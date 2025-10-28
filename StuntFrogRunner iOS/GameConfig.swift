@@ -37,11 +37,13 @@ struct GameConfig {
     static let maxScrollSpeed: CGFloat = 5.0  // Maximum scroll speed cap
     static let scoreIntervalForSpeedIncrease: Int = 2000  // Points needed for speed increase
     static let rocketScrollSpeed: CGFloat = 8.0  // Scroll speed during rocket mode
+    static let rocketFinalApproachScrollSpeed: CGFloat = 4.0  // 50% speed during last 3 seconds
+    static let rocketLandingSlowScrollSpeed: CGFloat = 1.0  // Temporary slow scroll to help landing
     
     // Spawn rates (per frame)
     static let lilyPadSpawnRate: CGFloat = 0.006  // HIGH - need lots of landing spots!
     static let enemySpawnRate: CGFloat = 0.012
-    static let tadpoleSpawnRate: CGFloat = 0.005
+    static let tadpoleSpawnRate: CGFloat = 0.018  // IMPROVED: Increased from 0.005 for better distribution
     static let logSpawnRate: CGFloat = 0.008
     
     // Enemy settings - all move on water surface
@@ -55,7 +57,7 @@ struct GameConfig {
     static let startingHealth: Int = 3
     static let tadpolesForAbility: Int = 5
     static let superJumpDurationFrames: Int = 420
-    static let rocketDurationFrames: Int = 300  // 5 seconds at 60 fps
+    static let rocketDurationFrames: Int = 480  // 8 seconds at 60 fps (extended by 3s)
     static let invincibleDurationFrames: Int = 90
     
     // Object sizes
@@ -75,23 +77,15 @@ struct GameConfig {
     static let lilyPadSpacing: CGFloat = 70  // Minimum distance between pads
     
     // Landing behavior
-    static let disablePostLandingSnap: Bool = false  // If true, frog stays where it lands; if false, snaps to pad center
+    static let disablePostLandingSnap: Bool = true  // If true, frog stays where it lands; if false, snaps to pad center
 }
 
-// Game states
-enum GameState {
-    case menu
-    case playing
-    case paused
-    case abilitySelection
-    case gameOver
-}
+
 
 // Enemy types
 enum EnemyType: String {
-    case snake = "ðŸ"
-    case bee = "ðŸ"
-    case dragonfly = "ðŸ¦Ÿ"
-    case log = "ðŸªµ"
+    case snake = "ÃƒÂ°Ã…Â¸Ã‚ÂÃ‚Â"
+    case bee = "ÃƒÂ°Ã…Â¸Ã‚ÂÃ‚Â"
+    case dragonfly = "ÃƒÂ°Ã…Â¸Ã‚Â¦Ã…Â¸"
+    case log = "ÃƒÂ°Ã…Â¸Ã‚ÂªÃ‚Âµ"
 }
-

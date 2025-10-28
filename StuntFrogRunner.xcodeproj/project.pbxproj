@@ -11,10 +11,9 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		1C1539F62E9C29CA00797DF6 /* Exceptions for "StuntFrogRunner Shared" folder in "StuntFrogRunner iOS" target */ = {
+		1C7EF0BB2EB0471C007B1A28 /* Exceptions for "StuntFrogRunner Shared" folder in "StuntFrogRunner iOS" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Actions.sks,
 				Assets.xcassets,
 			);
 			target = 1C1539E42E9C29C900797DF6 /* StuntFrogRunner iOS */;
@@ -25,7 +24,7 @@
 		1C1539DC2E9C29C900797DF6 /* StuntFrogRunner Shared */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				1C1539F62E9C29CA00797DF6 /* Exceptions for "StuntFrogRunner Shared" folder in "StuntFrogRunner iOS" target */,
+				1C7EF0BB2EB0471C007B1A28 /* Exceptions for "StuntFrogRunner Shared" folder in "StuntFrogRunner iOS" target */,
 			);
 			path = "StuntFrogRunner Shared";
 			sourceTree = "<group>";

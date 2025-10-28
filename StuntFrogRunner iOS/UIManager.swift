@@ -51,15 +51,29 @@ extension AbilityType {
 
     var emoji: String {
         switch self {
-        case .extraHeart: return "❤️"
-        case .superJump: return "⚡"
-        case .refillHearts: return "💚"
-        case .lifeVest: return "🦺"
-        case .scrollSaver: return "⏱"
-        case .flySwatter: return "🪰"
-        case .honeyJar: return "🍯"
-        case .rocket: return "🚀"
-        case .axe: return "🪓"
+        case .extraHeart: return "â¤ï¸"
+        case .superJump: return "âš¡"
+        case .refillHearts: return "ðŸ’š"
+        case .lifeVest: return "ðŸ¦º"
+        case .scrollSaver: return "â±"
+        case .flySwatter: return "ðŸª°"
+        case .honeyJar: return "ðŸ¯"
+        case .rocket: return "ðŸš€"
+        case .axe: return "ðŸª“"
+        }
+    }
+    
+    var imageName: String {
+        switch self {
+        case .extraHeart: return "heart.png" // extra heart icon
+        case .superJump: return "lightning.png"
+        case .refillHearts: return "refillHearts.png" // use provided asset name
+        case .lifeVest: return "lifevest.png"
+        case .scrollSaver: return "scroll.png"
+        case .flySwatter: return "flySwatter.png"
+        case .honeyJar: return "honeyPot.png"
+        case .rocket: return "rocket.png"
+        case .axe: return "ax.png"
         }
     }
 }
@@ -74,7 +88,8 @@ class UIManager {
     // Power-up indicators
     var superJumpIndicator: SKLabelNode?
     var rocketIndicator: SKLabelNode?
-    var glideIndicator: SKLabelNode?  // ⬅️ CRITICAL: This must be declared!
+    var glideIndicator: SKLabelNode?  // â¬…ï¸ CRITICAL: This must be declared!
+    var rocketLandButton: SKNode?  // Button to land during rocket ride
     
     var starIconTop: SKLabelNode?
     var starProgressBGTop: SKShapeNode?
@@ -106,16 +121,30 @@ class UIManager {
         // Tadpole counter removed from top UI; handled elsewhere
         tadpoleLabel = nil
         
-        // Pause button
-        pauseButton = SKLabelNode(text: "⏸")
-        pauseButton?.fontSize = 32
-        pauseButton?.name = "pauseButton"
-        pauseButton?.position = CGPoint(x: sceneSize.width - 35, y: sceneSize.height - 85)
-        pauseButton?.zPosition = 200
-        scene.addChild(pauseButton!)
+        // Pause button - use pause.png sprite instead of emoji
+        let pauseTexture = SKTexture(imageNamed: "pause.png")
+        if pauseTexture.size() != .zero {
+            // Use PNG sprite
+            let pauseSprite = SKSpriteNode(texture: pauseTexture)
+            pauseSprite.size = CGSize(width: 32, height: 32)
+            pauseSprite.name = "pauseButton"
+            pauseSprite.position = CGPoint(x: sceneSize.width - 35, y: sceneSize.height - 85)
+            pauseSprite.zPosition = 200
+            scene.addChild(pauseSprite)
+            // Store reference (though it's not a label, we keep the property name for compatibility)
+            pauseButton = nil
+        } else {
+            // Fallback to emoji if PNG not available
+            pauseButton = SKLabelNode(text: "⏸")
+            pauseButton?.fontSize = 32
+            pauseButton?.name = "pauseButton"
+            pauseButton?.position = CGPoint(x: sceneSize.width - 35, y: sceneSize.height - 85)
+            pauseButton?.zPosition = 200
+            scene.addChild(pauseButton!)
+        }
         
         // Star progress at top - replace emoji with star.png sprite
-        let starTexture = SKTexture(imageNamed: "star")
+        let starTexture = SKTexture(imageNamed: "star.png")
         let starSprite = SKSpriteNode(texture: starTexture)
         // Size similar to prior label icon (~26pt height)
         let iconSize: CGFloat = 26
@@ -184,12 +213,17 @@ class UIManager {
         let newPath = CGPath(roundedRect: newRect, cornerWidth: 5, cornerHeight: 5, transform: nil)
         let bgLeftX = bg.position.x - (bgWidth / 2)
         let newCenterX = bgLeftX + 2 + targetWidth / 2
-        let pathAction = SKAction.customAction(withDuration: 0.18) { node, _ in
-            if let shape = node as? SKShapeNode { shape.path = newPath }
+        
+        let duration: TimeInterval = 0.18
+        let pathAction = SKAction.customAction(withDuration: duration) { node, _ in
+            if let shape = node as? SKShapeNode {
+                shape.path = newPath
+            }
         }
-        pathAction.timingMode = .easeOut
-        let moveAction = SKAction.moveTo(x: newCenterX, duration: 0.18)
-        moveAction.timingMode = .easeOut
+        pathAction.timingMode = SKActionTimingMode.easeOut
+        
+        let moveAction = SKAction.moveTo(x: newCenterX, duration: duration)
+        moveAction.timingMode = SKActionTimingMode.easeOut
         fill.run(SKAction.group([pathAction, moveAction]))
     }
     
@@ -200,7 +234,7 @@ class UIManager {
         healthIcons.removeAll()
         
         for i in 0..<max {
-            let heart = SKLabelNode(text: i < current ? "❤️" : "🤍")
+            let heart = SKLabelNode(text: i < current ? "â¤ï¸" : "ðŸ¤")
             heart.fontSize = 20
             heart.position = CGPoint(x: 35 + CGFloat(i) * 35, y: 60)
             heart.zPosition = 200
@@ -218,7 +252,7 @@ class UIManager {
         
         guard let scene = scene else { return }
         
-        let indicator = SKLabelNode(text: "⚡ SUPER JUMP!")
+        let indicator = SKLabelNode(text: "âš¡ SUPER JUMP!")
         indicator.fontSize = 24
         indicator.fontColor = .yellow
         indicator.fontName = "Arial-BoldMT"
@@ -253,7 +287,7 @@ class UIManager {
         
         guard let scene = scene else { return }
         
-        let indicator = SKLabelNode(text: "🚀 ROCKET: 10s")
+        let indicator = SKLabelNode(text: "ðŸš€ ROCKET: 10s")
         indicator.fontSize = 24
         indicator.fontColor = .orange
         indicator.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height - 140)
@@ -278,7 +312,7 @@ class UIManager {
         }
     }
     
-    // MARK: - Glide Indicator ⬅️ NEW METHODS!
+    // MARK: - Glide Indicator â¬…ï¸ NEW METHODS!
     func showGlideIndicator(sceneSize: CGSize, duration: Double) {
         // Prevent stacking multiple glide indicators
         if let existing = glideIndicator, existing.parent != nil {
@@ -287,7 +321,7 @@ class UIManager {
         
         guard let scene = scene else { return }
         
-        let indicator = SKLabelNode(text: "🪂 GLIDE: 3.0s")
+        let indicator = SKLabelNode(text: String(format: "ðŸª‚ GLIDE: %.1fs", duration))
         indicator.fontSize = 28
         indicator.fontColor = .orange
         indicator.fontName = "Arial-BoldMT"
@@ -308,7 +342,7 @@ class UIManager {
     func updateGlideIndicator(remainingTime: Double) {
         guard let indicator = glideIndicator else { return }
         
-        indicator.text = String(format: "🪂 GLIDE: %.1fs", remainingTime)
+        indicator.text = String(format: "ðŸª‚ GLIDE: %.1fs", remainingTime)
         
         // Change color based on remaining time
         if remainingTime < 1.0 {
@@ -352,93 +386,49 @@ class UIManager {
         let menu = SKNode()
         menu.zPosition = 300
         menu.name = "menuLayer"
-
-        // Fullscreen dim background to ensure it fills entire scene
+        
+        // Fullscreen dim background
         let backdrop = SKShapeNode(rectOf: sceneSize)
-        backdrop.fillColor = UIColor.black.withAlphaComponent(0.75)
+        backdrop.fillColor = UIColor.black.withAlphaComponent(0.6)
         backdrop.strokeColor = .clear
         backdrop.position = CGPoint(x: sceneSize.width/2, y: sceneSize.height/2)
         menu.addChild(backdrop)
 
-        // Content panel with safe margins
-        let outerMargin: CGFloat = 24
-        let panelSize = CGSize(width: max(200, sceneSize.width - outerMargin*2),
-                               height: max(200, sceneSize.height - outerMargin*2))
-        let panel = SKShapeNode(rectOf: panelSize, cornerRadius: 24)
-        panel.fillColor = UIColor(white: 0.06, alpha: 0.95)
-        panel.strokeColor = UIColor.white.withAlphaComponent(0.12)
-        panel.lineWidth = 1.5
-        panel.position = CGPoint(x: sceneSize.width/2, y: sceneSize.height/2)
-        panel.zPosition = 1
-        menu.addChild(panel)
-
-        // Container for labels inside panel
-        let content = SKNode()
-        content.position = .zero
-        content.zPosition = 2
-        panel.addChild(content)
-
-        // Title image (title.png). We'll scale it to fit within the panel width; fall back to text if not available.
-        let maxContentWidth = panelSize.width - 40
-        var subtitleTopY: CGFloat
-        if let titleTexture = SKTexture(imageNamed: "title").copy() as? SKTexture, titleTexture.size().width > 0, titleTexture.size().height > 0 {
-            let titleSprite = SKSpriteNode(texture: titleTexture)
-            // Place near the top inside the panel
-            titleSprite.anchorPoint = CGPoint(x: 0.5, y: 1.0)
-            titleSprite.position = CGPoint(x: 0, y: panelSize.height/2 - 24)
-            // Scale to fit width with some padding
-            let targetWidth = maxContentWidth
-            let scale = min(1.0, targetWidth / max(1.0, titleTexture.size().width))
-            titleSprite.setScale(scale)
-            content.addChild(titleSprite)
-            // Compute Y under the sprite for subsequent elements
-            subtitleTopY = titleSprite.position.y - titleSprite.size.height * titleSprite.xScale - 14
-        } else {
-            // Fallback: Text title
-            let title = SKLabelNode(text: "Stuntfrog Superstar")
-            title.fontName = "Arial-BoldMT"
-            title.fontSize = 56
-            title.fontColor = UIColor(red: 0.25, green: 0.95, blue: 0.35, alpha: 1.0)
-            title.horizontalAlignmentMode = .center
-            title.verticalAlignmentMode = .top
-            title.position = CGPoint(x: 0, y: panelSize.height/2 - 36)
-            content.addChild(title)
-
-            // Shadow
-            let titleShadow = SKLabelNode(text: title.text)
-            titleShadow.fontName = title.fontName
-            titleShadow.fontSize = title.fontSize
-            titleShadow.fontColor = UIColor.black.withAlphaComponent(0.8)
-            titleShadow.horizontalAlignmentMode = .center
-            titleShadow.verticalAlignmentMode = .top
-            titleShadow.position = CGPoint(x: 3, y: panelSize.height/2 - 39)
-            titleShadow.zPosition = title.zPosition - 1
-            content.addChild(titleShadow)
-            subtitleTopY = title.position.y - (title.frame.height + 20)
+        // MAIN MENU Title
+        let titleButton = createButton(text: "MAIN MENU", name: "mainMenuTitle", size: CGSize(width: 300, height: 45))
+        if let _ = titleButton.childNode(withName: "background") as? SKSpriteNode, let label = titleButton.childNode(withName: "label") as? SKLabelNode {
+            label.fontColor = .white
+            label.fontSize = 22
         }
+        titleButton.position = CGPoint(x: sceneSize.width/2, y: sceneSize.height - 150)
+        menu.addChild(titleButton)
 
-        // Subtitle under the title image/text
-        let subtitle = SKLabelNode(text: "Lily Pad Hopping Adventure!")
+        let buttons: [(text: String, name: String, emoji: String)] = [
+            ("Play Game", "playGameButton", "â–·"),
+            ("Profile", "profileButton", "ðŸ‘¤"),
+            ("Leaderboard", "leaderboardButton", "ðŸ†"),
+            ("Settings", "settingsButton", "âš™ï¸"),
+            ("Audio", "audioButton", "ðŸ”Š"),
+            ("Exit", "exitButton", "â†’")
+        ]
+
+        var currentY = titleButton.position.y - 45 // Start position for the first button
+        let buttonSpacing: CGFloat = 10
+        let buttonSize = CGSize(width: sceneSize.width * 0.75, height: 60)
+        
+        for (index, buttonInfo) in buttons.enumerated() {
+            let button = createButton(text: buttonInfo.text, name: buttonInfo.name, size: buttonSize)
+            button.position = CGPoint(x: sceneSize.width/2, y: currentY - CGFloat(index) * (buttonSize.height + buttonSpacing))
+            menu.addChild(button)
+        }
+        
+        // "Tap to select an option" subtitle
+        let subtitle = SKLabelNode(text: "Tap to select an option")
         subtitle.fontName = "Arial-BoldMT"
-        subtitle.fontSize = 26
-        subtitle.fontColor = UIColor(white: 1.0, alpha: 0.92)
-        subtitle.horizontalAlignmentMode = .center
-        subtitle.verticalAlignmentMode = .top
-        subtitle.position = CGPoint(x: 0, y: subtitleTopY)
-        content.addChild(subtitle)
-
-        // If subtitle is wider than panel, scale it down
-        let subtitleWidth = max(subtitle.frame.width, 1)
-        if subtitleWidth > maxContentWidth {
-            let scale = max(0.6, maxContentWidth / subtitleWidth)
-            subtitle.setScale(scale)
-        }
-
-        // Start button near center
-        let startButton = createButton(text: "▶ START HOPPING", name: "startButton")
-        startButton.position = CGPoint(x: sceneSize.width/2, y: sceneSize.height/2 - 40)
-        startButton.zPosition = 305
-        menu.addChild(startButton)
+        subtitle.fontSize = 18
+        subtitle.fontColor = UIColor.white.withAlphaComponent(0.7)
+        subtitle.position = CGPoint(x: sceneSize.width/2, y: 30)
+        menu.addChild(subtitle)
 
         // Assign and add
         menuLayer = menu
@@ -454,32 +444,48 @@ class UIManager {
         menu.zPosition = 300
         menu.name = "menuLayer"
         
+        // Fullscreen dim background
         let bg = SKShapeNode(rectOf: sceneSize)
         bg.fillColor = UIColor.black.withAlphaComponent(0.85)
         bg.strokeColor = .clear
         bg.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2)
         menu.addChild(bg)
         
-        let title = SKLabelNode(text: "⏸ PAUSED")
-        title.fontSize = 40
-        title.fontColor = UIColor.white
-        title.fontName = "Arial-BoldMT"
-        title.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2 + 60)
-        menu.addChild(title)
+        // The center panel matching the UX (simpler than showMainMenu)
+        let panelSize = CGSize(width: sceneSize.width * 0.8, height: sceneSize.height * 0.5)
+        let panel = SKShapeNode(rectOf: panelSize, cornerRadius: panelSize.height/2)
+        panel.fillColor = UIColor(red: 0.06, green: 0.35, blue: 0.3, alpha: 0.85) // Dark teal fill
+        panel.strokeColor = UIColor.white.withAlphaComponent(0.5)
+        panel.lineWidth = 2.5
+        panel.position = CGPoint(x: sceneSize.width/2, y: sceneSize.height/2)
+        menu.addChild(panel)
         
-        let continueButton = createButton(text: "▶ Continue", name: "continueButton")
-        continueButton.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2 - 40)
+        // PAUSED Title (Styled as a small button)
+        let titleButton = createButton(text: "PAUSED", name: "pausedTitle", size: CGSize(width: 150, height: 40))
+        if let _ = titleButton.childNode(withName: "background") as? SKSpriteNode, let label = titleButton.childNode(withName: "label") as? SKLabelNode {
+            label.fontColor = .white
+            label.fontSize = 18
+            titleButton.position = CGPoint(x: sceneSize.width / 2, y: panel.frame.maxY - 40)
+        }
+        menu.addChild(titleButton)
+        
+        let buttonSize = CGSize(width: 250, height: 65)
+        
+        // Continue Button
+        let continueButton = createButton(text: "Continue", name: "continueButton", size: buttonSize)
+        continueButton.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2 + 50)
         menu.addChild(continueButton)
         
-        let quitButton = createButton(text: "🏠 Quit to Menu", name: "quitButton")
-        quitButton.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2 - 120)
+        // Quit to Menu Button
+        let quitButton = createButton(text: "Back to main menu", name: "quitButton", size: buttonSize)
+        quitButton.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2 - 50)
         menu.addChild(quitButton)
         
         menuLayer = menu
         scene.addChild(menu)
     }
     
-    func showGameOverMenu(sceneSize: CGSize, score: Int, highScore: Int, isNewHighScore: Bool, reason: GameScene.GameOverReason) {
+    func showGameOverMenu(sceneSize: CGSize, score: Int, highScore: Int, isNewHighScore: Bool, reason: GameOverReason) {
         hideMenus()
         guard let scene = scene else { return }
         
@@ -497,16 +503,16 @@ class UIManager {
         let subtitleText: String
         switch reason {
         case .splash:
-            titleText = "💦 SPLASH! 💦"
+            titleText = "SPLASH!"
             subtitleText = "Missed the lily pad!"
         case .healthDepleted:
-            titleText = "💔 OUT OF HEARTS"
+            titleText = "OUT OF HEARTS"
             subtitleText = "Your frog ran out of health."
         case .scrolledOffScreen:
-            titleText = "⏱ Too Slow!"
+            titleText = "Too Slow!"
             subtitleText = "You scrolled off the screen."
         case .tooSlow:
-            titleText = "⏱ Too Slow!"
+            titleText = "Too Slow!"
             subtitleText = "Keep up with the scroll!"
         }
         
@@ -540,7 +546,7 @@ class UIManager {
         var buttonStartY = highScoreText.position.y - 80
         
         if isNewHighScore {
-            let badge = SKLabelNode(text: "🏆 NEW HIGH SCORE!")
+            let badge = SKLabelNode(text: "ðŸ† NEW HIGH SCORE!")
             badge.fontSize = 20
             badge.fontColor = UIColor.yellow
             badge.fontName = "Arial-BoldMT"
@@ -556,11 +562,13 @@ class UIManager {
             buttonStartY = badge.position.y - 60
         }
         
-        let tryAgainButton = createButton(text: "🔄 Try Again", name: "tryAgainButton")
+        let buttonSize = CGSize(width: 300, height: 60)
+        
+        let tryAgainButton = createButton(text: "Try Again", name: "tryAgainButton", size: buttonSize)
         tryAgainButton.position = CGPoint(x: sceneSize.width / 2, y: buttonStartY)
         menu.addChild(tryAgainButton)
         
-        let backButton = createButton(text: "🏠 Back to Menu", name: "backToMenuButton")
+        let backButton = createButton(text: "Back to Menu", name: "backToMenuButton", size: buttonSize)
         backButton.position = CGPoint(x: sceneSize.width / 2, y: buttonStartY - 70)
         menu.addChild(backButton)
         
@@ -586,36 +594,76 @@ class UIManager {
         bg.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2)
         menu.addChild(bg)
         
-        let title = SKLabelNode(text: "⭐ Choose Your Power-Up! ⭐")
+        let title = SKLabelNode(text: "Choose Your Power-Up!")
         title.fontSize = 28
         title.fontColor = UIColor.yellow
         title.fontName = "Arial-BoldMT"
         title.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height - 150)
         menu.addChild(title)
         
-        var allAbilities: [AbilityType] = AbilityType.allPowerUps
+        // Determine allowed abilities based on score using HUDConfigurable logic
+        var abilities: [AbilityType] = []
         if let gs = scene as? GameScene {
-            if gs.maxHealth >= 6 { allAbilities.removeAll { $0 == .extraHeart } }
-            if gs.frogController.lifeVestCharges >= 6 { allAbilities.removeAll { $0 == .lifeVest } }
+            let currentScore = gs.score
+            // Try to get allowed upgrades from HUD
+            if let hud = gs.hudController as? HUDConfigurable {
+                let allowedUpgradeTypes = hud.upgradeOptions(for: currentScore)
+                // Map UpgradeType to AbilityType
+                func mapUpgrade(_ u: UpgradeType) -> AbilityType? {
+                    switch u {
+                    case .honeypot: return .honeyJar
+                    case .extraHeart: return .extraHeart
+                    case .lifeVests: return .lifeVest
+                    case .refillHearts: return .refillHearts
+                    case .flySwatters: return .flySwatter
+                    case .rockets: return .rocket
+                    }
+                }
+                var mapped: [AbilityType] = allowedUpgradeTypes.compactMap { mapUpgrade($0) }
+                // Capacity-based filters (preserve existing logic)
+                if gs.maxHealth >= 6 { mapped.removeAll { $0 == .extraHeart } }
+                if gs.frogController.lifeVestCharges >= 6 { mapped.removeAll { $0 == .lifeVest } }
+                // Mirror-based checks for other charges (keep behavior)
+                let mirror = Mirror(reflecting: gs)
+                if let prop = mirror.children.first(where: { $0.label == "scrollSaverCharges" }), let count = prop.value as? Int, count >= 6 {
+                    mapped.removeAll { $0 == .scrollSaver }
+                }
+                if let prop = mirror.children.first(where: { $0.label == "flySwatterCharges" }), let count = prop.value as? Int, count >= 6 {
+                    mapped.removeAll { $0 == .flySwatter }
+                }
+                if let prop = mirror.children.first(where: { $0.label == "honeyJarCharges" }), let count = prop.value as? Int, count >= 6 {
+                    mapped.removeAll { $0 == .honeyJar }
+                }
+                if let prop = mirror.children.first(where: { $0.label == "axeCharges" }), let count = prop.value as? Int, count >= 6 {
+                    mapped.removeAll { $0 == .axe }
+                }
+                // If nothing remains (e.g., all capped), fall back to all power-ups
+                if mapped.isEmpty { mapped = AbilityType.allPowerUps }
+                abilities = Array(mapped.shuffled().prefix(2))
+            }
         }
-        
-        if let gs = scene as? GameScene {
-            let mirror = Mirror(reflecting: gs)
-            if let prop = mirror.children.first(where: { $0.label == "scrollSaverCharges" }), let count = prop.value as? Int, count >= 6 {
-                allAbilities.removeAll { $0 == .scrollSaver }
+        // Fallback: if we couldn't compute from HUD/score, keep previous behavior
+        if abilities.isEmpty {
+            var allAbilities: [AbilityType] = AbilityType.allPowerUps
+            if let gs = scene as? GameScene {
+                if gs.maxHealth >= 6 { allAbilities.removeAll { $0 == .extraHeart } }
+                if gs.frogController.lifeVestCharges >= 6 { allAbilities.removeAll { $0 == .lifeVest } }
+                let mirror = Mirror(reflecting: gs)
+                if let prop = mirror.children.first(where: { $0.label == "scrollSaverCharges" }), let count = prop.value as? Int, count >= 6 {
+                    allAbilities.removeAll { $0 == .scrollSaver }
+                }
+                if let prop = mirror.children.first(where: { $0.label == "flySwatterCharges" }), let count = prop.value as? Int, count >= 6 {
+                    allAbilities.removeAll { $0 == .flySwatter }
+                }
+                if let prop = mirror.children.first(where: { $0.label == "honeyJarCharges" }), let count = prop.value as? Int, count >= 6 {
+                    allAbilities.removeAll { $0 == .honeyJar }
+                }
+                if let prop = mirror.children.first(where: { $0.label == "axeCharges" }), let count = prop.value as? Int, count >= 6 {
+                    allAbilities.removeAll { $0 == .axe }
+                }
             }
-            if let prop = mirror.children.first(where: { $0.label == "flySwatterCharges" }), let count = prop.value as? Int, count >= 6 {
-                allAbilities.removeAll { $0 == .flySwatter }
-            }
-            if let prop = mirror.children.first(where: { $0.label == "honeyJarCharges" }), let count = prop.value as? Int, count >= 6 {
-                allAbilities.removeAll { $0 == .honeyJar }
-            }
-            if let prop = mirror.children.first(where: { $0.label == "axeCharges" }), let count = prop.value as? Int, count >= 6 {
-                allAbilities.removeAll { $0 == .axe }
-            }
+            abilities = Array(allAbilities.shuffled().prefix(2))
         }
-        
-        let abilities = Array(allAbilities.shuffled().prefix(2))
         
         for (index, ability) in abilities.enumerated() {
             let button = createAbilityButton(ability: ability, name: "ability_\(ability)")
@@ -625,9 +673,9 @@ class UIManager {
         }
         
         let grow = SKAction.scale(to: 1.0, duration: 0.22)
-        grow.timingMode = .easeOut
+        grow.timingMode = SKActionTimingMode.easeOut
         let fade = SKAction.fadeAlpha(to: 1.0, duration: 0.18)
-        fade.timingMode = .easeOut
+        fade.timingMode = SKActionTimingMode.easeOut
         menu.run(SKAction.group([grow, fade]))
         
         abilityLayer = menu
@@ -641,30 +689,28 @@ class UIManager {
         abilityLayer = nil
     }
     
-    private func createButton(text: String, name: String) -> SKNode {
+    private func createButton(text: String, name: String, size: CGSize = CGSize(width: 300, height: 60)) -> SKNode {
         let button = SKNode()
         button.name = name
-        
-        let bg = SKShapeNode(rectOf: CGSize(width: 300, height: 60), cornerRadius: 12)
-        bg.fillColor = UIColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1.0)
-        bg.strokeColor = UIColor.white
-        bg.lineWidth = 3
+
+        // Use button.png as the background image for all buttons
+        let texture = SKTexture(imageNamed: "button.png")
+        let bg = SKSpriteNode(texture: texture)
+        bg.name = "background"
+        bg.size = size
+        bg.zPosition = 1
         button.addChild(bg)
-        
-        let shadow = SKShapeNode(rectOf: CGSize(width: 300, height: 60), cornerRadius: 12)
-        shadow.fillColor = UIColor.black.withAlphaComponent(0.35)
-        shadow.strokeColor = .clear
-        shadow.position = CGPoint(x: 2, y: -2)
-        shadow.zPosition = -1
-        button.addChild(shadow)
-        
+
+        // Centered label on top
         let label = SKLabelNode(text: text)
-        label.fontSize = 24
+        label.name = "label"
+        label.fontSize = 26
         label.fontColor = UIColor.white
         label.fontName = "Arial-BoldMT"
-        label.verticalAlignmentMode = SKLabelVerticalAlignmentMode.center
+        label.verticalAlignmentMode = .center
+        label.zPosition = 2
         button.addChild(label)
-        
+
         return button
     }
     
@@ -678,11 +724,23 @@ class UIManager {
         bg.lineWidth = 4
         button.addChild(bg)
         
-        let emoji = SKLabelNode(text: ability.emoji)
-        emoji.fontSize = 45
-        emoji.position = CGPoint(x: -130, y: 0)
-        emoji.verticalAlignmentMode = SKLabelVerticalAlignmentMode.center
-        button.addChild(emoji)
+        
+        // Use PNG sprite for ability icon with emoji fallback
+        let iconTexture = SKTexture(imageNamed: ability.imageName)
+        if iconTexture.size() != .zero {
+            // Use PNG sprite
+            let iconSprite = SKSpriteNode(texture: iconTexture)
+            iconSprite.size = CGSize(width: 45, height: 45)
+            iconSprite.position = CGPoint(x: -130, y: 0)
+            button.addChild(iconSprite)
+        } else {
+            // Fallback to emoji if PNG not available
+            let emoji = SKLabelNode(text: ability.emoji)
+            emoji.fontSize = 45
+            emoji.position = CGPoint(x: -130, y: 0)
+            emoji.verticalAlignmentMode = SKLabelVerticalAlignmentMode.center
+            button.addChild(emoji)
+        }
         
         let titleLabel = SKLabelNode(text: ability.title)
         titleLabel.fontSize = 19
@@ -749,14 +807,14 @@ class UIManager {
     func playHoneyJarEffect(at position: CGPoint) {
         guard let scene = scene else { return }
 
-        let splat = SKLabelNode(text: "🍯")
+        let splat = SKLabelNode(text: "ðŸ¯")
         splat.fontSize = 54
         splat.position = position
         splat.zPosition = 500
         splat.alpha = 0.0
         scene.addChild(splat)
 
-        let drip1 = SKLabelNode(text: "•")
+        let drip1 = SKLabelNode(text: "â€¢")
         drip1.fontSize = 20
         drip1.fontColor = .yellow
         drip1.position = CGPoint(x: position.x - 10, y: position.y - 8)
@@ -764,7 +822,7 @@ class UIManager {
         drip1.zPosition = 499
         scene.addChild(drip1)
 
-        let drip2 = SKLabelNode(text: "•")
+        let drip2 = SKLabelNode(text: "â€¢")
         drip2.fontSize = 16
         drip2.fontColor = .yellow
         drip2.position = CGPoint(x: position.x + 12, y: position.y - 14)
@@ -776,10 +834,10 @@ class UIManager {
             SKAction.fadeAlpha(to: 1.0, duration: 0.06),
             SKAction.scale(to: 1.15, duration: 0.08)
         ])
-        appear.timingMode = .easeOut
+        appear.timingMode = SKActionTimingMode.easeOut
 
         let settle = SKAction.scale(to: 1.0, duration: 0.08)
-        settle.timingMode = .easeIn
+        settle.timingMode = SKActionTimingMode.easeIn
 
         let wait = SKAction.wait(forDuration: 0.35)
         let fade = SKAction.fadeOut(withDuration: 0.18)
@@ -795,7 +853,7 @@ class UIManager {
     func playAxeChopEffect(at position: CGPoint, direction: CGFloat) {
         guard let scene = scene else { return }
 
-        let slash = SKLabelNode(text: "—")
+        let slash = SKLabelNode(text: "â€”")
         slash.fontName = "Arial-BoldMT"
         slash.fontSize = 60
         slash.fontColor = .white
@@ -805,7 +863,7 @@ class UIManager {
         slash.zRotation = direction
         scene.addChild(slash)
 
-        let axe = SKLabelNode(text: "🪓")
+        let axe = SKLabelNode(text: "ðŸª“")
         axe.fontSize = 42
         axe.position = position
         axe.zPosition = 501
@@ -819,21 +877,139 @@ class UIManager {
             SKAction.fadeAlpha(to: 1.0, duration: 0.05),
             SKAction.scale(to: 1.1, duration: 0.08)
         ])
-        appear.timingMode = .easeOut
+        appear.timingMode = SKActionTimingMode.easeOut
 
         let moveAxe = SKAction.moveBy(x: dx, y: dy, duration: 0.08)
-        moveAxe.timingMode = .easeOut
+        moveAxe.timingMode = SKActionTimingMode.easeOut
 
         let settle = SKAction.group([
             SKAction.scale(to: 0.98, duration: 0.05),
             SKAction.fadeAlpha(to: 0.0, duration: 0.15)
         ])
-        settle.timingMode = .easeIn
+        settle.timingMode = SKActionTimingMode.easeIn
 
         let remove = SKAction.removeFromParent()
 
         slash.run(SKAction.sequence([appear, settle, remove]))
         axe.run(SKAction.sequence([appear, moveAxe, settle, remove]))
     }
+    
+    // MARK: - Rocket Land Button
+    func showRocketLandButton(sceneSize: CGSize) {
+        guard let scene = scene, rocketLandButton == nil else { return }
+        
+        let button = createButton(text: "LAND", name: "rocketLandButton", size: CGSize(width: 180, height: 60))
+        // Position below the middle of the screen
+        button.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2 - 120)
+        button.zPosition = 250
+        
+        // Add a subtle pulsing animation to attract attention
+        let scaleUp = SKAction.scale(to: 1.08, duration: 0.6)
+        let scaleDown = SKAction.scale(to: 1.0, duration: 0.6)
+        scaleUp.timingMode = .easeInEaseOut
+        scaleDown.timingMode = .easeInEaseOut
+        let pulse = SKAction.sequence([scaleUp, scaleDown])
+        button.run(SKAction.repeatForever(pulse))
+        
+        rocketLandButton = button
+        scene.addChild(button)
+    }
+    
+    func hideRocketLandButton() {
+        rocketLandButton?.removeAllActions()
+        rocketLandButton?.removeFromParent()
+        rocketLandButton = nil
+    }
 }
 
+// MARK: - CGPath sampling helper
+private extension CGPath {
+    // Returns a point along the path by sampling its bounding box and flattening to line segments.
+    // t should be in [0,1]. This is an approximation good enough for placing decorative dashes.
+    func point(atNormalizedLength t: CGFloat) -> CGPoint? {
+        let clampedT: CGFloat = max(0, min(1, t))
+        var points: [CGPoint] = []
+        var lastPoint: CGPoint?
+        self.applyWithBlock { elementPtr in
+            let e = elementPtr.pointee
+            switch e.type {
+            case .moveToPoint:
+                lastPoint = e.points[0]
+                points.append(e.points[0])
+            case .addLineToPoint:
+                if let last = lastPoint {
+                    let to = e.points[0]
+                    let segs: Int = 4
+                    for s in 1...segs {
+                        let su: CGFloat = CGFloat(s)
+                        let segsF: CGFloat = CGFloat(segs)
+                        let u: CGFloat = su / segsF
+                        let x: CGFloat = last.x + (to.x - last.x) * u
+                        let y: CGFloat = last.y + (to.y - last.y) * u
+                        points.append(CGPoint(x: x, y: y))
+                    }
+                    lastPoint = to
+                } else {
+                    lastPoint = e.points[0]
+                    points.append(e.points[0])
+                }
+            case .addQuadCurveToPoint:
+                if let last = lastPoint {
+                    let c = e.points[0]
+                    let to = e.points[1]
+                    let segs: Int = 12
+                    for s in 1...segs {
+                        let su: CGFloat = CGFloat(s)
+                        let segsF: CGFloat = CGFloat(segs)
+                        let u: CGFloat = su / segsF
+                        
+                        // FIXED: Breaking up the Quadratic Bezier curve expressions
+                        let u2 = pow(u, 2)
+                        let u_minus_1 = 1 - u
+                        let u_minus_1_2 = pow(u_minus_1, 2)
+                        let u_times_u_minus_1_2 = 2 * u_minus_1 * u
+
+                        let x: CGFloat = u_minus_1_2 * last.x + u_times_u_minus_1_2 * c.x + u2 * to.x
+                        let y: CGFloat = u_minus_1_2 * last.y + u_times_u_minus_1_2 * c.y + u2 * to.y
+                        
+                        points.append(CGPoint(x: x, y: y))
+                    }
+                    lastPoint = to
+                }
+            case .addCurveToPoint:
+                if let last = lastPoint {
+                    let c1 = e.points[0]
+                    let c2 = e.points[1]
+                    let to = e.points[2]
+                    let segs: Int = 16
+                    for s in 1...segs {
+                        let su: CGFloat = CGFloat(s)
+                        let segsF: CGFloat = CGFloat(segs)
+                        let u: CGFloat = su / segsF
+                        
+                        // FIXED: Breaking up the Cubic Bezier curve expressions
+                        let u2 = pow(u, 2)
+                        let u3 = u2 * u
+                        let u_minus_1 = 1 - u
+                        let u_minus_1_2 = pow(u_minus_1, 2)
+                        let u_minus_1_3 = u_minus_1_2 * u_minus_1
+
+                        let x: CGFloat = u_minus_1_3 * last.x + 3 * u_minus_1_2 * u * c1.x + 3 * u_minus_1 * u2 * c2.x + u3 * to.x
+                        let y: CGFloat = u_minus_1_3 * last.y + 3 * u_minus_1_2 * u * c1.y + 3 * u_minus_1 * u2 * c2.y + u3 * to.y
+                        
+                        points.append(CGPoint(x: x, y: y))
+                    }
+                    lastPoint = to
+                }
+            case .closeSubpath:
+                break
+            @unknown default:
+                break
+            }
+        }
+        guard !points.isEmpty else { return nil }
+        let countMinusOne: Int = max(0, points.count - 1)
+        let countMinusOneF: CGFloat = CGFloat(countMinusOne)
+        let idx: Int = Int((clampedT * countMinusOneF).rounded())
+        return points[idx]
+    }}

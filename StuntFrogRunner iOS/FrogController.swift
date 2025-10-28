@@ -170,9 +170,9 @@ class FrogController {
         // atan2(dy, dx) gives us the angle to the target
         // Common corrections based on your frog art's default orientation:
         //   0: frog faces right by default
-        //   π/2 (90°): frog faces up by default
-        //   -π/2 (-90°): frog faces down by default
-        //   π/4 (45°): frog faces up-right by default
+        //   Ï€/2 (90Â°): frog faces up by default
+        //   -Ï€/2 (-90Â°): frog faces down by default
+        //   Ï€/4 (45Â°): frog faces up-right by default
         let angle = atan2(dy, dx)
         let correction: CGFloat = .pi / 2 // 90 degrees - top of frog faces up in the art
         frogSprite.removeAction(forKey: "face")
@@ -314,19 +314,40 @@ class FrogController {
                    gameScene.worldManager.addRipple(at: ripplePos, amplitude: amplitude, frequency: frequency)
                    
                    print("ðŸ¸ Frog position BEFORE snap: \(position)")
-                   print("ðŸª· Lily pad position: \(pad.position)")
+                   print("ðŸ¦¦ Lily pad position: \(pad.position)")
                }
             
-               // Temporarily disable post-landing snap: keep exact landing position
-               // (Set back to GameConfig.disablePostLandingSnap check when re-enabling)
-               // No position change here
+        // Preserve actual landing position on the pad instead of snapping to center
+        // If you ever want to restore center-snap, flip GameConfig.disablePostLandingSnap to false
+        if GameConfig.disablePostLandingSnap {
+            // Keep current position (already at landing point)
+            // Optionally clamp to pad radius for safety if slightly outside
+            let dx = position.x - pad.position.x
+            let dy = position.y - pad.position.y
+            let dist = max(0.0001, sqrt(dx*dx + dy*dy))
+            if dist > pad.radius {
+                let nx = dx / dist
+                let ny = dy / dist
+                position = CGPoint(x: pad.position.x + nx * pad.radius * 0.98,
+                                   y: pad.position.y + ny * pad.radius * 0.98)
+            }
+        } else {
+            // Backward-compatible: snap to center if explicitly configured
+            position = pad.position
+        }
+
+        // Optional: log world/screen after snap for clarity
+        if let scene = scene as? GameScene {
+            let screenAfter = scene.convert(position, from: scene.worldManager.worldNode)
+            print("ðŸ¸ Frog position AFTER land - local(world): \(position) screen: \(screenAfter)")
+        } else {
+            print("ðŸ¸ Frog position AFTER land - local(world): \(position)")
+        }
             
             inWater = false
             
             // Return to idle pose on land
             playIdle()
-            
-            print("ðŸ¸ Frog position AFTER snap: \(position)")
             
             // Bounce animation (keyed, non-conflicting)
             frogSprite.removeAction(forKey: "frogBounce")
@@ -526,9 +547,29 @@ class FrogController {
         }
     }
     
+    /// Force the rocket ride to end immediately (e.g., when user taps land button)
+    func forceRocketLanding() {
+        guard rocketActive else { return }
+        
+        rocketActive = false
+        rocketFramesRemaining = 0
+        
+        // Remove rocket sprite and its animations
+        rocketSprite?.removeAllActions()
+        rocketSprite?.removeFromParent()
+        rocketSprite = nil
+        
+        // Remove trail visual
+        rocketTrail?.removeFromParent()
+        rocketTrail = nil
+        
+        // Restore normal rotation behavior
+        unlockFacingAfterRocket()
+    }
+    
     // Locks the frog to face upwards (top of screen) during rocket
     private func lockFacingUpForRocket() {
-        // Ensure the frog faces up (0 radians points to the right; +π/2 rotates to up for our art)
+        // Ensure the frog faces up (0 radians points to the right; +Ï€/2 rotates to up for our art)
         // If your art already faces up at 0, set to 0 and constrain to 0.
         frogSprite.removeAction(forKey: "face")
         frogSprite.zRotation = 0

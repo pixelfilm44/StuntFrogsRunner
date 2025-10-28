@@ -95,7 +95,7 @@ class SlingshotController {
         aimLine = SKShapeNode(path: linePath)
         aimLine?.strokeColor = superJumpActive ? .yellow : .white
         aimLine?.lineWidth = 3
-        aimLine?.zPosition = 98
+        aimLine?.zPosition = 200
         aimLine?.alpha = 0.8
         scene.addChild(aimLine!)
         
