@@ -39,14 +39,13 @@ class GameLoopCoordinator {
         rightWorldX: CGFloat
     ) {
         // Parameters for log behavior
-        let logSpeed: CGFloat = 10   // points/sec equivalent; we convert per-frame below
+        let logSpeed: CGFloat = 10
         let perFrame: CGFloat = logSpeed / 60.0
         
-        let logRadius: CGFloat = 48.0   // approximate collision radius for pushing pads
-        let padPushStrength: CGFloat = 22.0 // how much to nudge pads per frame when overlapping
-        
-        // Move each log and mark for removal if off-screen
+        // Track logs for removal
         var indicesToRemove: [Int] = []
+        
+        // Update only log movement and screen bounds - collision is handled in CollisionManager
         for (i, enemy) in enemies.enumerated() {
             if enemy.type == EnemyType.log {
                 // Determine or retrieve the horizontal direction for this log
@@ -63,34 +62,20 @@ class GameLoopCoordinator {
                 
                 // Apply horizontal movement per frame
                 enemy.position.x += dir * perFrame
+                enemy.node.position.x = enemy.position.x
                 
-                // Push nearby lily pads away horizontally
-                for pad in lilyPads {
-                    let dx = pad.position.x - enemy.position.x
-                    let dy = pad.position.y - enemy.position.y
-                    let dist = sqrt(dx*dx + dy*dy)
-                    if dist < (logRadius + pad.radius * 0.6) { // overlap threshold
-                        // Push direction is away from the log's center
-                        let pushDir: CGFloat = dx >= 0 ? 1.0 : -1.0
-                        let newX = pad.position.x + (pushDir * (padPushStrength / 60.0))
-                        pad.position.x = newX
-                        pad.node.position.x = newX
-                    }
-                }
-                
-                // If the log has gone off-screen horizontally, mark for removal
-                if enemy.position.x < min(leftWorldX, rightWorldX) - 200 || enemy.position.x > max(leftWorldX, rightWorldX) + 200 {
+                // Check if off-screen for removal
+                if enemy.position.x < min(leftWorldX, rightWorldX) - 200 || 
+                   enemy.position.x > max(leftWorldX, rightWorldX) + 200 {
                     indicesToRemove.append(i)
                 }
             }
         }
         
-        // Remove off-screen logs (from both array and node tree)
+        // Remove off-screen logs
         if !indicesToRemove.isEmpty {
-            // Remove higher indices first to avoid reindexing issues
             for i in indicesToRemove.sorted(by: >) {
                 let e = enemies.remove(at: i)
-                // Clean up sidecar direction state
                 let key = ObjectIdentifier(e)
                 logDirection.removeValue(forKey: key)
                 e.node.removeFromParent()

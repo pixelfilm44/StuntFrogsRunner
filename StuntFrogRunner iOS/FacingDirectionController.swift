@@ -18,7 +18,7 @@ class FacingDirectionController {
     // MARK: - Properties
     private var frogFacingAngle: CGFloat = 0
     private var lockedFacingAngle: CGFloat?
-    private let artCorrection: CGFloat = .pi  // Flip 180°
+    private let artCorrection: CGFloat = -.pi / 2  // -90°: flip vertically to correct facing
     
     weak var frogNode: SKNode?
     
@@ -86,12 +86,27 @@ class FacingDirectionController {
     }
     
     func setFacingFromPull(pullDirection: CGPoint) {
-        if pullDirection.x != 0 || pullDirection.y != 0 {
-            let desired = atan2(-pullDirection.y, -pullDirection.x) + .pi/2
-            frogFacingAngle = desired + artCorrection
-            frogNode?.zRotation = frogFacingAngle
-            lockedFacingAngle = frogFacingAngle
-        }
+        // Aim: user pulls from frog toward touch; launch vector is opposite pull.
+        // Compute the facing angle so the frog points along the launch direction.
+        guard (pullDirection.x != 0 || pullDirection.y != 0), let frogNode = frogNode else { return }
+
+        // Launch direction is opposite the pull vector
+        let launchDX = -pullDirection.x
+        let launchDY = -pullDirection.y
+        let desiredBase = atan2(launchDY, launchDX)
+
+        // Apply art correction so the sprite's visual 'up' aligns with intended direction
+        let desiredAngle = desiredBase + artCorrection
+
+        // Smoothly interpolate toward desired angle for stability while aiming
+        let lerpFactor: CGFloat = 0.25
+        var delta = desiredAngle - frogFacingAngle
+        while delta > .pi { delta -= 2 * .pi }
+        while delta < -.pi { delta += 2 * .pi }
+        frogFacingAngle = frogFacingAngle + delta * lerpFactor
+        frogNode.zRotation = frogFacingAngle
+
+        // Do NOT lock here; locking is handled on touch end when jump actually starts
     }
     
     func lockCurrentFacing() {
@@ -108,3 +123,4 @@ class FacingDirectionController {
         frogNode?.zRotation = 0
     }
 }
+

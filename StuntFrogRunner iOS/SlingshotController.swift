@@ -19,6 +19,10 @@ class SlingshotController {
     
     weak var scene: SKScene?
     
+    /// Normalized pull intensity from the most recent release (0.0 ... 1.0).
+    /// Computed at handleTouchEnded time using the appropriate max pull distance.
+    var lastPullIntensity: CGFloat = 0.0
+    
     init(scene: SKScene) {
         self.scene = scene
     }
@@ -52,6 +56,10 @@ class SlingshotController {
         
         let maxPull = superJumpActive ? GameConfig.maxPullDistanceSuperJump : GameConfig.maxPullDistance
         let pullDistance = min(sqrt(dx * dx + dy * dy), maxPull)
+        
+        // Store normalized pull intensity for downstream effects (e.g., landing ripples)
+        lastPullIntensity = max(0.0, min(1.0, pullDistance / maxPull))
+        
         let angle = atan2(dy, dx)
         
         // Dead zone: ignore tiny pulls
@@ -187,3 +195,4 @@ class SlingshotController {
         clearVisuals()
     }
 }
+

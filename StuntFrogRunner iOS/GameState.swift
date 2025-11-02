@@ -101,6 +101,11 @@ class GameStateManager {
         }
     }
     
+    func forceUnlockInput() {
+        inputLocked = false
+        print("🔓 Input forcefully unlocked")
+    }
+    
     // MARK: - Reset
     func reset() {
         currentState = .menu

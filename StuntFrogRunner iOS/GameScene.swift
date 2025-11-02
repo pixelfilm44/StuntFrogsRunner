@@ -33,15 +33,22 @@ class GameScene: SKScene {
     private var touchInputController: TouchInputController!
     private var gameLoopCoordinator: GameLoopCoordinator!
     
+    var visualFX: VisualEffectsController!
+    
     // MARK: - Scene Nodes
     private var menuBackdrop: SKShapeNode?
     private var backgroundNode: SKSpriteNode?
     var frogContainer: SKSpriteNode!
     var hudBar: SKShapeNode!
+    var hudBarShadow: SKShapeNode?  // Track the shadow element separately
     let hudBarHeight: CGFloat = 160
     var heartsContainer: SKNode!
     var lifeVestsContainer: SKNode!
     var scrollSaverContainer: SKNode!
+    
+    // MARK: - Parallax Background Elements
+    private var rightTree: SKSpriteNode?
+    private var leftTree: SKSpriteNode?
     
     // MARK: - Game Objects (in world space)
     var enemies: [Enemy] = []
@@ -52,6 +59,9 @@ class GameScene: SKScene {
         get { healthManager.maxHealth }
         set { healthManager.maxHealth = newValue }
     }
+
+    // Tracks the currently pressed UI button node for press/release animation
+    private var currentlyPressedButton: SKNode!
     
     // MARK: - Convenience Properties
     private var gameState: GameState {
@@ -77,8 +87,7 @@ class GameScene: SKScene {
     
     // MARK: - Scene Setup
     override func didMove(to view: SKView) {
-        print("Ã°Å¸Å½Â® GameScene didMove - Top-Down View!")
-        print("Ã°Å¸â€œÂ± Scene size: \(size)")
+     
         
         backgroundColor = UIColor(red: 0.1, green: 0.3, blue: 0.6, alpha: 1.0)
         
@@ -108,7 +117,7 @@ class GameScene: SKScene {
         HapticFeedbackManager.shared.notification(.success)
         HapticFeedbackManager.shared.notification(.warning)
         HapticFeedbackManager.shared.notification(.error)
-        print("Ã¢Å“â€¦ Setup complete!")
+  
     }
     
     // MARK: - Background Setup
@@ -164,8 +173,9 @@ class GameScene: SKScene {
         }
         
         healthManager.onHealthDepleted = { [weak self] in
-            self?.visualEffectsController?.stopLowHealthFlash()
-            self?.gameOver(.healthDepleted)
+            guard let self = self else { return }
+            self.visualEffectsController?.stopLowHealthFlash()
+            self.playScaredSpinDropAndGameOver(reason: .healthDepleted)
         }
         
         healthManager.onMaxHealthChanged = { [weak self] _ in
@@ -222,7 +232,6 @@ class GameScene: SKScene {
             guard let self = self else { return }
 
             // Instrumentation and safety: clear actions/velocity and log positions
-            print("Ã¢Å“â€¦ Landing success on pad at world: \(pad.position) radius: \(pad.radius) type: \(pad.type)")
 
             self.frogController.frog.removeAllActions()
             self.frogController.frogShadow.removeAllActions()
@@ -234,14 +243,12 @@ class GameScene: SKScene {
             let padWorld = pad.position
             let padScreen = self.convert(padWorld, from: self.worldManager.worldNode)
 
-            print("Ã°Å¸ÂÂ¸ BEFORE snap - frog world: \(frogWorldBefore) screen: \(frogScreenBefore)")
-            print("Ã°Å¸ÂªÂ· Pad world: \(padWorld) screen: \(padScreen)")
+          
 
             // Perform land logic; snapping now done inside FrogController.landOnPad
             self.frogController.landOnPad(pad)
 
             let frogScreenAfter = self.convert(self.frogController.position, from: self.worldManager.worldNode)
-            print("Ã°Å¸ÂÂ¸ AFTER land - frog world: \(self.frogController.position) screen: \(frogScreenAfter)")
 
             // Update grounded/water/jump state
             self.frogController.isJumping = false
@@ -250,7 +257,17 @@ class GameScene: SKScene {
             self.frogController.suppressWaterCollisionUntilNextJump = false
 
             // Effects and haptics at final screen position
-            self.effectsManager?.createLandingEffect(at: frogScreenAfter)
+            // Prefer slingshot pull magnitude for ripple intensity; fall back to distance if unavailable
+            var intensity = self.slingshotController.lastPullIntensity
+            if intensity <= 0.0 {
+                // Fallback: compute from jump distance
+                let jumpDistance = hypot(self.frogController.jumpTargetPos.x - self.frogController.jumpStartPos.x,
+                                         self.frogController.jumpTargetPos.y - self.frogController.jumpStartPos.y)
+                let maxDist = max(1.0, GameConfig.maxRegularJumpDistance)
+                intensity = min(1.0, max(0.0, jumpDistance / maxDist))
+            }
+            self.effectsManager?.createLandingEffect(at: frogScreenAfter, intensity: intensity, lilyPad: pad)
+
             HapticFeedbackManager.shared.impact(.medium)
 
             // Set hasLandedOnce true after normal landing
@@ -262,9 +279,27 @@ class GameScene: SKScene {
             self.stateManager.splashTriggered = false
 
             if self.healthManager.pendingAbilitySelection && self.gameState == .playing {
-                self.healthManager.pendingAbilitySelection = false
-                self.gameState = .abilitySelection
-                self.uiManager.showAbilitySelection(sceneSize: self.size)
+                // Keep the flag true until the UI actually appears so touches are ignored
+                // and lock input during the animation window.
+                self.stateManager.lockInput(for: 1.0)
+                let vfx = self.visualEffectsController!
+                vfx.playUpgradeCue()
+
+                // Pause spawning and clear enemies around the landing pad immediately
+                // so the scene is calm while the animation plays.
+                self.spawnManager.pauseSpawningAndClearEnemies(around: pad, enemies: &self.enemies, sceneSize: self.size)
+
+                // Delay showing the ability selection to let the animation be seen.
+                let delay = SKAction.wait(forDuration: 0.9)
+                self.run(delay) { [weak self] in
+                    guard let self = self else { return }
+                    // Ensure we are still in a valid state to present selection
+                    guard self.gameState == .playing else { return }
+                    // Now transition into ability selection and consume the pending flag.
+                    self.healthManager.pendingAbilitySelection = false
+                    self.gameState = .abilitySelection
+                    self.uiManager.showAbilitySelection(sceneSize: self.size)
+                }
             }
         }
         
@@ -273,7 +308,7 @@ class GameScene: SKScene {
         }
         
         landingController.onUnsafePadLanding = { [weak self] in
-            self?.triggerSplashOnce(gameOverDelay: 1.5)
+            self?.handleUnsafePadLanding()
         }
         
         // Ability Manager Callbacks
@@ -340,56 +375,58 @@ class GameScene: SKScene {
     }
     
     // MARK: - Game Setup
-    func setupGame() {
-        // Setup world (scrolls down)
-        if let bg = backgroundNode {
-            bg.removeFromParent()
-            bg.zPosition = -1000
-            addChild(bg)
+        func setupGame() {
+            // Setup world (scrolls down)
+            if let bg = backgroundNode {
+                bg.removeFromParent()
+                bg.zPosition = -1000
+                addChild(bg)
+            }
+            
+            let world = worldManager.setupWorld(sceneSize: size)
+            addChild(world)
+            
+            // Setup parallax background tree
+            setupBackgroundTree()
+            
+            // Initialize scoring anchor based on initial world Y
+            lastWorldYForScore = worldManager.worldNode.position.y
+            hasInitializedScoreAnchor = true
+            
+            // Setup spawn manager
+            spawnManager = SpawnManager(scene: self, worldNode: worldManager.worldNode)
+            spawnManager.startGracePeriod(duration: 1.5)
+            
+            // Setup frog container
+            let frogRootNode = frogController.setupFrog(sceneSize: size)
+            let frogContainerSprite = SKSpriteNode(color: .clear, size: .zero)
+            frogContainerSprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            frogContainerSprite.zPosition = 110
+            frogContainerSprite.position = CGPoint(x: size.width / 2, y: size.height * 0.4)
+            frogRootNode.position = .zero
+            frogContainerSprite.addChild(frogRootNode)
+            frogContainer = frogContainerSprite
+            addChild(frogContainerSprite)
+            
+            // Initialize visual effects controller now that frog is set up
+            visualEffectsController = VisualEffectsController(
+                frogContainer: frogContainer,
+                frogSprite: frogController.frog as! SKSpriteNode,
+                frogShadow: frogController.frogShadow  // ✅ FIXED: Now passing actual shadow reference instead of nil
+            )
+            
+            // Initialize facing direction controller
+            facingDirectionController = FacingDirectionController(frogNode: frogController.frog)
+            
+            // Setup UI
+            uiManager.setupUI(sceneSize: size)
+            
+            // Create menu backdrop
+            setupMenuBackdrop()
+            
+            // Create bottom HUD bar
+            setupHUDBar()
         }
-        
-        let world = worldManager.setupWorld(sceneSize: size)
-        addChild(world)
-        
-        // Initialize scoring anchor based on initial world Y
-        lastWorldYForScore = worldManager.worldNode.position.y
-        hasInitializedScoreAnchor = true
-        
-        // Setup spawn manager
-        spawnManager = SpawnManager(scene: self, worldNode: worldManager.worldNode)
-        spawnManager.startGracePeriod(duration: 1.5)
-        
-        // Setup frog container
-        let frogRootNode = frogController.setupFrog(sceneSize: size)
-        let frogContainerSprite = SKSpriteNode(color: .clear, size: .zero)
-        frogContainerSprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        frogContainerSprite.zPosition = 110
-        frogContainerSprite.position = CGPoint(x: size.width / 2, y: size.height * 0.4)
-        frogRootNode.position = .zero
-        frogContainerSprite.addChild(frogRootNode)
-        frogContainer = frogContainerSprite
-        addChild(frogContainerSprite)
-        
-        // Initialize visual effects controller now that frog is set up
-        visualEffectsController = VisualEffectsController(
-            frogContainer: frogContainer,
-            frogSprite: frogController.frog as! SKSpriteNode,
-            frogShadow: nil
-        )
-        
-        // Initialize facing direction controller
-        facingDirectionController = FacingDirectionController(frogNode: frogController.frog)
-        
-        // Setup UI
-        uiManager.setupUI(sceneSize: size)
-        
-        // Create menu backdrop
-        setupMenuBackdrop()
-        
-        // Create bottom HUD bar
-        setupHUDBar()
-    }
-    
     private func setupMenuBackdrop() {
         if menuBackdrop == nil {
             let inset: CGFloat = 24
@@ -421,6 +458,7 @@ class GameScene: SKScene {
         shadow.strokeColor = .clear
         shadow.zPosition = 999
         shadow.position = CGPoint(x: size.width/2, y: trayHeight/2 - 6)
+        hudBarShadow = shadow  // Store reference for visibility control
         addChild(shadow)
 
         // Main tray
@@ -470,6 +508,7 @@ class GameScene: SKScene {
             configurable.configure(
                 gameScene: self,
                 hudBar: hudBar,
+                hudBarShadow: hudBarShadow,
                 heartsContainer: heartsContainer,
                 lifeVestsContainer: lifeVestsContainer,
                 scrollSaverContainer: scrollSaverContainer
@@ -477,6 +516,7 @@ class GameScene: SKScene {
         } else {
             // Fallback: try setting properties directly if exposed
             hudController.hudBar = hudBar
+            hudController.hudBarShadow = hudBarShadow
             hudController.heartsContainer = heartsContainer
             hudController.lifeVestsContainer = lifeVestsContainer
             hudController.scrollSaverContainer = scrollSaverContainer
@@ -493,6 +533,109 @@ class GameScene: SKScene {
         }
 
         updateHUD()
+    }
+    
+    // MARK: - Background Tree Setup
+    private func setupBackgroundTree() {
+        
+        // Create the right side tree aligned to the right edge of screen
+        // First, try to load the treeRight.png image
+        let treeTexture = SKTexture(imageNamed: "treeRight")
+        
+        // Check if we have a valid tree image, otherwise use placeholder
+        if treeTexture.size().width > 1 && treeTexture.size().height > 1 {
+            rightTree = SKSpriteNode(texture: treeTexture)
+        }
+        
+        if let tree = rightTree {
+            // Scale appropriately for the scene first so we can calculate proper position
+            tree.setScale(0.3)
+            
+            // Position the tree aligned to the right edge of the screen
+            // Using the tree's scaled width to position it properly at the edge
+            let treeWidth = tree.size.width
+            tree.position = CGPoint(
+                x: size.width - (treeWidth * 0.9), // Right edge minus half tree width
+                y: size.height * 0.3
+            )
+            
+            // Layer behind the world but in front of background for depth
+            tree.zPosition = 100  // Between background (-1000) and world (0)
+            
+            // Make it slightly transparent to emphasize it's in the background
+            tree.alpha = 0.8
+            
+            addChild(tree)
+            
+        }
+        // Create the left side tree aligned to the left edge of screen
+        let leftTexture = SKTexture(imageNamed: "treeLeft")
+        if leftTexture.size().width > 1 && leftTexture.size().height > 1 {
+            leftTree = SKSpriteNode(texture: leftTexture)
+        }
+        if let ltree = leftTree {
+            ltree.setScale(0.3)
+            let treeWidth = ltree.size.width
+            ltree.position = CGPoint(
+                x: (treeWidth * 0.9),
+                y: size.height * 0.3
+            )
+            ltree.zPosition = 100
+            ltree.alpha = 0.8
+            addChild(ltree)
+        }
+    }
+    
+
+    
+    // MARK: - Background Tree Parallax Update
+    private func updateBackgroundTreeParallax() {
+        // Update both background trees if present
+        let baseY = size.height * 0.3
+        let parallaxFactor: CGFloat = 0.3
+        let parallaxOffsetY = -frogController.position.y * parallaxFactor
+        let currentTime = CFAbsoluteTimeGetCurrent()
+        let swayY = cos(currentTime * 0.3) * 4.0
+        let finalY = baseY + parallaxOffsetY + swayY
+
+        if let rtree = rightTree {
+            let treeWidth = rtree.size.width
+            let fixedX = size.width - (treeWidth * 0.5)
+            let margin: CGFloat = rtree.size.height * 0.5
+            let clampedY = max(-margin, min(size.height + margin, finalY))
+            rtree.position = CGPoint(x: fixedX, y: clampedY)
+        }
+
+        if let ltree = leftTree {
+            let treeWidth = ltree.size.width
+            let fixedX = (treeWidth * 0.5)
+            let margin: CGFloat = ltree.size.height * 0.5
+            let clampedY = max(-margin, min(size.height + margin, finalY))
+            ltree.position = CGPoint(x: fixedX, y: clampedY)
+        }
+    }
+    
+    // MARK: - Background Tree Reset
+    private func resetBackgroundTree() {
+        // Reset right tree to its initial position at the right edge
+        if let rtree = rightTree {
+            let treeWidth = rtree.size.width
+            let baseX = size.width - (treeWidth * 0.5)
+            let baseY = size.height * 0.6
+            rtree.position = CGPoint(x: baseX, y: baseY)
+            rtree.alpha = 0.8
+        }
+
+        // Reset left tree to its initial position at the left edge
+        if let ltree = leftTree {
+            let treeWidth = ltree.size.width
+            let baseX = (treeWidth * 0.5)
+            let baseY = size.height * 0.6
+            ltree.position = CGPoint(x: baseX, y: baseY)
+            ltree.alpha = 0.8
+        }
+
+        print("🌳 Background trees reset. Right: \(String(describing: rightTree?.position)) Left: \(String(describing: leftTree?.position))")
     }
     
     // MARK: - HUD Update
@@ -524,7 +667,7 @@ class GameScene: SKScene {
             menuBackdrop?.run(SKAction.fadeAlpha(to: 0.0, duration: 0.2))
             worldManager.worldNode.isPaused = false
         case .paused, .abilitySelection, .gameOver:
-            menuBackdrop?.run(SKAction.fadeAlpha(to: 0.9, duration: 0.2))
+          //  menuBackdrop?.run(SKAction.fadeAlpha(to: 0.9, duration: 0.2))
             worldManager.worldNode.isPaused = true
         }
     }
@@ -536,15 +679,25 @@ class GameScene: SKScene {
         uiManager.hideSuperJumpIndicator()
         uiManager.hideRocketIndicator()
         healthManager.pendingAbilitySelection = false
+        
+        // Hide background tree during menu
+        rightTree?.alpha = 0.0
+        
+        // Resume spawning if we're exiting ability selection
+        spawnManager.resumeSpawningAfterAbilitySelection()
+        
+        // Ensure spawn state and pad tadpole flags are reset when returning to menu
+        spawnManager.reset(for: &lilyPads, tadpoles: &tadpoles)
+        
         gameState = .menu
         uiManager.showMainMenu(sceneSize: size)
     }
     
     // MARK: - Game Start
     func startGame() {
-        print("Ã°Å¸Å½Â® GameScene.startGame() ENTERED")
+        print("GameScene.startGame() ENTERED")
             uiManager.hideMenus()
-            print("Ã°Å¸Å½Â® After hideMenus()")
+            print("After hideMenus()")
         uiManager.hideSuperJumpIndicator()
         uiManager.hideRocketIndicator()
         menuBackdrop?.run(SKAction.fadeOut(withDuration: 0.2))
@@ -598,10 +751,19 @@ class GameScene: SKScene {
         tadpoles.removeAll()
         lilyPads.removeAll()
         
+        // Reset spawn-related state and clear any lingering pad-tadpole links
+        spawnManager.reset(for: &lilyPads, tadpoles: &tadpoles)
+        
         worldManager.reset()
+        
+        // Reset background tree position
+        resetBackgroundTree()
         
         // Reset scoring anchor after world reset
         lastWorldYForScore = worldManager.worldNode.position.y
+        
+        // Ensure spawning is resumed for new game
+        spawnManager.resumeSpawningAfterAbilitySelection()
         hasInitializedScoreAnchor = true
         
         let startWorldPos = CGPoint(x: size.width / 2, y: 0)
@@ -631,6 +793,10 @@ class GameScene: SKScene {
         frogController.frog.alpha = 1.0
         frogController.frogShadow.alpha = 0.3
         
+        // Show background tree during gameplay with gentle fade-in
+        rightTree?.alpha = 0.0
+        rightTree?.run(SKAction.fadeAlpha(to: 0.8, duration: 1.0))
+        
         spawnManager.spawnInitialObjects(
             sceneSize: size,
             lilyPads: &lilyPads,
@@ -639,9 +805,12 @@ class GameScene: SKScene {
             worldOffset: worldManager.worldNode.position.y
         )
         
+        // Ensure spawning is resumed for new game
+        spawnManager.resumeSpawningAfterAbilitySelection()
+        
         updateHUD()
         
-        print("Ã°Å¸ÂÂ¸ Game started! Frog world position: \(frogController.position)")
+        print("ÃƒÂ°Ã…Â¸Ã‚ÂÃ‚Â¸ Game started! Frog world position: \(frogController.position)")
     }
     
     // MARK: - Game Over
@@ -653,12 +822,23 @@ class GameScene: SKScene {
     func selectAbility(_ abilityStr: String) {
         abilityManager.selectAbility(abilityStr)
         healthManager.pendingAbilitySelection = false
+        
+        // Resume spawning when ability selection ends
+        spawnManager.resumeSpawningAfterAbilitySelection()
+        
         gameState = .playing
     }
     
     // MARK: - Update Loop
     override func update(_ currentTime: TimeInterval) {
         guard gameState == .playing else { return }
+        
+        // PERFORMANCE MONITORING: Log collision stats occasionally
+        if gameLoopCoordinator.getFrameCount() % 300 == 0 { // Every 5 seconds at 60fps
+            let logCount = enemies.filter { $0.type == .log }.count
+            let padCount = lilyPads.count
+            print("🔧 Performance: \(logCount) logs, \(padCount) lily pads active")
+        }
         
         // Keep background covering the screen
         if let bg = backgroundNode, let texture = bg.texture {
@@ -675,6 +855,22 @@ class GameScene: SKScene {
         
         gameLoopCoordinator.incrementFrame()
         let frameCount = gameLoopCoordinator.getFrameCount()
+        
+        // Debug state every 10 seconds if frog seems stuck
+        if frameCount % 600 == 0 { // Every 10 seconds at 60fps
+            if !frogController.isGrounded && !frogController.inWater && !frogController.isJumping && !frogController.rocketActive {
+                debugFrogState()
+                print("🚨 Frog appears to be in stuck state - attempting recovery")
+                
+                // Force unlock input if it's been locked too long
+                if stateManager.inputLocked {
+                    stateManager.forceUnlockInput()
+                }
+                
+                // Try to recover the frog state
+                _ = attemptStateRecovery()
+            }
+        }
         
         spawnManager.spawnObjects(
                sceneSize: size,
@@ -732,6 +928,9 @@ class GameScene: SKScene {
         // Position world so that frog's world position maps to the screen center
         worldManager.worldNode.position.x = screenCenter.x - frogController.position.x
         worldManager.worldNode.position.y = screenCenter.y - frogController.position.y
+        
+        // Update parallax background tree for depth effect
+        updateBackgroundTreeParallax()
         
         // Distance-based scoring: when the world moves downward relative to the screen, the frog advanced upward in world space.
         if hasInitializedScoreAnchor {
@@ -808,7 +1007,7 @@ class GameScene: SKScene {
         if frogController.isGrounded, let pad = frogController.currentLilyPad, pad.type == .pulsing, !pad.isSafeToLand {
             if frogController.suppressWaterCollisionUntilNextJump {
             } else {
-                triggerSplashOnce(gameOverDelay: 1.5)
+                handleUnsafePadLanding()
             }
             return
         }
@@ -919,7 +1118,7 @@ class GameScene: SKScene {
             consumedProtection = true
             destroyCause = .axe
             showFloatingText("Chop!", color: .systemGreen)
-        } else if enemy.type == EnemyType.dragonfly && healthManager.useFlySwatterCharge() {          
+        } else if enemy.type == EnemyType.dragonfly && healthManager.useFlySwatterCharge() {
             consumedProtection = true
             destroyCause = nil
             showFloatingText("Swat!", color: .systemOrange)
@@ -936,6 +1135,8 @@ class GameScene: SKScene {
         
         if !consumedProtection {
             healthManager.damageHealth()
+            // Show scared reaction on the frog for a brief moment
+            frogController.showScared(duration: 1.0)
         }
         
         frogController.activateInvincibility()
@@ -1014,7 +1215,8 @@ class GameScene: SKScene {
             lilyPads.append(rescuePad)
             frogController.position = newPadPos
             frogController.landOnPad(rescuePad)
-            effectsManager?.createLandingEffect(at: convert(newPadPos, from: worldManager.worldNode))
+            // Rescue pad landing: small-to-medium ripple to feel gentle
+            effectsManager?.createLandingEffect(at: convert(newPadPos, from: worldManager.worldNode), intensity: 0.4, lilyPad: rescuePad)
             showFloatingText("Scroll Saver -1", color: .systemYellow)
         } else {
             HapticFeedbackManager.shared.notification(.error)
@@ -1034,13 +1236,14 @@ class GameScene: SKScene {
             frogController.landOnPad(padUnderFrog)
             frogController.isGrounded = true
             frogController.inWater = false
-            effectsManager?.createLandingEffect(at: frogContainer.position)
+            // Rocket landings use a medium-high intensity ripple
+            effectsManager?.createLandingEffect(at: frogContainer.position, intensity: 0.75, lilyPad: padUnderFrog)
             HapticFeedbackManager.shared.impact(.medium)
             landingController.setRocketGracePeriod(frames: 180) // 3 seconds of slow scroll grace
             facingDirectionController.clearLockedFacing()
         } else {
             // Missed landing
-            triggerSplashOnce(gameOverDelay: 1.5)
+            handleMissedLanding()
         }
     }
     
@@ -1059,7 +1262,8 @@ class GameScene: SKScene {
             frogController.landOnPad(padUnderFrog)
             frogController.isGrounded = true
             frogController.inWater = false
-            effectsManager?.createLandingEffect(at: frogContainer.position)
+            // Rocket land button landings use a medium-high intensity ripple
+            effectsManager?.createLandingEffect(at: frogContainer.position, intensity: 0.75, lilyPad: padUnderFrog)
             HapticFeedbackManager.shared.impact(.medium)
             landingController.setRocketGracePeriod(frames: 180)
             facingDirectionController.clearLockedFacing()
@@ -1076,12 +1280,64 @@ class GameScene: SKScene {
     }
     
     // MARK: - Landing Helpers
+    private func handleUnsafePadLanding() {
+        if stateManager.splashTriggered { return }
+        stateManager.splashTriggered = true
+        
+        if frogController.suppressWaterCollisionUntilNextJump {
+            print("ðŸŒŠ Suppressing water collision until next jump")
+            healthManager.pendingAbilitySelection = false
+            return
+        }
+        
+        frogController.splash()
+        facingDirectionController.clearLockedFacing()
+        HapticFeedbackManager.shared.notification(.error)
+        effectsManager?.createSplashEffect(at: frogContainer.position)
+        
+        // Check for life vest charges (same logic as handleMissedLanding)
+        if frogController.lifeVestCharges > 0 {
+            frogController.lifeVestCharges -= 1
+            updateHUD()
+            stateManager.cancelPendingGameOver()
+            healthManager.pendingAbilitySelection = false
+            frogController.suppressWaterCollisionUntilNextJump = true
+            stateManager.splashTriggered = false
+            showFloatingText("Life Vest -1", color: .systemYellow)
+            
+            // CRITICAL FIX: After life vest rescue, place frog on nearest safe lily pad
+            // Find nearest safe lily pad to land on
+            var nearestPad: LilyPad?
+            var nearestDist: CGFloat = .infinity
+            for pad in lilyPads where pad.type != .pulsing || pad.isSafeToLand {
+                let dx = frogController.position.x - pad.position.x
+                let dy = frogController.position.y - pad.position.y
+                let dist = sqrt(dx*dx + dy*dy)
+                if dist < nearestDist {
+                    nearestDist = dist
+                    nearestPad = pad
+                }
+            }
+            
+            // Replaced block as per instructions:
+            // Life vest rescue: keep frog floating at current position; do not snap to a pad
+            frogController.inWater = true
+            frogController.isGrounded = false
+            frogController.isJumping = false
+            // Position remains unchanged; player can slingshot to safety
+            print("🦎 Life vest rescue: Keeping frog at splash position (no teleport)")
+        } else {
+            healthManager.pendingAbilitySelection = false
+            self.playScaredSpinDropAndGameOver(reason: .splash)
+        }
+    }
+    
     private func handleMissedLanding() {
         if stateManager.splashTriggered { return }
         stateManager.splashTriggered = true
         
         if frogController.suppressWaterCollisionUntilNextJump {
-            print("Ã°Å¸â€ºÅ¸ Suppressing water collision until next jump")
+            print("ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂºÃ…Â¸ Suppressing water collision until next jump")
             healthManager.pendingAbilitySelection = false
             return
         }
@@ -1100,13 +1356,21 @@ class GameScene: SKScene {
                 frogController.suppressWaterCollisionUntilNextJump = true
                 stateManager.splashTriggered = false
                 showFloatingText("Life Vest -1", color: .systemYellow)
+                
+                // CRITICAL FIX: After life vest rescue, try to find a nearby lily pad
+                // Removed the search and landing code, replaced with stays in water:
+                // Life vest water rescue: keep frog floating; do not move position or land on a pad
+                frogController.inWater = true
+                frogController.isGrounded = false
+                frogController.isJumping = false
+                print("🦎 Life vest water rescue: Keeping frog at splash position (no teleport)")
             } else {
                 healthManager.pendingAbilitySelection = false
-                stateManager.triggerGameOver(.splash, delay: 1.5)
+                self.playScaredSpinDropAndGameOver(reason: .splash)
             }
         } else {
             healthManager.pendingAbilitySelection = false
-            stateManager.triggerGameOver(.splash, delay: 1.5)
+            self.playScaredSpinDropAndGameOver(reason: .splash)
         }
     }
     
@@ -1120,31 +1384,13 @@ class GameScene: SKScene {
         effectsManager?.createSplashEffect(at: frogContainer.position)
         
         healthManager.pendingAbilitySelection = false
-        stateManager.triggerGameOver(.splash, delay: gameOverDelay)
+        self.playScaredSpinDropAndGameOver(reason: .splash)
     }
     
-    // MARK: - Lily Pad Creation
+    // MARK: - Lily Pad Creation (for special cases only)
     private func makeLilyPad(position: CGPoint, radius: CGFloat) -> LilyPad {
-        let type: LilyPadType
-        if score < 2000 {
-            type = .normal
-        } else {
-            let r = CGFloat.random(in: 0...1)
-            if r < 0.3 {
-                type = .normal
-            } else if r < 0.5 {
-                type = .pulsing
-            } else {
-                type = .moving
-            }
-        }
-        let pad = LilyPad(position: position, radius: radius, type: type)
-        if type == .moving {
-            pad.screenWidthProvider = { [weak self] in self?.size.width ?? 1024 }
-            pad.movementSpeed = 120.0
-            pad.refreshMovement()
-        }
-        return pad
+        // For start pad and rescue pad, always create normal pads
+        return LilyPad(position: position, radius: radius, type: .normal)
     }
     
     // MARK: - UI Helpers
@@ -1191,13 +1437,89 @@ class GameScene: SKScene {
         label.run(SKAction.sequence([group, remove]))
     }
     
+    // MARK: - Recovery Helpers
+    private func findNearbyLilyPad() -> LilyPad? {
+        let frogPos = frogController.position
+        let maxDistance: CGFloat = 100 // Search within 100 units
+        
+        return lilyPads.first { pad in
+            let dx = frogPos.x - pad.position.x
+            let dy = frogPos.y - pad.position.y
+            let distance = sqrt(dx * dx + dy * dy)
+            return distance <= maxDistance
+        }
+    }
+    
+    private func attemptStateRecovery() -> Bool {
+        // Only attempt recovery if frog is not jumping and not in rocket mode
+        guard !frogController.isJumping && !frogController.rocketActive else {
+            return false
+        }
+        
+        print("⚠️ Attempting state recovery - checking for nearby lily pad")
+        
+        if let nearbyPad = findNearbyLilyPad() {
+            print("✅ Recovery: Found nearby lily pad, setting grounded state")
+            frogController.landOnPad(nearbyPad)
+            return true
+        } else {
+            print("❌ Recovery: No nearby lily pad found")
+            return false
+        }
+    }
+    
+    private func debugFrogState() {
+        print("🐸 DEBUG - Frog State:")
+        print("  - isGrounded: \(frogController.isGrounded)")
+        print("  - isJumping: \(frogController.isJumping)")
+        print("  - inWater: \(frogController.inWater)")
+        print("  - rocketActive: \(frogController.rocketActive)")
+        print("  - currentLilyPad: \(frogController.currentLilyPad != nil ? "YES" : "NO")")
+        print("  - inputLocked: \(stateManager.inputLocked)")
+        print("  - gameState: \(gameState)")
+        print("  - pendingAbilitySelection: \(healthManager.pendingAbilitySelection)")
+    }
+    
+    // Manual recovery function for testing/debugging
+    func manualRecovery() {
+        debugFrogState()
+        stateManager.forceUnlockInput()
+        if attemptStateRecovery() {
+            print("✅ Manual recovery successful")
+        } else {
+            print("❌ Manual recovery failed")
+        }
+    }
+    
     // MARK: - Touch Handling
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
         let location = touch.location(in: self)
         
-        // Check for UI button taps FIRST
         let nodesAtPoint = nodes(at: location)
+        
+        // Press feedback for UI buttons (nodes named with known button names or ability_ prefix)
+        if let tapped = nodesAtPoint.first(where: { node in
+            guard let name = node.name else { return false }
+            return name == "playGameButton" ||
+                   name == "pauseButton" ||
+                   name == "continueButton" ||
+                   name == "resumeButton" ||
+                   name == "quitButton" ||
+                   name == "quitToMenuButton" ||
+                   name == "tryAgainButton" ||
+                   name == "restartButton" ||
+                   name == "backToMenuButton" ||
+                   name == "rocketLandButton" ||
+                   name.hasPrefix("ability_")
+        }) {
+            // Animate press on the button's root node (use parent if label/sprite was hit)
+            let buttonRoot = tapped.name == "tapTarget" ? tapped.parent ?? tapped : tapped
+            currentlyPressedButton = buttonRoot
+            uiManager.handleButtonPress(node: buttonRoot)
+        }
+        
+        // Check for UI button taps FIRST
         for node in nodesAtPoint {
             if let nodeName = node.name {
                 // Main Menu Buttons
@@ -1252,13 +1574,13 @@ class GameScene: SKScene {
         
         // Only check gameplay touches if we're in playing state
         guard gameState == .playing else {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch ignored: gameState=\(gameState)")
+            print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch ignored: gameState=\(gameState)")
             return
         }
         
         // Rocket steering
         if frogController.rocketActive {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch routed to rocket steering")
+            print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch routed to rocket steering")
             let screenCenter = size.width / 2
             if location.x > screenCenter + 40 {
                 touchInputController.applyTapNudge(isRightSide: true, sceneWidth: size.width)
@@ -1270,22 +1592,22 @@ class GameScene: SKScene {
         }
         
         if stateManager.inputLocked {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch ignored: inputLocked")
+            print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch ignored: inputLocked")
             return
         }
         
         if healthManager.pendingAbilitySelection {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch ignored: ability selection pending")
+            print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch ignored: ability selection pending")
             return
         }
         
         if !(frogController.isGrounded || frogController.inWater) {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch ignored: not grounded/inWater (isGrounded=\(frogController.isGrounded), isJumping=\(frogController.isJumping))")
+            print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch ignored: not grounded/inWater (isGrounded=\(frogController.isGrounded), isJumping=\(frogController.isJumping))")
             return
         }
         
         // Slingshot handling - only if grounded or in water
-        print("Ã°Å¸Å½Â¯ Slingshot touch began at: \(location)")
+        print("ÃƒÂ°Ã…Â¸Ã…Â½Ã‚Â¯ Slingshot touch began at: \(location)")
         let frogScreenPoint = convert(frogController.position, from: worldManager.worldNode)
         slingshotController.handleTouchBegan(at: location, frogScreenPosition: frogScreenPoint)
     }
@@ -1294,28 +1616,33 @@ class GameScene: SKScene {
         guard let touch = touches.first else { return }
         let location = touch.location(in: self)
         
+        // If finger moves significantly, cancel press state
+        if let pressed = currentlyPressedButton {
+            let pressedFrame = pressed.calculateAccumulatedFrame()
+            if !pressedFrame.insetBy(dx: -20, dy: -20).contains(location) {
+                uiManager.handleButtonRelease(node: pressed)
+                currentlyPressedButton = nil
+            }
+        }
+        
         guard gameState == .playing else {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch ignored: gameState=\(gameState)")
             return
         }
         
         if stateManager.inputLocked {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch ignored: inputLocked")
             return
         }
         
         if healthManager.pendingAbilitySelection {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch ignored: ability selection pending")
             return
         }
         
         if frogController.rocketActive {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch ignored: rocketActive")
             return
         }
         
         if !(frogController.isGrounded || frogController.inWater) {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch ignored: not grounded/inWater (isGrounded=\(frogController.isGrounded), isJumping=\(frogController.isJumping))")
+            print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch ignored: not grounded/inWater (isGrounded=\(frogController.isGrounded), isJumping=\(frogController.isJumping))")
             return
         }
         
@@ -1337,29 +1664,35 @@ class GameScene: SKScene {
         guard let touch = touches.first else { return }
         let location = touch.location(in: self)
         
+        // Release visual for any pressed button
+        if let pressed = currentlyPressedButton {
+            uiManager.handleButtonRelease(node: pressed)
+            currentlyPressedButton = nil
+        }
+        
         if gameState == .playing && frogController.rocketActive {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch routed to rocket steering")
+            print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch routed to rocket steering")
             _ = touchInputController.handleTouchEnded(touch, in: self.view!, sceneSize: size, rocketActive: frogController.rocketActive, hudBarHeight: hudBarHeight)
             return
         }
         
         guard gameState == .playing else {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch ignored: gameState=\(gameState)")
+            print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch ignored: gameState=\(gameState)")
             return
         }
         
         if stateManager.inputLocked {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch ignored: inputLocked")
+            print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch ignored: inputLocked")
             return
         }
         
         if healthManager.pendingAbilitySelection {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch ignored: ability selection pending")
+            print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch ignored: ability selection pending")
             return
         }
         
         if !(frogController.isGrounded || frogController.inWater) {
-            print("Ã¢â€ºâ€Ã¯Â¸Â Touch ignored: not grounded/inWater (isGrounded=\(frogController.isGrounded), isJumping=\(frogController.isJumping))")
+            print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch ignored: not grounded/inWater (isGrounded=\(frogController.isGrounded), isJumping=\(frogController.isJumping))")
             return
         }
         
@@ -1373,10 +1706,17 @@ class GameScene: SKScene {
                 worldOffset: worldManager.worldNode.position.y,
                 superJumpActive: frogController.superJumpActive
             ) {
-                print("Ã°Å¸ÂÂ¸ Jumping to: \(targetWorldPos)")
+                print("ÃƒÂ°Ã…Â¸Ã‚ÂÃ‚Â¸ Jumping to: \(targetWorldPos)")
                 frogController.startJump(to: targetWorldPos)
                 facingDirectionController?.lockCurrentFacing()
             }
+        }
+    }
+    
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let pressed = currentlyPressedButton {
+            uiManager.handleButtonRelease(node: pressed)
+            currentlyPressedButton = nil
         }
     }
     
@@ -1389,4 +1729,51 @@ class GameScene: SKScene {
             }
         }
     }
+    
+    // MARK: - Game Over Animation Helper
+    private func playScaredSpinDropAndGameOver(reason: GameOverReason) {
+        // Prevent duplicate triggers
+        guard gameState == .playing else {
+            gameOver(reason)
+            return
+        }
+
+        stateManager.lockInput(for: 0.5)  // Reduced from 2.0 to 0.5 seconds to prevent extended input loss
+        frogController.showScared(duration: 2.0)
+
+        frogController.frog.removeAllActions()
+        frogController.frogShadow.removeAllActions()
+        frogContainer.removeAllActions()
+
+        frogContainer.zPosition = max(frogContainer.zPosition, 500)
+
+        let spin = SKAction.rotate(byAngle: .pi * 2.0, duration: 0.5)
+        spin.timingMode = .easeInEaseOut
+        let scaleUp = SKAction.scale(to: 1.2, duration: 0.2)
+        scaleUp.timingMode = .easeOut
+        let scaleDown = SKAction.scale(to: 1.0, duration: 0.2)
+        scaleDown.timingMode = .easeIn
+        let wobble = SKAction.sequence([scaleUp, scaleDown])
+
+        let dropTarget = CGPoint(x: frogContainer.position.x, y: -size.height * 0.4)
+        let drop = SKAction.move(to: dropTarget, duration: 0.6)
+        drop.timingMode = .easeIn
+        let fade = SKAction.fadeOut(withDuration: 0.5)
+        let groupSpinWobble = SKAction.group([spin, wobble])
+
+        HapticFeedbackManager.shared.notification(.error)
+
+        let sequence = SKAction.sequence([
+            groupSpinWobble,
+            SKAction.group([drop, fade])
+        ])
+
+        frogContainer.run(sequence) { [weak self] in
+            guard let self = self else { return }
+            self.frogController.frog.alpha = 1.0
+            self.frogController.frogShadow.alpha = 0.0
+            self.gameOver(reason)
+        }
+    }
 }
+

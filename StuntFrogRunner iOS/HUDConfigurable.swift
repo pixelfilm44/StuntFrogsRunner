@@ -13,6 +13,7 @@ public protocol HUDConfigurable {
     func configure(
         gameScene: SKScene,
         hudBar: SKShapeNode,
+        hudBarShadow: SKShapeNode?,
         heartsContainer: SKNode,
         lifeVestsContainer: SKNode,
         scrollSaverContainer: SKNode
@@ -28,12 +29,14 @@ extension HUDController: HUDConfigurable {
     public func configure(
         gameScene: SKScene,
         hudBar: SKShapeNode,
+        hudBarShadow: SKShapeNode?,
         heartsContainer: SKNode,
         lifeVestsContainer: SKNode,
         scrollSaverContainer: SKNode
     ) {
         self.scene = gameScene
         self.hudBar = hudBar
+        self.hudBarShadow = hudBarShadow
         self.heartsContainer = heartsContainer
         self.lifeVestsContainer = lifeVestsContainer
     }

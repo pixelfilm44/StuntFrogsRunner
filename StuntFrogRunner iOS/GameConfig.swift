@@ -42,27 +42,27 @@ struct GameConfig {
     
     // Spawn rates (per frame)
     static let lilyPadSpawnRate: CGFloat = 0.006  // HIGH - need lots of landing spots!
-    static let enemySpawnRate: CGFloat = 0.012
-    static let tadpoleSpawnRate: CGFloat = 0.018  // IMPROVED: Increased from 0.005 for better distribution
-    static let logSpawnRate: CGFloat = 0.008
+    static let enemySpawnRate: CGFloat = 0.008
+    static let tadpoleSpawnRate: CGFloat = 0.05  // IMPROVED: Increased from 0.005 for better distribution
+    static let logSpawnRate: CGFloat = 0.004  // Reduced from 0.008 for better performance
     
     // Enemy settings - all move on water surface
     static let snakeSpeed: CGFloat = 2.0
-    static let beeSpeed: CGFloat = 1.5  // Bees hover and move
+    static let beeSpeed: CGFloat = 1.25  // Bees hover and move
     static let dragonflySpeed: CGFloat = -2.5  // Moves up screen
     static let logSpeed: CGFloat = 0.5
     static let logBounceForce: CGFloat = 15.0
     
     // Game settings
     static let startingHealth: Int = 3
-    static let tadpolesForAbility: Int = 5
+    static let tadpolesForAbility: Int = 10
     static let superJumpDurationFrames: Int = 420
     static let rocketDurationFrames: Int = 480  // 8 seconds at 60 fps (extended by 3s)
     static let invincibleDurationFrames: Int = 90
     
     // Object sizes
     static let snakeSize: CGFloat = 45
-    static let beeSize: CGFloat = 35
+    static let beeSize: CGFloat = 30
     static let dragonflySize: CGFloat = 40
     static let tadpoleSize: CGFloat = 30
     static let logWidth: CGFloat = 110  // Visual width
@@ -76,9 +76,13 @@ struct GameConfig {
     static let maxLilyPadRadius: CGFloat = 65
     static let lilyPadSpacing: CGFloat = 70  // Minimum distance between pads
     
+    static let tadpolePerPadProbability: CGFloat = 0.7
+
+    
     // Landing behavior
     static let disablePostLandingSnap: Bool = true  // If true, frog stays where it lands; if false, snaps to pad center
 }
+
 
 
 

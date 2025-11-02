@@ -16,6 +16,7 @@ import SpriteKit
 class HUDController {
     // Rocket final approach banner
     private var rocketBannerLabel: SKLabelNode?
+    private var rocketCountdownLabel: SKLabelNode?
     /// Called when the final-approach state toggles so the game can slow/restore scroll speed
     var onRocketFinalApproachChanged: ((Bool) -> Void)?
     private var isShowingRocketBanner: Bool = false
@@ -27,6 +28,7 @@ class HUDController {
 
     // MARK: - Properties
     weak var hudBar: SKShapeNode?
+    weak var hudBarShadow: SKShapeNode?  // Track shadow separately
     weak var heartsContainer: SKNode?
     weak var lifeVestsContainer: SKNode?
     weak var scrollSaverContainer: SKNode?
@@ -99,7 +101,12 @@ class HUDController {
     /// External API: call this every frame (or on state change) with seconds remaining in rocket ride.
     /// When `timeRemaining <= 3`, we show the banner and trigger the slow-scroll callback.
     func updateRocketFinalApproach(timeRemaining: TimeInterval?) {
-        let shouldShow = (timeRemaining ?? .infinity) <= 3.0
+        // Determine if we should show the final approach banner based on finite remaining time
+        let finiteTime: Double? = {
+            guard let t = timeRemaining, t.isFinite, !t.isNaN else { return nil }
+            return t
+        }()
+        let shouldShow = (finiteTime ?? .infinity) <= 3.0
         if shouldShow != isShowingRocketBanner {
             isShowingRocketBanner = shouldShow
             setRocketBanner(visible: shouldShow)
@@ -108,6 +115,50 @@ class HUDController {
             // keep position updated if HUD re-anchors
             setRocketBanner(visible: true)
         }
+        
+        // Safely compute seconds only when we have a finite time; otherwise hide countdown
+        if let t = finiteTime, t <= 4.0 {
+            let clamped = max(0.0, min(t, 10_000.0))
+            let seconds = Int(ceil(clamped))
+            showRocketCountdown(seconds: max(0, seconds))
+        } else {
+            hideRocketCountdown()
+        }
+    }
+    
+    private func showRocketCountdown(seconds: Int) {
+        guard let scene = scene else { return }
+        if rocketCountdownLabel == nil {
+            let label = SKLabelNode(fontNamed: "Arial-BoldMT")
+            label.fontSize = 120
+            label.fontColor = .white
+            label.zPosition = 400
+            label.name = "rocketCountdown"
+            label.position = CGPoint(x: scene.size.width / 2, y: scene.size.height / 2 + 60)
+            label.alpha = 1.0
+            let scaleUp = SKAction.scale(to: 1.08, duration: 0.24)
+            let scaleDown = SKAction.scale(to: 1.0, duration: 0.24)
+            let pulse = SKAction.repeatForever(SKAction.sequence([scaleUp, scaleDown]))
+            label.run(pulse, withKey: "pulse")
+            rocketCountdownLabel = label
+            scene.addChild(label)
+        }
+        rocketCountdownLabel?.position = CGPoint(x: scene.size.width / 2, y: scene.size.height / 2 + 60)
+        rocketCountdownLabel?.text = "\(seconds)"
+        if seconds <= 1 {
+            rocketCountdownLabel?.fontColor = .red
+        } else if seconds <= 2 {
+            rocketCountdownLabel?.fontColor = .yellow
+        } else {
+            rocketCountdownLabel?.fontColor = .white
+        }
+        rocketCountdownLabel?.isHidden = false
+    }
+    
+    private func hideRocketCountdown() {
+        rocketCountdownLabel?.removeAction(forKey: "pulse")
+        rocketCountdownLabel?.removeFromParent()
+        rocketCountdownLabel = nil
     }
     
     // MARK: - Score
@@ -128,6 +179,16 @@ class HUDController {
         token.lineWidth = 1.5
         token.zPosition = 0
         return token
+    }
+    
+    /// Applies a brief grow-shrink animation to emphasize a newly added HUD token
+    private func animateTokenAppear(_ node: SKNode) {
+        node.removeAction(forKey: "appearPulse")
+        node.setScale(0.88)
+        let grow = SKAction.scale(to: 1.15, duration: 0.12)
+        let shrink = SKAction.scale(to: 1.0, duration: 0.14)
+        let seq = SKAction.sequence([grow, shrink])
+        node.run(seq, withKey: "appearPulse")
     }
     
     private func computeRowLayout(count: Int, itemSize: CGFloat, minSpacing: CGFloat, maxWidth: CGFloat) -> [CGFloat] {
@@ -188,6 +249,12 @@ class HUDController {
         return max(0, barWidth - horizontalInset)
     }
 
+    // MARK: - HUD Visibility
+    func setHUDVisible(_ visible: Bool) {
+        hudBar?.isHidden = !visible
+        hudBarShadow?.isHidden = !visible
+    }
+    
     // MARK: - HUD Updates
     func updateHUD(health: Int, maxHealth: Int, lifeVestCharges: Int, scrollSaverCharges: Int, flySwatterCharges: Int, honeyJarCharges: Int, axeCharges: Int, tadpolesCollected: Int, tadpolesThreshold: Int) {
         guard let hudBar = hudBar else { return }
@@ -339,8 +406,19 @@ class HUDController {
             token.position = CGPoint(x: x, y: 0)
             lifeVestsContainer.addChild(token)
             if i < charges {
-                if useTexture { let s = SKSpriteNode(texture: texture); s.size = CGSize(width: 20, height: 20); s.zPosition = 2; token.addChild(s) }
-                else { let l = SKLabelNode(text: "Ã°Å¸â€ºÅ¸"); l.fontSize = 18; l.verticalAlignmentMode = .center; l.zPosition = 2; token.addChild(l) }
+                if useTexture {
+                    let s = SKSpriteNode(texture: texture)
+                    s.size = CGSize(width: 20, height: 20)
+                    s.zPosition = 2
+                    token.addChild(s)
+                } else {
+                    let l = SKLabelNode(text: "Ã°Å¸â€ºÅ¸")
+                    l.fontSize = 18
+                    l.verticalAlignmentMode = .center
+                    l.zPosition = 2
+                    token.addChild(l)
+                }
+                animateTokenAppear(token)
             } else {
                 token.alpha = 0.25
             }
@@ -368,8 +446,19 @@ class HUDController {
             token.position = CGPoint(x: x, y: 0)
             scrollSaverContainer.addChild(token)
             if i < charges {
-                if useTexture { let s = SKSpriteNode(texture: texture); s.size = CGSize(width: 18, height: 18); s.zPosition = 2; token.addChild(s) }
-                else { let l = SKLabelNode(text: "Ã¢ÂÂ±"); l.fontSize = 18; l.verticalAlignmentMode = .center; l.zPosition = 2; token.addChild(l) }
+                if useTexture {
+                    let s = SKSpriteNode(texture: texture)
+                    s.size = CGSize(width: 18, height: 18)
+                    s.zPosition = 2
+                    token.addChild(s)
+                } else {
+                    let l = SKLabelNode(text: "Ã¢ÂÂ±")
+                    l.fontSize = 18
+                    l.verticalAlignmentMode = .center
+                    l.zPosition = 2
+                    token.addChild(l)
+                }
+                animateTokenAppear(token)
             } else { token.alpha = 0.25 }
             x += size + spacing
         }
@@ -393,8 +482,19 @@ class HUDController {
             token.position = CGPoint(x: x, y: 0)
             flyContainer.addChild(token)
             if i < charges {
-                if useTexture { let s = SKSpriteNode(texture: texture); s.size = CGSize(width: 18, height: 18); s.zPosition = 2; token.addChild(s) }
-                else { let l = SKLabelNode(text: "Ã°Å¸ÂªÂ°"); l.fontSize = 18; l.verticalAlignmentMode = .center; l.zPosition = 2; token.addChild(l) }
+                if useTexture {
+                    let s = SKSpriteNode(texture: texture)
+                    s.size = CGSize(width: 18, height: 18)
+                    s.zPosition = 2
+                    token.addChild(s)
+                } else {
+                    let l = SKLabelNode(text: "Ã°Å¸ÂªÂ°")
+                    l.fontSize = 18
+                    l.verticalAlignmentMode = .center
+                    l.zPosition = 2
+                    token.addChild(l)
+                }
+                animateTokenAppear(token)
             } else { token.alpha = 0.25 }
             x += size + spacing
         }
@@ -418,8 +518,19 @@ class HUDController {
             token.position = CGPoint(x: x, y: 0)
             honeyContainer.addChild(token)
             if i < charges {
-                if useTexture { let s = SKSpriteNode(texture: texture); s.size = CGSize(width: 18, height: 18); s.zPosition = 2; token.addChild(s) }
-                else { let l = SKLabelNode(text: "Ã°Å¸ÂÂ¯"); l.fontSize = 18; l.verticalAlignmentMode = .center; l.zPosition = 2; token.addChild(l) }
+                if useTexture {
+                    let s = SKSpriteNode(texture: texture)
+                    s.size = CGSize(width: 18, height: 18)
+                    s.zPosition = 2
+                    token.addChild(s)
+                } else {
+                    let l = SKLabelNode(text: "Ã°Å¸ÂÂ¯")
+                    l.fontSize = 18
+                    l.verticalAlignmentMode = .center
+                    l.zPosition = 2
+                    token.addChild(l)
+                }
+                animateTokenAppear(token)
             } else { token.alpha = 0.25 }
             x += size + spacing
         }
@@ -443,8 +554,19 @@ class HUDController {
             token.position = CGPoint(x: x, y: 0)
             axeContainer.addChild(token)
             if i < charges {
-                if useTexture { let s = SKSpriteNode(texture: texture); s.size = CGSize(width: 18, height: 18); s.zPosition = 2; token.addChild(s) }
-                else { let l = SKLabelNode(text: "Ã°Å¸Âªâ€œ"); l.fontSize = 18; l.verticalAlignmentMode = .center; l.zPosition = 2; token.addChild(l) }
+                if useTexture {
+                    let s = SKSpriteNode(texture: texture)
+                    s.size = CGSize(width: 18, height: 18)
+                    s.zPosition = 2
+                    token.addChild(s)
+                } else {
+                    let l = SKLabelNode(text: "Ã°Å¸Âªâ€œ")
+                    l.fontSize = 18
+                    l.verticalAlignmentMode = .center
+                    l.zPosition = 2
+                    token.addChild(l)
+                }
+                animateTokenAppear(token)
             } else { token.alpha = 0.25 }
             x += size + spacing
         }

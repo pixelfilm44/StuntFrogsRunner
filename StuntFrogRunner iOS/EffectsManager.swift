@@ -172,114 +172,218 @@ class EffectsManager {
         splashText.run(textAction)
     }
     
-    func createLandingEffect(at position: CGPoint) {
+    func createLandingEffect(at position: CGPoint, intensity: CGFloat, lilyPad: LilyPad? = nil) {
         guard let scene = scene else { return }
+        
+        // Use lily pad center if provided, otherwise use the given position
+        let effectPosition = lilyPad?.position ?? position
+        
+        // Clamp intensity to 0...1 and derive scale factors
+        let clamped = max(0.0, min(1.0, intensity))
+        // Ripple and particle tuning based on intensity
+        let rippleScaleBase: CGFloat = 3.0
+        let rippleScaleExtra: CGFloat = 2.5 // added on top across rings
+        let lineWidthBase: CGFloat = 5.0
+        let glowRadiusBase: CGFloat = 8.0
+        let glowScale: CGFloat = 1.0 + clamped * 1.5
+        let particleCount = 8 + Int(round(clamped * 8)) // 8..16
+        let particleDistanceBase: CGFloat = 35.0
+        let particleDistanceExtra: CGFloat = 35.0
+        let rippleDuration: TimeInterval = 0.6 + TimeInterval(clamped * 0.4) // 0.6..1.0
+        let particleDuration: TimeInterval = 0.4 + TimeInterval(clamped * 0.2) // 0.4..0.6
         
         // Prefer to render landing ripples in the world layer (under lily pads)
         if let gs = scene as? GameScene {
-            // Convert the incoming screen-space position into world coordinates
-            let worldPos = gs.convert(position, to: gs.worldManager.worldNode)
+            // Use the effect position directly if lily pad is provided (already in world coordinates)
+            // Otherwise convert the incoming screen-space position into world coordinates
+            let worldPos = lilyPad != nil ? effectPosition : gs.convert(effectPosition, to: gs.worldManager.worldNode)
             // Safely unwrap the world node to add children
             guard let parent = gs.worldManager.worldNode else { return }
             let zBelowPads: CGFloat = 5 // pads are at 10
             
-            // Ripples emanating from landing spot
-            for i in 1...4 {
-                let ripple = SKShapeNode(circleOfRadius: 8)
-                ripple.strokeColor = UIColor(red: 0.3, green: 0.8, blue: 0.3, alpha: 0.7)
+            // Inner glow for impact point - creates focal emphasis
+            let glow = SKShapeNode(circleOfRadius: glowRadiusBase * (0.8 + clamped * 0.6))
+            glow.fillColor = UIColor(red: 0.4, green: 0.9, blue: 0.4, alpha: 0.9)
+            glow.strokeColor = .clear
+            glow.position = worldPos
+            glow.zPosition = zBelowPads
+            parent.addChild(glow)
+            
+            let glowAction = SKAction.sequence([
+                SKAction.group([
+                    SKAction.scale(to: 3.0 * glowScale, duration: rippleDuration * 0.375),
+                    SKAction.fadeOut(withDuration: rippleDuration * 0.375)
+                ]),
+                SKAction.removeFromParent()
+            ])
+            glow.run(glowAction)
+            
+            // Enhanced ripples emanating from landing spot with realistic properties
+            for i in 1...3 {
+                let ripple = SKShapeNode(circleOfRadius: 9)
+                
+                // Color variation: inner ripples brighter, outer ripples darker for depth
+                let alphaMod = 1.0 - (CGFloat(i - 1) * 0.1)
+                ripple.strokeColor = UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: alphaMod)
                 ripple.fillColor = .clear
-                ripple.lineWidth = 3
+                
+                // Start with thicker line for visibility
+                ripple.lineWidth = max(0.5, (lineWidthBase - CGFloat(i)) * (0.8 + clamped * 0.6)) // adjusted for intensity
                 ripple.position = worldPos
                 ripple.zPosition = zBelowPads
                 parent.addChild(ripple)
                 
-                let delay = Double(i) * 0.02
-                let base = cachedLandingRippleActionBase ?? SKAction.sequence([
-                    SKAction.group([
-                        SKAction.scale(to: CGFloat(4 + i), duration: 0.5),
-                        SKAction.fadeOut(withDuration: 0.5)
-                    ]),
+                // Stagger with more visible delay for cascade effect, adjusted by intensity
+                let delay = Double(i - 1) * (0.08 + (1.0 - Double(clamped)) * 0.06)
+                
+                // Scale more dramatically for better visibility (6-8x expansion)
+                let targetScale = rippleScaleBase + CGFloat(i) + rippleScaleExtra * clamped
+                
+                // Create custom action for line width animation (thin as it expands - realistic water)
+                let lineWidthAction = SKAction.customAction(withDuration: rippleDuration) { node, elapsedTime in
+                    if let shape = node as? SKShapeNode {
+                        let progress = CGFloat(elapsedTime) / CGFloat(rippleDuration)
+                        let startWidth = max(0.5, (lineWidthBase - CGFloat(i)) * (0.8 + clamped * 0.6))
+                        let endWidth: CGFloat = 0.5
+                        shape.lineWidth = startWidth - (startWidth - endWidth) * progress
+                    }
+                }
+                
+                let scaleAction = SKAction.scale(to: targetScale, duration: rippleDuration)
+                scaleAction.timingMode = .easeOut
+                let rippleAnimation = SKAction.group([
+                    scaleAction,
+                    SKAction.fadeOut(withDuration: rippleDuration),
+                    lineWidthAction
+                ])
+                
+                let fullAction = SKAction.sequence([
+                    SKAction.wait(forDuration: delay),
+                    rippleAnimation,
                     SKAction.removeFromParent()
                 ])
-                let rippleAction = SKAction.sequence([
-                    SKAction.wait(forDuration: delay),
-                    base
-                ])
-                ripple.run(rippleAction)
+                
+                ripple.run(fullAction)
             }
             
-            // Small splash particles
-            for i in 0..<8 {
-                let angle = CGFloat(i) * (CGFloat.pi * 2 / 8)
-                let particle = SKShapeNode(circleOfRadius: 4)
-                particle.fillColor = .white
-                particle.strokeColor = .cyan
-                particle.lineWidth = 1
+            // Enhanced splash particles with more energy
+            for i in 0..<particleCount {
+                let angle = CGFloat(i) * (CGFloat.pi * 2 / CGFloat(particleCount))
+                let particle = SKShapeNode(circleOfRadius: 4 + clamped * 3)
+                particle.fillColor = UIColor(red: 0.9, green: 1.0, blue: 0.9, alpha: 1.0)
+                particle.strokeColor = UIColor(red: 0.3, green: 0.9, blue: 0.9, alpha: 1.0)
+                particle.lineWidth = 2
                 particle.position = worldPos
                 particle.zPosition = zBelowPads + 1
                 particle.zRotation = angle
                 parent.addChild(particle)
                 
-                let base = cachedLandingParticleAction ?? SKAction.sequence([
+                // Vary particle travel distance for more natural look
+                let distance: CGFloat = particleDistanceBase + particleDistanceExtra * clamped + CGFloat(i % 3) * 10
+                
+                let moveAction = SKAction.moveBy(x: distance * cos(angle), y: distance * sin(angle), duration: particleDuration)
+                moveAction.timingMode = .easeOut
+                let particleAction = SKAction.sequence([
+                    SKAction.wait(forDuration: Double(i) * (0.015 + (1.0 - Double(clamped)) * 0.01)), // Quick stagger
                     SKAction.group([
-                        SKAction.moveBy(x: 25, y: 0, duration: 0.4),
-                        SKAction.fadeOut(withDuration: 0.4),
-                        SKAction.scale(to: 0.1, duration: 0.4)
+                        moveAction,
+                        SKAction.fadeOut(withDuration: particleDuration),
+                        SKAction.scale(to: 0.1, duration: particleDuration)
                     ]),
                     SKAction.removeFromParent()
                 ])
-                particle.run(base)
+                particle.run(particleAction)
             }
             return
         }
         
-        // Fallback: if not in a GameScene, keep old behavior (scene-level, above)
-        // Ripples emanating from landing spot
-        for i in 1...4 {
-            let ripple = SKShapeNode(circleOfRadius: 8)
-            ripple.strokeColor = UIColor(red: 0.3, green: 0.8, blue: 0.3, alpha: 0.7)
+        // Fallback: if not in a GameScene, apply enhanced effects at scene level
+        // Inner glow for impact point
+        let glow = SKShapeNode(circleOfRadius: glowRadiusBase * (0.8 + clamped * 0.6))
+        glow.fillColor = UIColor(red: 0.4, green: 0.9, blue: 0.4, alpha: 0.9)
+        glow.strokeColor = .clear
+        glow.position = effectPosition
+        glow.zPosition = 90
+        scene.addChild(glow)
+        
+        let glowAction = SKAction.sequence([
+            SKAction.group([
+                SKAction.scale(to: 3.0 * glowScale, duration: rippleDuration * 0.375),
+                SKAction.fadeOut(withDuration: rippleDuration * 0.375)
+            ]),
+            SKAction.removeFromParent()
+        ])
+        glow.run(glowAction)
+        
+        // Enhanced ripples emanating from landing spot
+        for i in 1...5 {
+            let ripple = SKShapeNode(circleOfRadius: 12)
+            
+            // Color variation for depth
+            let alphaMod = 1.0 - (CGFloat(i - 1) * 0.1)
+            ripple.strokeColor = UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: alphaMod)
             ripple.fillColor = .clear
-            ripple.lineWidth = 3
-            ripple.position = position
+            ripple.lineWidth = max(0.5, (lineWidthBase - CGFloat(i)) * (0.8 + clamped * 0.6))
+            ripple.position = effectPosition
             ripple.zPosition = 90
             scene.addChild(ripple)
             
-            let delay = Double(i) * 0.08
-            let base = cachedLandingRippleActionBase ?? SKAction.sequence([
-                SKAction.group([
-                    SKAction.scale(to: CGFloat(4 + i), duration: 0.5),
-                    SKAction.fadeOut(withDuration: 0.5)
-                ]),
+            let delay = Double(i - 1) * (0.08 + (1.0 - Double(clamped)) * 0.06)
+            let targetScale = rippleScaleBase + CGFloat(i) + rippleScaleExtra * clamped
+            
+            // Animate line width thinning
+            let lineWidthAction = SKAction.customAction(withDuration: rippleDuration) { node, elapsedTime in
+                if let shape = node as? SKShapeNode {
+                    let progress = CGFloat(elapsedTime) / CGFloat(rippleDuration)
+                    let startWidth = max(0.5, (lineWidthBase - CGFloat(i)) * (0.8 + clamped * 0.6))
+                    let endWidth: CGFloat = 0.5
+                    shape.lineWidth = startWidth - (startWidth - endWidth) * progress
+                }
+            }
+            
+            let scaleAction2 = SKAction.scale(to: targetScale, duration: rippleDuration)
+            scaleAction2.timingMode = .easeOut
+            let rippleAnimation = SKAction.group([
+                scaleAction2,
+                SKAction.fadeOut(withDuration: rippleDuration),
+                lineWidthAction
+            ])
+            
+            let fullAction = SKAction.sequence([
+                SKAction.wait(forDuration: delay),
+                rippleAnimation,
                 SKAction.removeFromParent()
             ])
-            let rippleAction = SKAction.sequence([
-                SKAction.wait(forDuration: delay),
-                base
-            ])
-            ripple.run(rippleAction)
+            
+            ripple.run(fullAction)
         }
         
-        // Small splash particles
-        for i in 0..<8 {
-            let angle = CGFloat(i) * (CGFloat.pi * 2 / 8)
-            let particle = SKShapeNode(circleOfRadius: 4)
-            particle.fillColor = .white
-            particle.strokeColor = .cyan
-            particle.lineWidth = 1
-            particle.position = position
+        // Enhanced splash particles
+        for i in 0..<particleCount {
+            let angle = CGFloat(i) * (CGFloat.pi * 2 / CGFloat(particleCount))
+            let particle = SKShapeNode(circleOfRadius: 4 + clamped * 3)
+            particle.fillColor = UIColor(red: 0.9, green: 1.0, blue: 0.9, alpha: 1.0)
+            particle.strokeColor = UIColor(red: 0.3, green: 0.9, blue: 0.9, alpha: 1.0)
+            particle.lineWidth = 2
+            particle.position = effectPosition
             particle.zPosition = 91
             particle.zRotation = angle
             scene.addChild(particle)
             
-            let base = cachedLandingParticleAction ?? SKAction.sequence([
+            let distance: CGFloat = particleDistanceBase + particleDistanceExtra * clamped + CGFloat(i % 3) * 10
+            
+            let moveAction2 = SKAction.moveBy(x: distance * cos(angle), y: distance * sin(angle), duration: particleDuration)
+            moveAction2.timingMode = .easeOut
+            let particleAction = SKAction.sequence([
+                SKAction.wait(forDuration: Double(i) * (0.015 + (1.0 - Double(clamped)) * 0.01)),
                 SKAction.group([
-                    SKAction.moveBy(x: 25, y: 0, duration: 0.4),
-                    SKAction.fadeOut(withDuration: 0.4),
-                    SKAction.scale(to: 0.1, duration: 0.4)
+                    moveAction2,
+                    SKAction.fadeOut(withDuration: particleDuration),
+                    SKAction.scale(to: 0.1, duration: particleDuration)
                 ]),
                 SKAction.removeFromParent()
             ])
-            particle.run(base)
+            particle.run(particleAction)
         }
     }
     
@@ -343,7 +447,7 @@ class EffectsManager {
         for i in 0..<8 {
             let angle = CGFloat(i) * (CGFloat.pi * 2 / 8)
             let particle = SKShapeNode(circleOfRadius: 8)
-            particle.fillColor = .orange
+            particle.fillColor = .red
             particle.strokeColor = .red
             particle.lineWidth = 2
             particle.position = position

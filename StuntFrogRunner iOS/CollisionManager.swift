@@ -18,6 +18,10 @@ class CollisionManager {
     
     private var rippleCounter: Int = 0
     
+    // PERFORMANCE: Cache for reducing expensive collision calculations
+    private var lastLogCollisionFrame: [ObjectIdentifier: Int] = [:]
+    private let collisionCacheFrames = 3 // Skip collision checks for N frames after processing
+    
     init(scene: SKScene, uiManager: UIManager? = nil, frogController: FrogController? = nil) {
         self.scene = scene
         self.uiManager = uiManager
@@ -56,41 +60,72 @@ class CollisionManager {
                 if let targetPad = enemy.targetLilyPad {
                     targetPad.removeEnemyType(enemy.type)
                 }
+                // Clean up collision cache for logs
+                if enemy.type == .log {
+                    let key = ObjectIdentifier(enemy)
+                    lastLogCollisionFrame.removeValue(forKey: key)
+                }
                 enemy.node.removeFromParent()
                 return true
             }
             
-            if enemy.type == .snake, let targetPad = enemy.targetLilyPad {
-                let dx = enemy.position.x - targetPad.position.x
-                if (enemy.speed > 0 && dx > targetPad.radius + 20) || (enemy.speed < 0 && dx < -(targetPad.radius + 20)) {
-                    targetPad.removeEnemyType(enemy.type)
-                    enemy.targetLilyPad = nil
+            if enemy.type == .snake {
+                // Horizontal movement with subtle vertical variance
+                let time = CGFloat(CACurrentMediaTime())
+                // Much smaller amplitude for subtle up/down variance
+                let varianceAmplitude: CGFloat = 3.0   // small up/down variance
+                let varianceFrequency: CGFloat = 1.8    // gentle frequency
+
+                if let targetPad = enemy.targetLilyPad {
+                    // Maintain occupancy only while the snake is near the pad horizontally; otherwise release
+                    let dx = enemy.position.x - targetPad.position.x
+                    if (enemy.speed > 0 && dx > targetPad.radius + 20) || (enemy.speed < 0 && dx < -(targetPad.radius + 20)) {
+                        targetPad.removeEnemyType(enemy.type)
+                        enemy.targetLilyPad = nil
+                    } else {
+                        // Keep the snake near the pad's Y with small variance
+                        let baseY = targetPad.position.y
+                        let varianceOffset = sin(time * varianceFrequency) * varianceAmplitude
+                        enemy.position.y = baseY + varianceOffset
+                        enemy.node.position.y = enemy.position.y
+                    }
+                } else {
+                    // No target pad: add small variance around current baseline
+                    let baseline = enemy.position.y
+                    let varianceOffset = sin(time * varianceFrequency) * varianceAmplitude
+                    enemy.node.position.y = baseline + varianceOffset
+                    enemy.position.y = enemy.node.position.y
                 }
             }
             
             if enemy.type == .snake || enemy.type == .log {
+                // Maintain horizontal motion
                 enemy.position.x += enemy.speed
                 enemy.node.position.x = enemy.position.x
-                
+
                 if enemy.type == .log {
-                    self.handleLogLilyPadCollisions(log: enemy, lilyPads: &lilyPads)
+                    // PERFORMANCE: Use cached collision checking to reduce per-frame overhead
+                    let key = ObjectIdentifier(enemy)
+                    let lastFrame = lastLogCollisionFrame[key] ?? 0
+                    let currentFrame = rippleCounter
+                    
+                    // Only process collision every few frames for performance
+                    if currentFrame - lastFrame >= collisionCacheFrames {
+                        self.handleLogLilyPadCollisions(log: enemy, lilyPads: &lilyPads)
+                        lastLogCollisionFrame[key] = currentFrame
+                    }
                 }
-                
-                if rippleCounter % 15 == 0 {
+
+                // Reduced ripple frequency for performance
+                if rippleCounter % 30 == 0 { // Less frequent ripples
                     if let gameScene = scene as? GameScene {
-                        let amplitude: CGFloat = enemy.type == .log ? 0.018 : 0.012
-                        let frequency: CGFloat = enemy.type == .log ? 6.0 : 8.0
+                        let amplitude: CGFloat = enemy.type == .log ? 0.018 : 0.008
+                        let frequency: CGFloat = enemy.type == .log ? 6.0 : 9.0
                         gameScene.worldManager.addRipple(at: enemy.position, amplitude: amplitude, frequency: frequency)
                     }
                 }
-                
-                if enemy.type == .snake, let targetPad = enemy.targetLilyPad {
-                    let dx = enemy.position.x - targetPad.position.x
-                    if (enemy.speed > 0 && dx >= -10 && dx <= 10) || (enemy.speed < 0 && dx >= -10 && dx <= 10) {
-                        enemy.position.y = targetPad.position.y
-                        enemy.node.position.y = enemy.position.y
-                    }
-                }
+
+                // Do not snap snake Y to pad here; vertical motion is handled by the jump logic above
             } else if enemy.type == .bee {
                 let time = CGFloat(CACurrentMediaTime())
                 if let targetPad = enemy.targetLilyPad {
@@ -123,7 +158,7 @@ class CollisionManager {
                                 if let gameScene = scene as? GameScene {
                                     screenPos = gameScene.convert(enemy.position, from: gameScene.worldManager.worldNode)
                                 }
-                                // Direction based on log movement: right-moving ~0 rad, left-moving ~Ãâ‚¬ rad
+                                // Direction based on log movement: right-moving ~0 rad, left-moving ~ÃƒÂÃ¢â€šÂ¬ rad
                                 let dir: CGFloat = enemy.speed >= 0 ? 0.0 : .pi
                                 self.uiManager?.playAxeChopEffect(at: screenPos, direction: dir)
                                 HapticFeedbackManager.shared.impact(.heavy)
@@ -134,13 +169,16 @@ class CollisionManager {
                             enemy.node.removeFromParent()
                             return true
                         case .hitOnly:
-                            // No destruction (e.g., no axe) Ã¢â‚¬â€ perform the legacy bounce behavior ONCE and then remove the log to prevent repeat bonks
+                            // No destruction (e.g., no axe) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â perform the legacy bounce behavior ONCE and then remove the log to prevent repeat bonks
                             onLogBounce?(enemy)
                             // Clean up any lily pad occupancy
                             if let targetPad = enemy.targetLilyPad {
                                 targetPad.removeEnemyType(enemy.type)
                                 enemy.targetLilyPad = nil
                             }
+                            // Clean up collision cache for logs
+                            let key = ObjectIdentifier(enemy)
+                            lastLogCollisionFrame.removeValue(forKey: key)
                             // Remove the log node from the scene and signal removal from the enemies array
                             enemy.node.removeFromParent()
                             return true
@@ -233,16 +271,26 @@ class CollisionManager {
         }
     }
     
-    // MARK: - Log-Lily Pad Physics
+    // MARK: - Optimized Log-Lily Pad Physics
     
     private func handleLogLilyPadCollisions(log: Enemy, lilyPads: inout [LilyPad]) {
         guard let scene = scene else { return }
         
         let logHalfWidth = GameConfig.logWidth / 2
         let logHalfHeight = GameConfig.logHeight / 2
+        let logRadius: CGFloat = 48.0
         
-        for pad in lilyPads {
-            // AABB vs circle
+        // PERFORMANCE OPTIMIZATION: Spatial filtering
+        // Only check lily pads within a reasonable distance (both X and Y)
+        let maxInteractionDistance: CGFloat = 300.0
+        let candidatePads = lilyPads.filter { pad in
+            let dx = abs(pad.position.x - log.position.x)
+            let dy = abs(pad.position.y - log.position.y)
+            return dx < maxInteractionDistance && dy < maxInteractionDistance
+        }
+        
+        for pad in candidatePads {
+            // AABB vs circle collision detection
             let closestX = max(log.position.x - logHalfWidth,
                                min(pad.position.x, log.position.x + logHalfWidth))
             let closestY = max(log.position.y - logHalfHeight,
@@ -250,40 +298,40 @@ class CollisionManager {
             
             let dx = pad.position.x - closestX
             let dy = pad.position.y - closestY
-            let distance = sqrt(dx * dx + dy * dy)
+            let distanceSquared = dx * dx + dy * dy // Avoid sqrt when possible
             
             let collisionDistance = pad.radius + 5
+            let collisionDistanceSquared = collisionDistance * collisionDistance
             
-            if distance < collisionDistance {
+            if distanceSquared < collisionDistanceSquared {
+                let distance = sqrt(distanceSquared) // Only calculate sqrt when we need it
+                
                 // Normalize; protect against zero
                 let invDist = distance > 0.001 ? 1.0 / distance : 0.0
                 let nx = dx * invDist
                 
-                // Stronger, horizontal-only shove so logs can squeeze between pads
-                // Scale with overlap depth; allow a higher clamp than before
-                let base: CGFloat = 0.7                        // was 0.45
-                let speedScale = min(1.0, abs(log.speed) / 2.5) // a bit more responsive to speed
+                // Optimized force calculation - horizontal only push
+                let baseForce: CGFloat = 0.7
+                let speedScale = min(1.0, abs(log.speed) / 2.5)
                 let penetration = (collisionDistance - distance)
-                // Allow full effect at 60% of pad radius overlap, not 40%
                 let penetrationScale = min(1.0, penetration / (pad.radius * 0.6))
-                // Higher clamp to enable noticeable push
-                let forceStrength = min(1.4, base * speedScale * (0.5 + 0.5 * penetrationScale))
+                let forceStrength = min(1.4, baseForce * speedScale * (0.5 + 0.5 * penetrationScale))
                 
-                let force = CGPoint(x: nx * forceStrength, y: 0.0)
-                pad.applyForce(force)
+                // Apply horizontal-only force for better gameplay
+                pad.applyForce(CGPoint(x: nx * forceStrength, y: 0.0))
                 
-                // Maintain contact a touch longer so the wedge feels real
-                // Slight slowdown (gentle) while overlapping
-                let slowFactor: CGFloat = 0.94   // was 0.92; a bit less slowdown to keep logs moving
-                log.speed *= slowFactor
+                // Slight log slowdown during collision
+                log.speed *= 0.94
                 
-                // Optional: occasional ripple
-                if let gameScene = scene as? GameScene, rippleCounter % 18 == 0 {
-                    gameScene.worldManager.addRipple(
-                        at: CGPoint(x: closestX, y: closestY),
-                        amplitude: 0.012,
-                        frequency: 7.0
-                    )
+                // Reduced ripple frequency for performance
+                if rippleCounter % 30 == 0 { // Less frequent ripples
+                    if let gameScene = scene as? GameScene {
+                        gameScene.worldManager.addRipple(
+                            at: CGPoint(x: closestX, y: closestY),
+                            amplitude: 0.012,
+                            frequency: 7.0
+                        )
+                    }
                 }
             }
         }
@@ -318,6 +366,15 @@ class CollisionManager {
     }
     
     func updateLilyPads(lilyPads: inout [LilyPad], worldOffset: CGFloat, screenHeight: CGFloat, frogPosition: CGPoint) {
+        // Update moving behavior for all lily pads
+        for pad in lilyPads {
+            if pad.type == .moving {
+                // Get screen width from the scene if possible, fallback to reasonable default
+                let screenWidth = (scene as? GameScene)?.size.width ?? 1024
+                pad.updateMoving(screenWidth: screenWidth)
+            }
+        }
+        
         // Remove lily pads that scrolled off bottom
         lilyPads.removeAll { pad in
             let screenY = pad.position.y + worldOffset
@@ -407,3 +464,4 @@ class CollisionManager {
         })
     }
 }
+

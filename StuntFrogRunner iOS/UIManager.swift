@@ -4,6 +4,7 @@
 //
 
 import SpriteKit
+import UIKit
 
 // Minimal definition to satisfy UI usage in this file
 enum AbilityType: CaseIterable {
@@ -85,6 +86,8 @@ class UIManager {
     var healthIcons: [SKLabelNode] = []
     var pauseButton: SKLabelNode?
     
+ 
+    
     // Power-up indicators
     var superJumpIndicator: SKLabelNode?
     var rocketIndicator: SKLabelNode?
@@ -103,6 +106,30 @@ class UIManager {
     
     init(scene: SKScene) {
         self.scene = scene
+    }
+    
+    // MARK: - Haptics & Button Animations
+    private func triggerTapHaptic() {
+        // Use light impact for subtle feedback
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+    }
+
+    func animateButtonPress(_ node: SKNode) {
+        // Slight shrink to 0.95 with easeOut
+        let press = SKAction.scale(to: 0.95, duration: 0.08)
+        press.timingMode = .easeOut
+        node.run(press, withKey: "pressScale")
+        triggerTapHaptic()
+    }
+
+    func animateButtonRelease(_ node: SKNode) {
+        // Return to normal scale with a tiny bounce
+        let up1 = SKAction.scale(to: 1.02, duration: 0.10)
+        up1.timingMode = .easeOut
+        let up2 = SKAction.scale(to: 1.0, duration: 0.08)
+        up2.timingMode = .easeIn
+        node.run(SKAction.sequence([up1, up2]), withKey: "pressScale")
     }
     
     func setupUI(sceneSize: CGSize) {
@@ -287,8 +314,9 @@ class UIManager {
         
         guard let scene = scene else { return }
         
-        let indicator = SKLabelNode(text: "ðŸš€ ROCKET: 10s")
+        let indicator = SKLabelNode(text: "ROCKET: 10s")
         indicator.fontSize = 24
+        indicator.fontName = "Arial-BoldMT"
         indicator.fontColor = .orange
         indicator.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height - 140)
         indicator.zPosition = 200
@@ -369,6 +397,16 @@ class UIManager {
         starProgressBGTop?.isHidden = !visible
         starProgressFillTop?.isHidden = !visible
         
+        // Keep temporary indicators in sync with HUD visibility
+        superJumpIndicator?.isHidden = !visible
+        rocketIndicator?.isHidden = !visible
+        glideIndicator?.isHidden = !visible
+        
+        // Control bottom HUD visibility
+        if let gameScene = scene as? GameScene {
+            gameScene.hudController?.setHUDVisible(visible)
+        }
+        
         // When main UI is visible, menus should be hidden, and vice versa
         menuLayer?.isHidden = visible
         abilityLayer?.isHidden = visible
@@ -378,57 +416,57 @@ class UIManager {
     func showMainMenu(sceneSize: CGSize) {
         // Remove any existing menus to prevent stacking
         hideMenus()
-        guard let scene = scene else { return }
-
-        // Hide HUD while menu is visible
         setUIVisible(false)
+        guard let scene = scene else { return }
 
         let menu = SKNode()
         menu.zPosition = 300
         menu.name = "menuLayer"
-        
-        // Fullscreen dim background
-        let backdrop = SKShapeNode(rectOf: sceneSize)
-        backdrop.fillColor = UIColor.black.withAlphaComponent(0.6)
-        backdrop.strokeColor = .clear
-        backdrop.position = CGPoint(x: sceneSize.width/2, y: sceneSize.height/2)
-        menu.addChild(backdrop)
 
-        // MAIN MENU Title
-        let titleButton = createButton(text: "MAIN MENU", name: "mainMenuTitle", size: CGSize(width: 300, height: 45))
-        if let _ = titleButton.childNode(withName: "background") as? SKSpriteNode, let label = titleButton.childNode(withName: "label") as? SKLabelNode {
-            label.fontColor = .white
-            label.fontSize = 22
+        // Title background image
+        let titleTexture = SKTexture(imageNamed: "title.png")
+        let titleBG = SKSpriteNode(texture: titleTexture)
+        titleBG.name = "titleBackground"
+        titleBG.zPosition = -1 // behind menu contents
+        titleBG.position = CGPoint(x: sceneSize.width/2, y: sceneSize.height/2)
+        // Scale to fill the screen while preserving aspect ratio
+        if titleTexture.size() != .zero {
+            let texSize = titleTexture.size()
+            let xScale = sceneSize.width / texSize.width
+            let yScale = sceneSize.height / texSize.height
+            let scale = max(xScale, yScale)
+            titleBG.xScale = scale
+            titleBG.yScale = scale
+        } else {
+            // Fallback size in case texture is missing
+            titleBG.size = sceneSize
         }
-        titleButton.position = CGPoint(x: sceneSize.width/2, y: sceneSize.height - 150)
-        menu.addChild(titleButton)
+        menu.addChild(titleBG)
 
-        let buttons: [(text: String, name: String, emoji: String)] = [
-            ("Play Game", "playGameButton", "â–·"),
-            ("Profile", "profileButton", "ðŸ‘¤"),
-            ("Leaderboard", "leaderboardButton", "ðŸ†"),
-            ("Settings", "settingsButton", "âš™ï¸"),
-            ("Audio", "audioButton", "ðŸ”Š"),
-            ("Exit", "exitButton", "â†’")
-        ]
+        
 
-        var currentY = titleButton.position.y - 45 // Start position for the first button
-        let buttonSpacing: CGFloat = 10
+        // Top-centered title text image (from titleText.svg in assets)
+        let titleTextTexture = SKTexture(imageNamed: "titleText")
+        if titleTextTexture.size() != .zero {
+            let titleTextSprite = SKSpriteNode(texture: titleTextTexture)
+            // Fit within 70% of the scene width, cap height to 180pt
+            let maxWidth = sceneSize.width * 0.95
+            let maxHeight: CGFloat = 600
+            let texSize = titleTextTexture.size()
+            let widthScale = maxWidth / texSize.width
+            let heightScale = maxHeight / texSize.height
+            let scale = min(widthScale, heightScale)
+            titleTextSprite.size = CGSize(width: texSize.width * scale, height: texSize.height * scale)
+            titleTextSprite.position = CGPoint(x: sceneSize.width/2, y: sceneSize.height - 340)
+            titleTextSprite.zPosition = 1 // above backdrop/titleBG within menu
+            menu.addChild(titleTextSprite)
+        }
+
+        // Single centered Play button
         let buttonSize = CGSize(width: sceneSize.width * 0.75, height: 60)
-        
-        for (index, buttonInfo) in buttons.enumerated() {
-            let button = createButton(text: buttonInfo.text, name: buttonInfo.name, size: buttonSize)
-            button.position = CGPoint(x: sceneSize.width/2, y: currentY - CGFloat(index) * (buttonSize.height + buttonSpacing))
-            menu.addChild(button)
-        }
-        
-        // "Tap to select an option" subtitle
-        let subtitle = SKLabelNode(text: "Tap to select an option")
-        subtitle.fontName = "Arial-BoldMT"
-        subtitle.fontSize = 18
-        subtitle.fontColor = UIColor.white.withAlphaComponent(0.7)
-        subtitle.position = CGPoint(x: sceneSize.width/2, y: 30)
-        menu.addChild(subtitle)
+        let playButton = createButton(text: "Play", name: "playGameButton", size: buttonSize)
+        playButton.position = CGPoint(x: sceneSize.width/2, y: 100)
+        menu.addChild(playButton)
 
         // Assign and add
         menuLayer = menu
@@ -487,6 +525,7 @@ class UIManager {
     
     func showGameOverMenu(sceneSize: CGSize, score: Int, highScore: Int, isNewHighScore: Bool, reason: GameOverReason) {
         hideMenus()
+        setUIVisible(false)
         guard let scene = scene else { return }
         
         let menu = SKNode()
@@ -546,7 +585,7 @@ class UIManager {
         var buttonStartY = highScoreText.position.y - 80
         
         if isNewHighScore {
-            let badge = SKLabelNode(text: "ðŸ† NEW HIGH SCORE!")
+            let badge = SKLabelNode(text: "NEW HIGH SCORE!")
             badge.fontSize = 20
             badge.fontColor = UIColor.yellow
             badge.fontName = "Arial-BoldMT"
@@ -579,26 +618,50 @@ class UIManager {
     func showAbilitySelection(sceneSize: CGSize) {
         hideMenus()
         guard let scene = scene else { return }
-        setUIVisible(false)
+        // Don't hide UI completely - we want the bottom HUD to remain visible
+        // Only hide top UI elements
+        pauseButton?.isHidden = true
+        scoreLabel?.isHidden = true
+        starIconTop?.isHidden = true
+        starProgressBGTop?.isHidden = true
+        starProgressFillTop?.isHidden = true
         
+        // Keep temporary indicators visible but dimmed
+        superJumpIndicator?.isHidden = true
+        rocketIndicator?.isHidden = true
+        glideIndicator?.isHidden = true
+    
+        self.presentAbilityMenu(sceneSize: sceneSize)
+    }
+    
+    private func presentAbilityMenu(sceneSize: CGSize) {
+        guard let scene = scene else { return }
         let menu = SKNode()
         menu.zPosition = 300
         menu.name = "abilityLayer"
         
-        menu.setScale(0.7)
-        menu.alpha = 0.0
+        // Calculate menu height to leave space for bottom HUD (approximately 120pt from bottom)
+        let hudHeight: CGFloat = 120
+        let menuHeight = sceneSize.height - hudHeight
         
-        let bg = SKShapeNode(rectOf: sceneSize)
-        bg.fillColor = UIColor.black.withAlphaComponent(0.92)
+        menu.alpha = 1.0
+        menu.position = CGPoint(x: 0, y: -menuHeight)
+        
+        // Create a smaller background that doesn't cover the bottom HUD
+        let bg = SKShapeNode(rectOf: CGSize(width: sceneSize.width, height: menuHeight))
+        bg.fillColor = UIColor.black.withAlphaComponent(0.0) // Start invisible
         bg.strokeColor = .clear
-        bg.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2)
+        bg.position = CGPoint(x: sceneSize.width / 2, y: menuHeight / 2)
+        bg.name = "background"
+        bg.zPosition = 0
         menu.addChild(bg)
         
         let title = SKLabelNode(text: "Choose Your Power-Up!")
         title.fontSize = 28
         title.fontColor = UIColor.yellow
         title.fontName = "Arial-BoldMT"
-        title.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height - 150)
+        title.position = CGPoint(x: sceneSize.width / 2, y: menuHeight - 80) // Adjust for smaller menu
+        title.zPosition = 12
         menu.addChild(title)
         
         // Determine allowed abilities based on score using HUDConfigurable logic
@@ -667,16 +730,38 @@ class UIManager {
         
         for (index, ability) in abilities.enumerated() {
             let button = createAbilityButton(ability: ability, name: "ability_\(ability)")
-            let baseY = sceneSize.height / 2 + 40
+            let baseY = menuHeight / 2 + 40 // Center vertically in the reduced menu height
             button.position = CGPoint(x: sceneSize.width / 2 - 20, y: baseY - CGFloat(index) * 120)
             menu.addChild(button)
         }
         
-        let grow = SKAction.scale(to: 1.0, duration: 0.22)
-        grow.timingMode = SKActionTimingMode.easeOut
-        let fade = SKAction.fadeAlpha(to: 1.0, duration: 0.18)
-        fade.timingMode = SKActionTimingMode.easeOut
-        menu.run(SKAction.group([grow, fade]))
+        // Slide up from bottom over 1.0s, with background fading in, and disable taps during animation
+        let duration: TimeInterval = 1.0
+        // Replace single slideUp action with bounce sequence:
+        let slideUp = SKAction.moveTo(y: 8, duration: duration)
+        slideUp.timingMode = .easeOut
+        let dip = SKAction.moveTo(y: -4, duration: 0.08)
+        dip.timingMode = .easeIn
+        let settle = SKAction.moveTo(y: 0, duration: 0.12)
+        settle.timingMode = .easeOut
+        let sequence = SKAction.sequence([slideUp, dip, settle])
+  
+        // Background fade to target alpha over same duration
+        if let background = menu.childNode(withName: "background") as? SKShapeNode {
+            let targetAlpha: CGFloat = 0.92
+            let bgFade = SKAction.customAction(withDuration: duration) { node, elapsed in
+                let progress = max(0, min(1, elapsed / duration))
+                if let shape = node as? SKShapeNode {
+                    shape.fillColor = UIColor.black.withAlphaComponent(targetAlpha * progress)
+                }
+            }
+            bgFade.timingMode = .easeOut
+            background.run(bgFade)
+        }
+  
+        // Removed: menu.isUserInteractionEnabled = false
+        // Removed: menu.run(slideUp) { [weak self] in menu.isUserInteractionEnabled = true }
+        menu.run(sequence)
         
         abilityLayer = menu
         scene.addChild(menu)
@@ -687,6 +772,23 @@ class UIManager {
         abilityLayer?.removeFromParent()
         menuLayer = nil
         abilityLayer = nil
+        
+        // Restore all UI elements to visible
+        pauseButton?.isHidden = false
+        scoreLabel?.isHidden = false
+        starIconTop?.isHidden = false
+        starProgressBGTop?.isHidden = false
+        starProgressFillTop?.isHidden = false
+        
+        // Restore temporary indicators if they were active
+        superJumpIndicator?.isHidden = false
+        rocketIndicator?.isHidden = false
+        glideIndicator?.isHidden = false
+        
+        // Ensure bottom HUD stays visible
+        if let gameScene = scene as? GameScene {
+            gameScene.hudController?.setHUDVisible(true)
+        }
     }
     
     private func createButton(text: String, name: String, size: CGSize = CGSize(width: 300, height: 60)) -> SKNode {
@@ -711,6 +813,10 @@ class UIManager {
         label.zPosition = 2
         button.addChild(label)
 
+        // Mark tappable area and default scale for animations
+        button.setScale(1.0)
+        bg.name = "tapTarget" // so touch handlers can hit-test the sprite easily
+
         return button
     }
     
@@ -722,6 +828,7 @@ class UIManager {
         bg.fillColor = UIColor(red: 0.15, green: 0.15, blue: 0.25, alpha: 1.0)
         bg.strokeColor = UIColor.yellow
         bg.lineWidth = 4
+        bg.zPosition = 10
         button.addChild(bg)
         
         
@@ -732,6 +839,7 @@ class UIManager {
             let iconSprite = SKSpriteNode(texture: iconTexture)
             iconSprite.size = CGSize(width: 45, height: 45)
             iconSprite.position = CGPoint(x: -130, y: 0)
+            iconSprite.zPosition = 11
             button.addChild(iconSprite)
         } else {
             // Fallback to emoji if PNG not available
@@ -739,6 +847,7 @@ class UIManager {
             emoji.fontSize = 45
             emoji.position = CGPoint(x: -130, y: 0)
             emoji.verticalAlignmentMode = SKLabelVerticalAlignmentMode.center
+            emoji.zPosition = 11
             button.addChild(emoji)
         }
         
@@ -748,6 +857,7 @@ class UIManager {
         titleLabel.fontName = "Arial-BoldMT"
         titleLabel.position = CGPoint(x: -40, y: 18)
         titleLabel.horizontalAlignmentMode = SKLabelHorizontalAlignmentMode.left
+        titleLabel.zPosition = 12
         button.addChild(titleLabel)
         
         let maxTextWidth: CGFloat = 220
@@ -761,8 +871,13 @@ class UIManager {
             horizontalAlignment: .left
         )
         wrapped.position = CGPoint(x: -40, y: -18)
+        wrapped.zPosition = 12
         button.addChild(wrapped)
         
+        // Prepare for tap animations
+        button.setScale(1.0)
+        bg.name = "tapTarget"
+
         return button
     }
 
@@ -919,6 +1034,19 @@ class UIManager {
         rocketLandButton?.removeAllActions()
         rocketLandButton?.removeFromParent()
         rocketLandButton = nil
+        // Also hide the rocket timer text when landing
+        hideRocketIndicator()
+    }
+
+    // MARK: - External convenience for GameScene touch handling
+    func handleButtonPress(node: SKNode?) {
+        guard let node = node else { return }
+        animateButtonPress(node)
+    }
+
+    func handleButtonRelease(node: SKNode?) {
+        guard let node = node else { return }
+        animateButtonRelease(node)
     }
 }
 
