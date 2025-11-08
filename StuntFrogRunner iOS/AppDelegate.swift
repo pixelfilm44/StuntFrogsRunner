@@ -7,6 +7,14 @@
 
 import UIKit
 
+// MARK: - Game Lifecycle Notifications
+extension Notification.Name {
+    static let pauseGame = Notification.Name("PauseGame")
+    static let saveGameState = Notification.Name("SaveGameState")
+    static let prepareGameResume = Notification.Name("PrepareGameResume")
+    static let appBecameActive = Notification.Name("AppBecameActive")
+}
+
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
     
@@ -41,20 +49,28 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
     
     func applicationWillResignActive(_ application: UIApplication) {
-        // Pause game when app goes to background
-        NotificationCenter.default.post(name: Notification.Name("PauseGame"), object: nil)
+        print("⏸ AppDelegate: App will resign active - pausing game")
+        // Pause game when app loses focus (switching apps, control center, notifications, etc.)
+        NotificationCenter.default.post(name: .pauseGame, object: nil)
     }
     
     func applicationDidEnterBackground(_ application: UIApplication) {
-        // Save game state if needed
+        print("🌙 AppDelegate: App entered background - ensuring game is paused")
+        // Ensure game is paused and save current state
+        NotificationCenter.default.post(name: .pauseGame, object: nil)
+        NotificationCenter.default.post(name: .saveGameState, object: nil)
     }
     
     func applicationWillEnterForeground(_ application: UIApplication) {
-        // Restore game state if needed
+        print("🌅 AppDelegate: App will enter foreground - preparing to resume")
+        // App is coming back from background, prepare for potential resume
+        NotificationCenter.default.post(name: .prepareGameResume, object: nil)
     }
     
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Resume game or show menu
+        print("▶️ AppDelegate: App became active - ready to resume if appropriate")
+        // App is fully active again - let game decide whether to auto-resume or show pause menu
+        NotificationCenter.default.post(name: .appBecameActive, object: nil)
     }
     
     func applicationWillTerminate(_ application: UIApplication) {

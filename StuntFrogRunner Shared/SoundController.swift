@@ -6,9 +6,14 @@
 
 import AVFoundation
 import SpriteKit
+internal import Combine
 
 /// Manages all audio for the game including background music, sound effects, and audio settings
 class SoundController: ObservableObject {
+
+    private var currentBackgroundTrack: BackgroundMusic? = nil
+    private var isPlayingSpecialTrack: Bool = false
+
     
     // MARK: - Singleton
     static let shared = SoundController()
@@ -31,7 +36,7 @@ class SoundController: ObservableObject {
         didSet { updateMusicVolume() }
     }
     
-    @Published var soundEffectsVolume: Float = 0.8 {
+    @Published var soundEffectsVolume: Float = 0.2 {
         didSet { updateSoundEffectsVolume() }
     }
     
@@ -42,6 +47,7 @@ class SoundController: ObservableObject {
         case frogLand = "frog_land"
         case frogSplash = "frog_splash"
         case frogCroak = "frog_croak"
+        case frogSlide = "frog_slide"  // New ice sliding sound
         
         // Slingshot
         case slingshotPull = "slingshot_pull"
@@ -50,6 +56,8 @@ class SoundController: ObservableObject {
         
         // Environment
         case waterRipple = "water_ripple"
+        case iceSlide = "ice_slide"  // New ice sliding sound
+        case iceCrack = "ice_crack"  // New ice interaction sound
         case lilyPadBounce = "lily_pad_bounce"
         case collectPowerup = "collect_powerup"
         case backgroundNature = "nature_ambience"
@@ -65,6 +73,8 @@ class SoundController: ObservableObject {
         case logHit = "log_hit"
         case turtleShell = "turtle_shell"
         case dangerZone = "danger_zone"
+        case ghostly = "ghostly"
+        case specialReward = "special_collect"
     }
     
     enum BackgroundMusic: String, CaseIterable {
@@ -73,13 +83,17 @@ class SoundController: ObservableObject {
         case gameOver = "game_over_music"
         case peaceful = "peaceful_pond"
         case energetic = "energetic_hopping"
+        case rocketFlight = "rocket_flight_music"
+        case superJump = "super_jump_music"
     }
     
     // MARK: - Initialization
     private init() {
-        audioEngine = AVAudioEngine()
-        setupAudioSession()
-        loadUserPreferences()
+        print("🎵 Initializing SoundController...")
+        self.audioEngine = AVAudioEngine()
+        self.setupAudioSession()
+        self.loadUserPreferences()
+        print("🎵 SoundController initialized successfully")
     }
     
     // MARK: - Audio Session Setup
@@ -87,14 +101,20 @@ class SoundController: ObservableObject {
         do {
             try AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: [.mixWithOthers])
             try AVAudioSession.sharedInstance().setActive(true)
+            print("✅ Audio session setup successful")
         } catch {
-            print("Failed to setup audio session: \(error.localizedDescription)")
+            print("❌ Failed to setup audio session: \(error.localizedDescription)")
         }
     }
     
     // MARK: - Background Music Management
     func playBackgroundMusic(_ music: BackgroundMusic, fadeIn: Bool = true) {
+        print("🎼 playBackgroundMusic requested: \(music.rawValue), fadeIn: \(fadeIn), isMusicEnabled: \(isMusicEnabled)")
         guard isMusicEnabled else { return }
+        if currentBackgroundTrack == music {
+            print("ℹ️ Requested music is already playing: \(music.rawValue)")
+            return
+        }
         
         // Stop current music
         if let currentPlayer = backgroundMusicPlayer {
@@ -112,6 +132,7 @@ class SoundController: ObservableObject {
     }
     
     private func startNewMusic(_ music: BackgroundMusic) {
+        print("🎼 startNewMusic requested: \(music.rawValue)")
         guard let url = Bundle.main.url(forResource: music.rawValue, withExtension: "mp3") else {
             print("Could not find music file: \(music.rawValue).mp3")
             return
@@ -121,7 +142,9 @@ class SoundController: ObservableObject {
             backgroundMusicPlayer = try AVAudioPlayer(contentsOf: url)
             backgroundMusicPlayer?.numberOfLoops = -1 // Loop infinitely
             backgroundMusicPlayer?.volume = isMusicEnabled ? musicVolume : 0.0
-            backgroundMusicPlayer?.play()
+            let didPlay = backgroundMusicPlayer?.play() ?? false
+            currentBackgroundTrack = music
+            print("🎼 Now playing: \(music.rawValue), didPlay: \(didPlay), volume: \(backgroundMusicPlayer?.volume ?? -1)")
         } catch {
             print("Error playing background music: \(error.localizedDescription)")
         }
@@ -133,10 +156,14 @@ class SoundController: ObservableObject {
         if fadeOut {
             fadeOutMusic(player) { [weak self] in
                 self?.backgroundMusicPlayer = nil
+                self?.currentBackgroundTrack = nil
+                self?.isPlayingSpecialTrack = false
             }
         } else {
             player.stop()
             backgroundMusicPlayer = nil
+            currentBackgroundTrack = nil
+            isPlayingSpecialTrack = false
         }
     }
     
@@ -150,10 +177,14 @@ class SoundController: ObservableObject {
     
     // MARK: - Sound Effects Management
     func playSoundEffect(_ effect: SoundEffect, volume: Float? = nil, pitch: Float = 1.0) {
-        guard areSoundEffectsEnabled else { return }
+        print("🔊 Attempting to play sound effect: \(effect.rawValue)")
+        guard areSoundEffectsEnabled else { 
+            print("🔇 Sound effects are disabled")
+            return 
+        }
         
-        guard let url = Bundle.main.url(forResource: effect.rawValue, withExtension: "wav") else {
-            print("Could not find sound effect: \(effect.rawValue).wav")
+        guard let url = Bundle.main.url(forResource: effect.rawValue, withExtension: "mp3") else {
+            print("❌ Could not find sound effect: \(effect.rawValue).mp3")
             return
         }
         
@@ -163,18 +194,24 @@ class SoundController: ObservableObject {
             player.volume = effectiveVolume
             player.enableRate = true
             player.rate = pitch
-            player.play()
+            let didStart = player.play()
+            
+            print("🔊 Sound effect \(effect.rawValue) - Started: \(didStart), Volume: \(effectiveVolume), Pitch: \(pitch)")
+            
+            // Create a unique key to avoid overwriting concurrent sounds
+            let uniqueKey = "\(effect.rawValue)_\(UUID().uuidString.prefix(8))"
             
             // Store reference to prevent deallocation
-            soundEffectPlayers[effect.rawValue] = player
+            soundEffectPlayers[uniqueKey] = player
             
-            // Remove reference after playback
-            DispatchQueue.main.asyncAfter(deadline: .now() + player.duration) { [weak self] in
-                self?.soundEffectPlayers.removeValue(forKey: effect.rawValue)
+            // Remove reference after playback with safety check
+            let duration = player.duration > 0 ? player.duration : 1.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.1) { [weak self] in
+                self?.soundEffectPlayers.removeValue(forKey: uniqueKey)
             }
             
         } catch {
-            print("Error playing sound effect: \(error.localizedDescription)")
+            print("❌ Error playing sound effect: \(error.localizedDescription)")
         }
     }
     
@@ -182,6 +219,11 @@ class SoundController: ObservableObject {
     func playFrogJumpSound(intensity: Float = 1.0) {
         let pitch = 0.8 + (intensity * 0.4) // Vary pitch based on jump intensity
         playSoundEffect(.frogJump, pitch: pitch)
+    }
+    
+    func playFrogLand(intensity: Float = 1.0) {
+        let pitch = 0.9 + (intensity * 0.2) // Vary pitch based on landing intensity
+        playSoundEffect(.frogLand, pitch: pitch)
     }
     
     func playSlingshotSound(pullDistance: Float) {
@@ -193,6 +235,21 @@ class SoundController: ObservableObject {
     func playWaterSplash(severity: Float = 1.0) {
         let volume = soundEffectsVolume * severity
         playSoundEffect(.frogSplash, volume: volume)
+    }
+    
+    func playIceSlide(velocity: Float = 1.0) {
+        let pitch = 0.8 + (velocity * 0.4) // Vary pitch based on sliding speed
+        let volume = soundEffectsVolume * min(1.0, velocity)
+        playSoundEffect(.iceSlide, volume: volume, pitch: pitch)
+    }
+    
+    func playIceCrack() {
+        playSoundEffect(.iceCrack, pitch: Float.random(in: 0.9...1.1))
+    }
+    
+    func playFrogSlide(intensity: Float = 1.0) {
+        let pitch = 0.9 + (intensity * 0.3)
+        playSoundEffect(.frogSlide, pitch: pitch)
     }
     
     func playCollectSound() {
@@ -211,7 +268,7 @@ class SoundController: ObservableObject {
     
     private func updateSoundEffectsVolume() {
         // This affects new sound effects; existing ones keep their volume
-        UserDefaults.standard.set(areSoundEffectsEnabled, forKey: "soundEffectsEnabled")
+        // Don't save areSoundEffectsEnabled since it's always true
         UserDefaults.standard.set(soundEffectsVolume, forKey: "soundEffectsVolume")
     }
     
@@ -237,57 +294,144 @@ class SoundController: ObservableObject {
     
     // MARK: - User Preferences
     private func loadUserPreferences() {
-        isMusicEnabled = UserDefaults.standard.bool(forKey: "musicEnabled")
-        areSoundEffectsEnabled = UserDefaults.standard.bool(forKey: "soundEffectsEnabled")
-        musicVolume = UserDefaults.standard.float(forKey: "musicVolume")
-        soundEffectsVolume = UserDefaults.standard.float(forKey: "soundEffectsVolume")
-        
-        // Set defaults if not previously saved
+        // Load with proper defaults
         if UserDefaults.standard.object(forKey: "musicEnabled") == nil {
             isMusicEnabled = true
+        } else {
+            isMusicEnabled = UserDefaults.standard.bool(forKey: "musicEnabled")
         }
-        if UserDefaults.standard.object(forKey: "soundEffectsEnabled") == nil {
-            areSoundEffectsEnabled = true
-        }
+        
+        // Always enable sound effects - no user preference for this
+        // Clear any existing preference that might be set to false
+        UserDefaults.standard.removeObject(forKey: "soundEffectsEnabled")
+        areSoundEffectsEnabled = true
+        
         if UserDefaults.standard.object(forKey: "musicVolume") == nil {
             musicVolume = 0.7
+        } else {
+            musicVolume = UserDefaults.standard.float(forKey: "musicVolume")
         }
+        
         if UserDefaults.standard.object(forKey: "soundEffectsVolume") == nil {
-            soundEffectsVolume = 0.8
+            soundEffectsVolume = 0.2
+        } else {
+            soundEffectsVolume = UserDefaults.standard.float(forKey: "soundEffectsVolume")
         }
+        
+        print("🎵 Loaded preferences - Music: \(isMusicEnabled), SFX: \(areSoundEffectsEnabled), MusicVol: \(musicVolume), SFXVol: \(soundEffectsVolume)")
     }
     
     func saveUserPreferences() {
         UserDefaults.standard.set(isMusicEnabled, forKey: "musicEnabled")
-        UserDefaults.standard.set(areSoundEffectsEnabled, forKey: "soundEffectsEnabled")
+        // Don't save areSoundEffectsEnabled since it's always true
         UserDefaults.standard.set(musicVolume, forKey: "musicVolume")
         UserDefaults.standard.set(soundEffectsVolume, forKey: "soundEffectsVolume")
     }
     
     // MARK: - Game State Audio Management
     func handleGameStateChange(to newState: GameState) {
+        if isPlayingSpecialTrack {
+            switch newState {
+            case .paused:
+                pauseBackgroundMusic()
+                return
+            case .abilitySelection, .initialUpgradeSelection:
+                // Lower volume but keep current special track
+                backgroundMusicPlayer?.volume = (isMusicEnabled ? musicVolume : 0.0) * 0.5
+                return
+            default:
+                // Ignore other state-driven music changes while a special track is active
+                print("🔒 Special track active (\(currentBackgroundTrack?.rawValue ?? "none")); ignoring state change to \(newState)")
+                return
+            }
+        }
+        
         switch newState {
         case .menu:
+            playBackgroundMusic(.mainMenu)
+        case .initialUpgradeSelection:
+            // Keep menu music playing during initial upgrade selection
             playBackgroundMusic(.mainMenu)
         case .playing:
             playBackgroundMusic(.gameplay)
         case .paused:
             pauseBackgroundMusic()
+        case .abilitySelection:
+            // Keep current music but lower volume
+            backgroundMusicPlayer?.volume = (isMusicEnabled ? musicVolume : 0.0) * 0.5
         case .gameOver:
             playBackgroundMusic(.gameOver)
             playSoundEffect(.gameOver)
         }
     }
     
+    func resumeFromAbilitySelection() {
+        // Restore normal volume when returning from ability selection
+        if isPlayingSpecialTrack {
+            backgroundMusicPlayer?.volume = isMusicEnabled ? musicVolume : 0.0
+        } else {
+            updateMusicVolume()
+        }
+    }
+    
+    // MARK: - Special Ability Audio Management
+    func playRocketFlightMusic() {
+        print("🚀 Playing rocket flight music")
+        isPlayingSpecialTrack = true
+        playBackgroundMusic(.rocketFlight, fadeIn: true)
+    }
+    
+    func playSuperJumpMusic() {
+        print("⚡ Playing super jump music")
+        isPlayingSpecialTrack = true
+        playBackgroundMusic(.superJump, fadeIn: true)
+    }
+    
+    func returnToGameplayMusic() {
+        print("🎮 Returning to normal gameplay music")
+        isPlayingSpecialTrack = false
+        playBackgroundMusic(.gameplay, fadeIn: true)
+    }
+    
+    // MARK: - Explicit Starters (for callers that don't want to rely on state changes)
+    /// Explicitly start gameplay background music and clear any special-track state.
+    func startGameplayMusic() {
+        print("🎮 startGameplayMusic() called explicitly")
+        isPlayingSpecialTrack = false
+        playBackgroundMusic(.gameplay, fadeIn: true)
+    }
+    
+    /// Call this when the frog activates rocket ability
+    func handleRocketAbilityActivated() {
+        playRocketFlightMusic()
+        playSoundEffect(.collectPowerup, pitch: 0.8) // Lower pitch for rocket activation
+    }
+    
+    /// Call this when the frog activates super jump ability
+    func handleSuperJumpAbilityActivated() {
+        playSuperJumpMusic()
+        playSoundEffect(.frogJump, pitch: 1.5) // Higher pitch for super jump
+    }
+    
+    /// Call this when special abilities end
+    func handleSpecialAbilityEnded() {
+        returnToGameplayMusic()
+    }
+    
     // MARK: - Cleanup
     func stopAllAudio() {
         backgroundMusicPlayer?.stop()
         backgroundMusicPlayer = nil
+        currentBackgroundTrack = nil
+        isPlayingSpecialTrack = false
         
-        for (_, player) in soundEffectPlayers {
+        // Safely stop all sound effects
+        let playersToStop = soundEffectPlayers
+        soundEffectPlayers.removeAll()
+        
+        for (_, player) in playersToStop {
             player.stop()
         }
-        soundEffectPlayers.removeAll()
     }
     
     deinit {
@@ -295,7 +439,3 @@ class SoundController: ObservableObject {
     }
 }
 
-// MARK: - GameState Extension
-extension GameState {
-    case menu, playing, paused, gameOver
-}

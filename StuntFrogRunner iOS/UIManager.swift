@@ -5,6 +5,7 @@
 
 import SpriteKit
 import UIKit
+import GameKit
 
 // Minimal definition to satisfy UI usage in this file
 enum AbilityType: CaseIterable {
@@ -79,7 +80,10 @@ extension AbilityType {
     }
 }
 
-class UIManager {
+class UIManager: NSObject {
+    // Set this to your App Store Connect leaderboard identifier
+    var leaderboardID: String = "com.yourcompany.yourapp.leaderboard"
+
     // UI Elements
     var scoreLabel: SKLabelNode?
     var tadpoleLabel: SKLabelNode?
@@ -101,6 +105,7 @@ class UIManager {
     // Menus
     var menuLayer: SKNode?
     var abilityLayer: SKNode?
+    var tutorialModal: SKNode?
     
     weak var scene: SKScene?
     
@@ -137,9 +142,9 @@ class UIManager {
         
         // Score label
         scoreLabel = SKLabelNode(text: "Score: 0")
-        scoreLabel?.fontSize = 22
+        scoreLabel?.fontSize = 18
         scoreLabel?.fontColor = UIColor.white
-        scoreLabel?.fontName = "Arial-BoldMT"
+        scoreLabel?.fontName = "ArialRoundedMTBold"
         scoreLabel?.horizontalAlignmentMode = SKLabelHorizontalAlignmentMode.left
         scoreLabel?.position = CGPoint(x: 20, y: sceneSize.height - 85)
         scoreLabel?.zPosition = 200
@@ -279,10 +284,10 @@ class UIManager {
         
         guard let scene = scene else { return }
         
-        let indicator = SKLabelNode(text: "âš¡ SUPER JUMP!")
+        let indicator = SKLabelNode(text: "SUPER JUMP!")
         indicator.fontSize = 24
         indicator.fontColor = .yellow
-        indicator.fontName = "Arial-BoldMT"
+        indicator.fontName = "ArialRoundedMTBold"
         indicator.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height - 90)
         indicator.zPosition = 200
         
@@ -316,7 +321,7 @@ class UIManager {
         
         let indicator = SKLabelNode(text: "ROCKET: 10s")
         indicator.fontSize = 24
-        indicator.fontName = "Arial-BoldMT"
+        indicator.fontName = "ArialRoundedMTBold"
         indicator.fontColor = .orange
         indicator.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height - 140)
         indicator.zPosition = 200
@@ -352,7 +357,7 @@ class UIManager {
         let indicator = SKLabelNode(text: String(format: "ðŸª‚ GLIDE: %.1fs", duration))
         indicator.fontSize = 28
         indicator.fontColor = .orange
-        indicator.fontName = "Arial-BoldMT"
+        indicator.fontName = "ArialRoundedMTBold"
         indicator.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height - 180)
         indicator.zPosition = 200
         
@@ -465,12 +470,28 @@ class UIManager {
         // Single centered Play button
         let buttonSize = CGSize(width: sceneSize.width * 0.75, height: 60)
         let playButton = createButton(text: "Play", name: "playGameButton", size: buttonSize)
-        playButton.position = CGPoint(x: sceneSize.width/2, y: 100)
+        playButton.position = CGPoint(x: sceneSize.width/2, y: 170)
         menu.addChild(playButton)
+
+        // Add a smaller Leaderboard button below Play (8px spacing)
+        let leaderboardSize = CGSize(width: sceneSize.width * 0.6, height: 48)
+        let leaderboardButton = createButton(text: "Leaderboard", name: "leaderboardButton", size: leaderboardSize)
+        // Play button bottom: 170 - 30 = 140, then 8px gap: 140 - 8 - 24 = 108
+        leaderboardButton.position = CGPoint(x: sceneSize.width/2, y: 108)
+        menu.addChild(leaderboardButton)
+        
+        // Add Tutorial button under Leaderboard (8px spacing)
+        let tutorialButton = createButton(text: "Tutorial", name: "tutorialButton", size: leaderboardSize)
+        // Leaderboard button bottom: 108 - 24 = 84, then 8px gap: 84 - 8 - 24 = 52
+        tutorialButton.position = CGPoint(x: sceneSize.width/2, y: 52)
+        menu.addChild(tutorialButton)
 
         // Assign and add
         menuLayer = menu
         scene.addChild(menu)
+        
+        // Ensure button taps (e.g., Leaderboard) are routed to Game Center
+        enableButtonInput()
     }
     
     func showPauseMenu(sceneSize: CGSize) {
@@ -553,12 +574,15 @@ class UIManager {
         case .tooSlow:
             titleText = "Too Slow!"
             subtitleText = "Keep up with the scroll!"
+        case .timeUp:
+            titleText = "TIME'S UP!"
+            subtitleText = "You ran out of time!"
         }
         
         let title = SKLabelNode(text: titleText)
         title.fontSize = 32
         title.fontColor = UIColor.cyan
-        title.fontName = "Arial-BoldMT"
+        title.fontName = "ArialRoundedMTBold"
         title.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height - 120)
         menu.addChild(title)
         
@@ -571,14 +595,14 @@ class UIManager {
         let scoreText = SKLabelNode(text: "Final Score: \(score)")
         scoreText.fontSize = 26
         scoreText.fontColor = UIColor.yellow
-        scoreText.fontName = "Arial-BoldMT"
+        scoreText.fontName = "ArialRoundedMTBold"
         scoreText.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height - 220)
         menu.addChild(scoreText)
         
         let highScoreText = SKLabelNode(text: "High Score: \(highScore)")
         highScoreText.fontSize = 20
         highScoreText.fontColor = UIColor.white
-        highScoreText.fontName = "Arial-BoldMT"
+        highScoreText.fontName = "ArialRoundedMTBold"
         highScoreText.position = CGPoint(x: sceneSize.width / 2, y: scoreText.position.y - 35)
         menu.addChild(highScoreText)
 
@@ -588,7 +612,7 @@ class UIManager {
             let badge = SKLabelNode(text: "NEW HIGH SCORE!")
             badge.fontSize = 20
             badge.fontColor = UIColor.yellow
-            badge.fontName = "Arial-BoldMT"
+            badge.fontName = "ArialRoundedMTBold"
             badge.position = CGPoint(x: sceneSize.width / 2, y: highScoreText.position.y - 45)
             menu.addChild(badge)
 
@@ -659,7 +683,7 @@ class UIManager {
         let title = SKLabelNode(text: "Choose Your Power-Up!")
         title.fontSize = 28
         title.fontColor = UIColor.yellow
-        title.fontName = "Arial-BoldMT"
+        title.fontName = "ArialRoundedMTBold"
         title.position = CGPoint(x: sceneSize.width / 2, y: menuHeight - 80) // Adjust for smaller menu
         title.zPosition = 12
         menu.addChild(title)
@@ -680,11 +704,19 @@ class UIManager {
                     case .refillHearts: return .refillHearts
                     case .flySwatters: return .flySwatter
                     case .rockets: return .rocket
+                    case .superJump: return .superJump
+                    case .axe: return .axe
+                    
                     }
                 }
                 var mapped: [AbilityType] = allowedUpgradeTypes.compactMap { mapUpgrade($0) }
+                // Ensure Super Jump is always a potential option
+                if !mapped.contains(.superJump) {
+                    mapped.append(.superJump)
+                }
                 // Capacity-based filters (preserve existing logic)
                 if gs.maxHealth >= 6 { mapped.removeAll { $0 == .extraHeart } }
+                if gs.healthManager.health >= gs.healthManager.maxHealth { mapped.removeAll { $0 == .refillHearts } }
                 if gs.frogController.lifeVestCharges >= 6 { mapped.removeAll { $0 == .lifeVest } }
                 // Mirror-based checks for other charges (keep behavior)
                 let mirror = Mirror(reflecting: gs)
@@ -710,6 +742,7 @@ class UIManager {
             var allAbilities: [AbilityType] = AbilityType.allPowerUps
             if let gs = scene as? GameScene {
                 if gs.maxHealth >= 6 { allAbilities.removeAll { $0 == .extraHeart } }
+                if gs.healthManager.health >= gs.healthManager.maxHealth { allAbilities.removeAll { $0 == .refillHearts } }
                 if gs.frogController.lifeVestCharges >= 6 { allAbilities.removeAll { $0 == .lifeVest } }
                 let mirror = Mirror(reflecting: gs)
                 if let prop = mirror.children.first(where: { $0.label == "scrollSaverCharges" }), let count = prop.value as? Int, count >= 6 {
@@ -767,9 +800,76 @@ class UIManager {
         scene.addChild(menu)
     }
     
+    func showTutorialModal(sceneSize: CGSize) {
+        hideTutorialModal() // Remove any existing modal
+        guard let scene = scene else { return }
+        
+        let modal = SKNode()
+        modal.zPosition = 400 // Higher than other menus
+        modal.name = "tutorialModal"
+        
+        // Fullscreen dim background
+        let bg = SKShapeNode(rectOf: sceneSize)
+        bg.fillColor = UIColor.black.withAlphaComponent(0.85)
+        bg.strokeColor = .clear
+        bg.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2)
+        bg.name = "tutorialBackground"
+        modal.addChild(bg)
+        
+        // Tutorial image
+        let tutorialTexture = SKTexture(imageNamed: "tutorial.png")
+        let tutorialImage = SKSpriteNode(texture: tutorialTexture)
+        
+        // Scale the image to fit nicely on screen while maintaining aspect ratio
+        let maxWidth = sceneSize.width * 0.9
+        let maxHeight = sceneSize.height * 0.75
+        
+        if tutorialTexture.size() != .zero {
+            let texSize = tutorialTexture.size()
+            let widthScale = maxWidth / texSize.width
+            let heightScale = maxHeight / texSize.height
+            let scale = min(widthScale, heightScale)
+            tutorialImage.size = CGSize(width: texSize.width * scale, height: texSize.height * scale)
+        } else {
+            // Fallback size if image is missing
+            tutorialImage.size = CGSize(width: maxWidth, height: maxHeight)
+            tutorialImage.color = .gray
+            tutorialImage.colorBlendFactor = 1.0
+        }
+        
+        tutorialImage.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2 + 20)
+        tutorialImage.zPosition = 1
+        modal.addChild(tutorialImage)
+        
+        // Close button
+        let closeButtonSize = CGSize(width: 120, height: 50)
+        let closeButton = createButton(text: "Close", name: "closeTutorialButton", size: closeButtonSize)
+        closeButton.position = CGPoint(x: sceneSize.width / 2, y: 80)
+        closeButton.zPosition = 2
+        modal.addChild(closeButton)
+        
+        // Add fade-in animation
+        modal.alpha = 0.0
+        let fadeIn = SKAction.fadeIn(withDuration: 0.3)
+        modal.run(fadeIn)
+        
+        tutorialModal = modal
+        scene.addChild(modal)
+    }
+    
+    func hideTutorialModal() {
+        if let modal = tutorialModal {
+            let fadeOut = SKAction.fadeOut(withDuration: 0.2)
+            let remove = SKAction.removeFromParent()
+            modal.run(SKAction.sequence([fadeOut, remove]))
+            tutorialModal = nil
+        }
+    }
+    
     func hideMenus() {
         menuLayer?.removeFromParent()
         abilityLayer?.removeFromParent()
+        hideTutorialModal()
         menuLayer = nil
         abilityLayer = nil
         
@@ -806,9 +906,9 @@ class UIManager {
         // Centered label on top
         let label = SKLabelNode(text: text)
         label.name = "label"
-        label.fontSize = 26
+        label.fontSize = 20
         label.fontColor = UIColor.white
-        label.fontName = "Arial-BoldMT"
+        label.fontName = "ArialRoundedMTBold"
         label.verticalAlignmentMode = .center
         label.zPosition = 2
         button.addChild(label)
@@ -854,7 +954,7 @@ class UIManager {
         let titleLabel = SKLabelNode(text: ability.title)
         titleLabel.fontSize = 19
         titleLabel.fontColor = UIColor.white
-        titleLabel.fontName = "Arial-BoldMT"
+        titleLabel.fontName = "ArialRoundedMTBold"
         titleLabel.position = CGPoint(x: -40, y: 18)
         titleLabel.horizontalAlignmentMode = SKLabelHorizontalAlignmentMode.left
         titleLabel.zPosition = 12
@@ -863,7 +963,7 @@ class UIManager {
         let maxTextWidth: CGFloat = 220
         let wrapped = makeWrappedLabel(
             text: ability.description,
-            fontName: "Arial-BoldMT",
+            fontName: "ArialRoundedMTBold",
             fontSize: 15,
             color: UIColor(red: 0.8, green: 0.8, blue: 0.8, alpha: 1.0),
             maxWidth: maxTextWidth,
@@ -881,7 +981,7 @@ class UIManager {
         return button
     }
 
-    private func makeWrappedLabel(text: String, fontName: String? = "Arial-BoldMT", fontSize: CGFloat, color: UIColor, maxWidth: CGFloat, lineSpacing: CGFloat = 4, horizontalAlignment: SKLabelHorizontalAlignmentMode = .left) -> SKNode {
+    private func makeWrappedLabel(text: String, fontName: String? = "ArialRoundedMTBold", fontSize: CGFloat, color: UIColor, maxWidth: CGFloat, lineSpacing: CGFloat = 4, horizontalAlignment: SKLabelHorizontalAlignmentMode = .left) -> SKNode {
         let container = SKNode()
         let words = text.split(separator: " ")
         var currentLine = ""
@@ -969,7 +1069,7 @@ class UIManager {
         guard let scene = scene else { return }
 
         let slash = SKLabelNode(text: "â€”")
-        slash.fontName = "Arial-BoldMT"
+        slash.fontName = "ArialRoundedMTBold"
         slash.fontSize = 60
         slash.fontColor = .white
         slash.position = position
@@ -1009,6 +1109,53 @@ class UIManager {
         axe.run(SKAction.sequence([appear, moveAxe, settle, remove]))
     }
     
+    // MARK: - Game Center Leaderboard
+    func presentLeaderboard(leaderboardID: String) {
+        // Authenticate if needed, then present
+        if GKLocalPlayer.local.isAuthenticated {
+            presentLeaderboardView(leaderboardID: leaderboardID)
+        } else {
+            GKLocalPlayer.local.authenticateHandler = { [weak self] vc, error in
+                if let vc = vc {
+                    self?.present(viewController: vc)
+                } else if GKLocalPlayer.local.isAuthenticated {
+                    self?.presentLeaderboardView(leaderboardID: leaderboardID)
+                } else {
+                    #if DEBUG
+                    print("Game Center authentication failed: \(error?.localizedDescription ?? "unknown error")")
+                    #endif
+                }
+            }
+        }
+    }
+
+    private func presentLeaderboardView(leaderboardID: String) {
+        let gcVC = GKGameCenterViewController(leaderboardID: leaderboardID, playerScope: .global, timeScope: .allTime)
+        gcVC.gameCenterDelegate = self
+        present(viewController: gcVC)
+    }
+
+    private func present(viewController: UIViewController) {
+        guard let rootVC = topViewController() else { return }
+        rootVC.present(viewController, animated: true)
+    }
+
+    private func topViewController(base: UIViewController? = UIApplication.shared.connectedScenes
+        .compactMap { ($0 as? UIWindowScene)?.keyWindow }
+        .first?
+        .rootViewController) -> UIViewController? {
+        if let nav = base as? UINavigationController {
+            return topViewController(base: nav.visibleViewController)
+        }
+        if let tab = base as? UITabBarController {
+            return topViewController(base: tab.selectedViewController)
+        }
+        if let presented = base?.presentedViewController {
+            return topViewController(base: presented)
+        }
+        return base
+    }
+
     // MARK: - Rocket Land Button
     func showRocketLandButton(sceneSize: CGSize) {
         guard let scene = scene, rocketLandButton == nil else { return }
@@ -1038,6 +1185,27 @@ class UIManager {
         hideRocketIndicator()
     }
 
+    // MARK: - Button tap routing
+    /// Call this from your scene when a node is tapped. It routes based on the node's name.
+    /// - Parameter nodeName: The `name` of the tapped node (e.g., "leaderboardButton").
+    func handleNamedButtonTap(_ nodeName: String) {
+        switch nodeName {
+        case "leaderboardButton":
+            // Present the Game Center leaderboard
+            presentLeaderboard(leaderboardID: leaderboardID)
+        case "tutorialButton":
+            // Show the tutorial modal
+            if let scene = scene {
+                showTutorialModal(sceneSize: scene.size)
+            }
+        case "closeTutorialButton":
+            // Close the tutorial modal
+            hideTutorialModal()
+        default:
+            break
+        }
+    }
+    
     // MARK: - External convenience for GameScene touch handling
     func handleButtonPress(node: SKNode?) {
         guard let node = node else { return }
@@ -1047,6 +1215,189 @@ class UIManager {
     func handleButtonRelease(node: SKNode?) {
         guard let node = node else { return }
         animateButtonRelease(node)
+    }
+    
+    // MARK: - Enable Button Input Helper
+    func enableButtonInput() {
+        // This function can be expanded for enabling input on menu buttons if needed
+        // For now, it is a placeholder to ensure taps on the leaderboard button work
+    }
+    
+    // MARK: - Initial Game Upgrade Selection
+    func showInitialUpgradeSelection(sceneSize: CGSize) {
+        hideMenus()
+        guard let scene = scene else { return }
+        
+        let menu = SKNode()
+        menu.zPosition = 350 // Higher than normal menus
+        menu.name = "initialUpgradeLayer"
+        
+        // Calculate safe areas - leave space for bottom HUD (about 140pt) and top safe area
+        let bottomHudHeight: CGFloat = 140
+        let topSafeArea: CGFloat = 80
+        let availableHeight = sceneSize.height - bottomHudHeight - topSafeArea
+        
+        // Full screen background with attractive appearance
+        let bg = SKShapeNode(rectOf: sceneSize)
+        bg.fillColor = UIColor(red: 0.05, green: 0.15, blue: 0.3, alpha: 0.95)
+        bg.strokeColor = UIColor.white.withAlphaComponent(0.2)
+        bg.lineWidth = 2.0
+        bg.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2)
+        bg.name = "background"
+        bg.zPosition = 0
+        menu.addChild(bg)
+        
+        // Title - positioned in safe area at top
+        let title = SKLabelNode(text: "Choose Your Starting Upgrade!")
+        title.fontSize = 18 // Slightly smaller to fit better
+        title.fontColor = UIColor.yellow
+        title.fontName = "ArialRoundedMTBold"
+        title.horizontalAlignmentMode = .center
+        title.verticalAlignmentMode = .center
+        title.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height - 160) // More margin from top
+        title.zPosition = 12
+        
+       
+        menu.addChild(title)
+        
+        // Create the three initial upgrade options
+        let initialAbilities: [AbilityType] = [.lifeVest, .honeyJar, .extraHeart]
+        
+        // Calculate button positions - center them in the available space above the HUD
+        let contentCenterY = topSafeArea + (availableHeight / 2)
+        
+        // For iPhone-sized screens, use smaller button spacing to fit better
+        let baseButtonSpacing: CGFloat = min(180, sceneSize.width * 0.28) // Adaptive spacing
+        let buttonSpacing = min(baseButtonSpacing, (sceneSize.width - 60) / 3) // Ensure buttons fit with margins
+        
+        let centerX = sceneSize.width / 2
+        
+        for (index, ability) in initialAbilities.enumerated() {
+            let xOffset = CGFloat(index - 1) * buttonSpacing // -1, 0, 1 for left, center, right
+            let buttonX = centerX + xOffset
+            
+            let button = createInitialUpgradeButton(ability: ability, name: "initialUpgrade_\(ability)")
+            button.position = CGPoint(x: buttonX, y: contentCenterY)
+            menu.addChild(button)
+        }
+        
+        // Add instructions - position them below buttons but above HUD
+        let instructions = SKLabelNode(text: "Tap to select your starting advantage")
+        instructions.fontSize = 16
+        instructions.fontColor = UIColor.white.withAlphaComponent(0.8)
+        instructions.fontName = "ArialRoundedMTBold"
+        instructions.horizontalAlignmentMode = .center
+        instructions.verticalAlignmentMode = .center
+        // Position instructions between buttons and bottom HUD
+        instructions.position = CGPoint(x: sceneSize.width / 2, y: bottomHudHeight + 40)
+        instructions.zPosition = 12
+        menu.addChild(instructions)
+        
+        // Add fade-in animation
+        menu.alpha = 0.0
+        let fadeIn = SKAction.fadeIn(withDuration: 0.5)
+        menu.run(fadeIn)
+        
+        abilityLayer = menu
+        scene.addChild(menu)
+    }
+    
+    private func createInitialUpgradeButton(ability: AbilityType, name: String) -> SKNode {
+        let container = SKNode()
+        container.name = name
+        
+        // Smaller buttons to fit better on screen
+        let buttonWidth: CGFloat = 100
+        let buttonHeight: CGFloat = 180
+        let cornerRadius: CGFloat = 16
+        
+        let bgRect = CGRect(x: -buttonWidth/2, y: -buttonHeight/2, width: buttonWidth, height: buttonHeight)
+        let background = SKShapeNode(path: CGPath(roundedRect: bgRect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil))
+        background.fillColor = UIColor(red: 0.1, green: 0.4, blue: 0.2, alpha: 0.9)
+        background.strokeColor = UIColor.white.withAlphaComponent(0.6)
+        background.lineWidth = 2.0
+        background.zPosition = 1
+        container.addChild(background)
+        
+        // Icon/Image - slightly smaller
+        let iconSize: CGFloat = 56
+        let iconNode: SKNode
+        
+        // Fix the texture loading issue
+        let texture = SKTexture(imageNamed: ability.imageName)
+        if texture.size() != .zero {
+            let sprite = SKSpriteNode(texture: texture)
+            sprite.size = CGSize(width: iconSize, height: iconSize)
+            iconNode = sprite
+        } else {
+            // Fallback to emoji if image not available
+            let emoji = SKLabelNode(text: ability.emoji)
+            emoji.fontSize = 42
+            emoji.horizontalAlignmentMode = .center
+            emoji.verticalAlignmentMode = .center
+            iconNode = emoji
+        }
+        
+        iconNode.position = CGPoint(x: 0, y: 35)
+        iconNode.zPosition = 2
+        container.addChild(iconNode)
+        
+        // Title - adjusted for smaller button
+        let title = SKLabelNode(text: ability.title)
+        title.fontSize = 15
+        title.fontColor = UIColor.white
+        title.fontName = "ArialRoundedMTBold"
+        title.horizontalAlignmentMode = .center
+        title.verticalAlignmentMode = .center
+        title.position = CGPoint(x: 0, y: -5)
+        title.zPosition = 2
+        
+        // Handle multi-line titles if needed
+        if title.text!.count > 12 {
+            title.fontSize = 13
+        }
+        container.addChild(title)
+        
+        // Description (shorter for initial selection) - smaller font and positioned lower
+        let description = SKLabelNode()
+        description.fontSize = 11
+        description.fontColor = UIColor.white.withAlphaComponent(0.9)
+        description.fontName = "ArialRoundedMTBold"
+        description.horizontalAlignmentMode = .center
+        description.verticalAlignmentMode = .center
+        description.position = CGPoint(x: 0, y: -35)
+        description.zPosition = 2
+        description.numberOfLines = 2 // Allow line wrapping
+        
+        // Simplified descriptions for initial selection
+        switch ability {
+        case .lifeVest:
+            description.text = "Survive water\nfalls once"
+        case .honeyJar:
+            description.text = "Protect against\nbee attacks"
+        case .extraHeart:
+            description.text = "Start with\n+1 health"
+        default:
+            description.text = ability.description
+        }
+        
+        container.addChild(description)
+        
+        // Add tap target for better touch detection - slightly smaller to match button
+        let tapTarget = SKShapeNode(path: CGPath(roundedRect: bgRect.insetBy(dx: -10, dy: -10), cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil))
+        tapTarget.fillColor = .clear
+        tapTarget.strokeColor = .clear
+        tapTarget.name = "tapTarget"
+        tapTarget.zPosition = 10
+        container.addChild(tapTarget)
+        
+        return container
+    }
+}
+
+extension UIManager: GKGameCenterControllerDelegate {
+    func gameCenterViewControllerDidFinish(_ gameCenterViewController: GKGameCenterViewController) {
+        gameCenterViewController.dismiss(animated: true)
     }
 }
 
@@ -1140,4 +1491,6 @@ private extension CGPath {
         let countMinusOneF: CGFloat = CGFloat(countMinusOne)
         let idx: Int = Int((clampedT * countMinusOneF).rounded())
         return points[idx]
-    }}
+    }
+}
+

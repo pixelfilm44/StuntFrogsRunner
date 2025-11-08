@@ -7,6 +7,8 @@
 
 import Foundation
 import UIKit
+import GameKit
+import AVFoundation
 
 class LoadingManager {
     
@@ -42,6 +44,20 @@ class LoadingManager {
     
     private func setupLoadingTasks() {
         loadingTasks = [
+            LoadingTask(name: "Connecting to Game Center") { [weak self] completion in
+                // Authenticate Game Center early in the loading process
+                ScoreManager.shared.authenticateGameCenter { [weak self] in
+                    // Return the presenting view controller (LoadingViewController in this case)
+                    return self?.getPresentingViewController()
+                }
+                
+                // Give Game Center a moment to authenticate, then continue
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    print("🎮 LoadingManager: Game Center authentication initiated")
+                    completion()
+                }
+            },
+            
             LoadingTask(name: "Initializing Game Engine") { [weak self] completion in
                 DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
                     // Simulate game engine initialization
@@ -126,6 +142,15 @@ class LoadingManager {
     
     // MARK: - Asset Preloading
     
+    private func getPresentingViewController() -> UIViewController? {
+        // Get the current root view controller (LoadingViewController)
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first {
+            return window.rootViewController
+        }
+        return nil
+    }
+    
     private func preloadTextures() {
         // Here you could preload game textures
         // For example:
@@ -135,10 +160,75 @@ class LoadingManager {
     }
     
     private func preloadAudio() {
-        // Here you could preload audio files
-        // For example:
-        // AudioManager.shared.preloadSound("jump.wav")
-        // AudioManager.shared.preloadMusic("background_music.mp3")
-        // etc.
+        // Preload all sound effects
+        let soundEffects: [String] = [
+            // Frog Actions
+            "frog_jump",
+            "frog_land", 
+            "frog_splash",
+            "frog_croak",
+            
+            // Slingshot
+            "slingshot_pull",
+            "slingshot_release",
+            "slingshot_stretch",
+            
+            // Environment
+            "water_ripple",
+            "lily_pad_bounce",
+            "collect_powerup",
+            "nature_ambience",
+            
+            // UI & Feedback
+            "button_tap",
+            "menu_transition",
+            "score_increase",
+            "game_over",
+            "level_complete",
+            
+            // Hazards & Obstacles
+            "log_hit",
+            "turtle_shell",
+            "danger_zone"
+        ]
+        
+        // Preload all background music
+        let backgroundMusic: [String] = [
+            "menu_music",
+            "gameplay_music", 
+            "game_over_music",
+            "peaceful_pond",
+            "energetic_hopping",
+            "rocket_flight_music",
+            "super_jump_music"
+        ]
+        
+        // Preload sound effects
+        for soundName in soundEffects {
+            if let url = Bundle.main.url(forResource: soundName, withExtension: "mp3") {
+                do {
+                    let _ = try AVAudioPlayer(contentsOf: url)
+                    print("🔊 Preloaded sound effect: \(soundName)")
+                } catch {
+                    print("⚠️ Failed to preload sound effect \(soundName): \(error.localizedDescription)")
+                }
+            } else {
+                print("⚠️ Sound effect file not found: \(soundName).mp3")
+            }
+        }
+        
+        // Preload background music
+        for musicName in backgroundMusic {
+            if let url = Bundle.main.url(forResource: musicName, withExtension: "mp3") {
+                do {
+                    let _ = try AVAudioPlayer(contentsOf: url)
+                    print("🎵 Preloaded background music: \(musicName)")
+                } catch {
+                    print("⚠️ Failed to preload background music \(musicName): \(error.localizedDescription)")
+                }
+            } else {
+                print("⚠️ Background music file not found: \(musicName).mp3")
+            }
+        }
     }
 }

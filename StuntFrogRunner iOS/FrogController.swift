@@ -13,6 +13,11 @@ class FrogController {
 
     var frogShadow: SKShapeNode!
     
+    // Sound controller reference
+    private var soundController: SoundController {
+        return SoundController.shared
+    }
+    
     
     var currentLilyPad: LilyPad? {
         didSet {
@@ -43,6 +48,10 @@ class FrogController {
     var jumpSpeed: CGFloat = GameConfig.jumpSpeed
     private var cachedJumpDistance: CGFloat = 1.0
     
+    // Jump timeout safety mechanism
+    private var jumpFrameCount: Int = 0
+    private let maxJumpFrames: Int = 300  // 5 seconds at 60 FPS - emergency timeout
+    
     // Key for repeating water ripple while floating
     private let waterRippleActionKey = "waterRippleRepeat"
     
@@ -60,6 +69,12 @@ class FrogController {
     var inWater: Bool = false
     // When true, ignore subsequent water-fall checks until the frog jumps again
     var suppressWaterCollisionUntilNextJump: Bool = false
+    
+    // Ice sliding state
+    var onIce: Bool = false
+    var slideVelocity: CGVector = .zero
+    var slideDeceleration: CGFloat = 0.95  // How quickly sliding slows down
+    var minSlideSpeed: CGFloat = 0.5  // Below this speed, stop sliding
     
     // Super jump visuals
     var superJumpGlow: SKShapeNode?
@@ -142,6 +157,11 @@ class FrogController {
         frogSprite.setScale(1.0)
     }
     
+    /// Public method to set the frog to idle pose
+    func setToIdlePose() {
+        playIdle()
+    }
+    
     private func playJumpOnce() {
         guard !jumpTextures.isEmpty else { return }
         frogSprite.removeAction(forKey: "frogJumpAnim")
@@ -184,6 +204,8 @@ class FrogController {
         jumpProgress = 0
         velocity = .zero
         inWater = false
+        onIce = false
+        slideVelocity = .zero
         suppressWaterCollisionUntilNextJump = false
         frogSprite.texture = idleTexture
         
@@ -201,6 +223,7 @@ class FrogController {
         jumpProgress = 0
         isJumping = true
         isGrounded = false
+        jumpFrameCount = 0  // Reset jump timeout counter
         // Stop water bobbing when leaving water to jump
         frogSprite.removeAction(forKey: "frogBob")
         frogSprite.parent?.removeAction(forKey: waterRippleActionKey)
@@ -216,6 +239,12 @@ class FrogController {
         let dx = targetPos.x - position.x
         let dy = targetPos.y - position.y
         let distance = max(0.001, sqrt(dx*dx + dy*dy))
+        
+        // Calculate jump intensity for sound
+        let jumpIntensity = min(distance / 200.0, 1.0) // Normalize to 0-1 range
+        
+        // Play jump sound with intensity-based pitch variation
+        soundController.playFrogJumpSound(intensity: Float(jumpIntensity))
         // Face the direction of travel with art correction
         // atan2(dy, dx) gives us the angle to the target
         // Common corrections based on your frog art's default orientation:
@@ -242,7 +271,20 @@ class FrogController {
     }
     
     func updateJump() {
-        guard isJumping else { return }
+        guard isJumping else { 
+            jumpFrameCount = 0  // Reset counter when not jumping
+            return 
+        }
+        
+        // Increment jump frame counter and check for timeout
+        jumpFrameCount += 1
+        if jumpFrameCount > maxJumpFrames {
+            print("🚨 EMERGENCY: Jump timeout after \(jumpFrameCount) frames - force completing jump")
+            position = jumpTargetPos
+            jumpProgress = 1.0
+            completeJump()
+            return
+        }
         
         // Move by velocity toward target
         position.x += velocity.dx
@@ -359,12 +401,19 @@ class FrogController {
                 frogSprite.removeAction(forKey: "frogBob")
                 frogSprite.parent?.removeAction(forKey: waterRippleActionKey)
                 print("SPLASH! Fell in water")
+                
+                // Play splash sound
+                soundController.playWaterSplash(severity: 1.0)
             }
         }
     
     func landOnPad(_ pad: LilyPad) {
                isGrounded = true
                currentLilyPad = pad
+               
+               // Play landing sound
+               soundController.playSoundEffect(.frogLand)
+               // soundController.playSoundEffect(.lilyPadBounce) // TODO: Add missing sound file
                
                // Create a subtle water ripple just outside the pad edge so it is visible "under" the pad
                if let gameScene = scene as? GameScene {
@@ -395,8 +444,7 @@ class FrogController {
                    let frequency: CGFloat = 40.0
                    gameScene.worldManager.addRipple(at: ripplePos, amplitude: amplitude, frequency: frequency)
                    
-                   print("ðŸ¸ Frog position BEFORE snap: \(position)")
-                   print("ðŸ¦¦ Lily pad position: \(pad.position)")
+                   
                }
             
         // Preserve actual landing position on the pad instead of snapping to center
@@ -495,6 +543,9 @@ class FrogController {
                 superJumpGlow?.removeAllActions()
                 superJumpGlow?.removeFromParent()
                 superJumpGlow = nil
+
+                // Clear special track state and return to normal gameplay music
+                SoundController.shared.handleSpecialAbilityEnded()
 
                 // Restore full visibility
                 frogSprite.alpha = 1.0
@@ -629,6 +680,10 @@ class FrogController {
                 // Remove trail visual
                 rocketTrail?.removeFromParent()
                 rocketTrail = nil
+                
+                // Clear special track state and return to normal gameplay music
+                SoundController.shared.handleSpecialAbilityEnded()
+                
                 // Rocket landing will be handled by the game scene
                 
                 // Restore normal rotation behavior
@@ -652,6 +707,9 @@ class FrogController {
         // Remove trail visual
         rocketTrail?.removeFromParent()
         rocketTrail = nil
+        
+        // Clear special track state and return to normal gameplay music
+        SoundController.shared.handleSpecialAbilityEnded()
         
         // Restore normal rotation behavior
         unlockFacingAfterRocket()
@@ -711,6 +769,74 @@ class FrogController {
         // The frog will be moved to center screen by GameScene
         frogSprite.alpha = 1.0  // Keep full visibility during rocket flight
         lockFacingUpForRocket()
+    }
+    
+    // MARK: - Ice Sliding Methods
+    
+    /// Start sliding on ice with initial velocity from jump
+    func startSlidingOnIce(initialVelocity: CGVector) {
+        onIce = true
+        inWater = false
+        isGrounded = true
+        isJumping = false
+        
+        // Use the frog's current facing direction for sliding
+        // The frog's zRotation includes the art correction (π/2), so subtract it to get world direction
+        let frogFacingAngle = frogSprite.zRotation + (.pi / 2)
+        let facingDirection = CGVector(dx: cos(frogFacingAngle), dy: sin(frogFacingAngle))
+        
+        // Calculate slide speed from initial velocity magnitude
+        let initialSpeed = sqrt(initialVelocity.dx * initialVelocity.dx + initialVelocity.dy * initialVelocity.dy)
+        let slideSpeed = initialSpeed * 1.2 // Apply dampening factor
+        
+        // Apply the speed in the frog's facing direction
+        slideVelocity = CGVector(dx: facingDirection.dx * slideSpeed, dy: facingDirection.dy * slideSpeed)
+        
+        // Play sliding sound
+        soundController.playFrogSlide(intensity: Float(min(slideSpeed / 10.0, 1.0)))
+        soundController.playIceSlide(velocity: Float(min(slideSpeed / 8.0, 1.0)))
+        
+        // Remove any lily pad association while sliding
+        currentLilyPad = nil
+        
+        print("🧊 Frog started sliding on ice with velocity: (\(slideVelocity.dx), \(slideVelocity.dy)), facing angle: \(frogFacingAngle * 180 / .pi)°")
+    }
+    
+    /// Update sliding physics each frame
+    func updateSliding() {
+        guard onIce else { return }
+        
+        // Apply slide velocity to position
+        position.x += slideVelocity.dx
+        position.y += slideVelocity.dy
+        
+        // Apply deceleration
+        slideVelocity.dx *= slideDeceleration
+        slideVelocity.dy *= slideDeceleration
+        
+        // Stop sliding when velocity is very low
+        let speed = sqrt(slideVelocity.dx * slideVelocity.dx + slideVelocity.dy * slideVelocity.dy)
+        if speed < minSlideSpeed {
+            stopSliding()
+        }
+    }
+    
+    /// Stop sliding and return to normal grounded state
+    func stopSliding() {
+        guard onIce else { return }
+        
+        onIce = false
+        slideVelocity = .zero
+        
+        // Try to find a nearby lily pad to land on
+        // This will be handled by GameScene collision detection
+        print("🧊 Frog stopped sliding")
+    }
+    
+    /// Force stop sliding (e.g., when landing on a lily pad)
+    func forceStopSliding() {
+        onIce = false
+        slideVelocity = .zero
     }
 }
 

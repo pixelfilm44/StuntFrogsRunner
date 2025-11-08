@@ -22,8 +22,8 @@ class GameScene: SKScene {
     var uiManager: UIManager!
     
     // MARK: - New Manager Classes (Refactored)
-    private var healthManager: HealthManager!
-    private var scoreManager: ScoreManager!
+    var healthManager: HealthManager!
+    var scoreManager: ScoreManager!
     private var stateManager: GameStateManager!
     private var visualEffectsController: VisualEffectsController!
     var hudController: HUDController!
@@ -32,6 +32,8 @@ class GameScene: SKScene {
     private var landingController: LandingController!
     private var touchInputController: TouchInputController!
     private var gameLoopCoordinator: GameLoopCoordinator!
+    private var soundController: SoundController!
+    private var edgeSpikeBushManager: EdgeSpikeBushManager!
     
     var visualFX: VisualEffectsController!
     
@@ -46,6 +48,20 @@ class GameScene: SKScene {
     var lifeVestsContainer: SKNode!
     var scrollSaverContainer: SKNode!
     
+    // MARK: - Level Management
+    private var currentLevel: Int = 1
+    private var baseSpawnRateMultiplier: CGFloat = 1.0
+    
+    // MARK: - Level Timer
+    private var levelStartTime: CFTimeInterval = 0
+    private var levelTimeRemaining: Double = 0
+    private var levelTimerActive: Bool = false
+    
+    // MARK: - Finish Line
+    private var finishLine: FinishLine?
+    private var hasSpawnedFinishLine: Bool = false
+    private var frogPreviousY: CGFloat = 0
+    
     // MARK: - Parallax Background Elements
     private var rightTree: SKSpriteNode?
     private var leftTree: SKSpriteNode?
@@ -53,6 +69,7 @@ class GameScene: SKScene {
     // MARK: - Game Objects (in world space)
     var enemies: [Enemy] = []
     var tadpoles: [Tadpole] = []
+    var bigHoneyPots: [BigHoneyPot] = []
     var lilyPads: [LilyPad] = []
     
     var maxHealth: Int {
@@ -62,6 +79,45 @@ class GameScene: SKScene {
 
     // Tracks the currently pressed UI button node for press/release animation
     private var currentlyPressedButton: SKNode!
+    
+    // MARK: - Deinitializer
+    deinit {
+        print("🧹 GameScene deinitializing - cleaning up resources")
+        
+        // Clear all callback closures to break retain cycles
+        healthManager?.onHealthChanged = nil
+        healthManager?.onHealthDepleted = nil
+        healthManager?.onTadpolesChanged = nil
+        healthManager?.onAbilityChargesChanged = nil
+        
+        scoreManager?.onScoreChanged = nil
+        scoreManager?.onHighScoreAchieved = nil
+        scoreManager?.onLevelProgressed = nil
+        
+        stateManager?.onStateChanged = nil
+        stateManager?.onWaterStateChanged = nil
+        
+        landingController?.onLandingSuccess = nil
+        landingController?.onLandingMissed = nil
+        
+        abilityManager?.onExtraHeartSelected = nil
+        abilityManager?.onRefillHeartsSelected = nil
+        abilityManager?.onLifeVestSelected = nil
+        abilityManager?.onScrollSaverSelected = nil
+        abilityManager?.onFlySwatterSelected = nil
+        abilityManager?.onHoneyJarSelected = nil
+        abilityManager?.onAxeSelected = nil
+        abilityManager?.onRocketSelected = nil
+        
+        hudController?.onScoreGained = nil
+        
+        finishLine?.onCrossed = nil
+        
+        // Force cleanup of all game objects
+        forceCompleteCleanup()
+        
+        print("🧹 GameScene deinitialization complete")
+    }
     
     // MARK: - Convenience Properties
     private var gameState: GameState {
@@ -129,7 +185,7 @@ class GameScene: SKScene {
         // Initialize existing managers
         frogController = FrogController(scene: self)
         slingshotController = SlingshotController(scene: self)
-        
+
         worldManager = WorldManager(scene: self)
         effectsManager = EffectsManager(scene: self)
         uiManager = UIManager(scene: self)
@@ -139,12 +195,14 @@ class GameScene: SKScene {
         
         // Initialize new refactored managers
         healthManager = HealthManager(startingHealth: GameConfig.startingHealth)
-        scoreManager = ScoreManager()
+        scoreManager = ScoreManager.shared
         stateManager = GameStateManager()
+        soundController = SoundController.shared
         gameLoopCoordinator = GameLoopCoordinator()
         landingController = LandingController()
         touchInputController = TouchInputController()
         abilityManager = AbilityManager()
+        edgeSpikeBushManager = EdgeSpikeBushManager(worldNode: worldManager.worldNode, scene: self)
         
         setupManagerCallbacks()
     }
@@ -208,13 +266,32 @@ class GameScene: SKScene {
             }
         }
         
+        scoreManager.onLevelProgressed = { [weak self] newLevel in
+            print("🎮 ScoreManager reported level progression to Level \(newLevel)")
+            // Update local level tracking to match ScoreManager
+            self?.currentLevel = newLevel
+        }
+        
         // State Manager Callbacks
         stateManager.onStateChanged = { [weak self] newState, oldState in
             self?.handleStateChange(from: oldState, to: newState)
         }
         
+        stateManager.onInputLocked = { [weak self] in
+            // Cancel slingshot aiming when input gets locked
+            if self?.slingshotController.slingshotActive == true {
+                print("🎯 Input locked - automatically canceling slingshot aiming")
+                self?.slingshotController.cancelCurrentAiming()
+            }
+        }
+        
+        stateManager.onWaterStateChanged = { [weak self] newState, oldState in
+            self?.handleWaterStateChange(from: oldState, to: newState)
+        }
+        
         stateManager.onGameOver = { [weak self] reason in
             guard let self = self else { return }
+            self.stopLevelTimer()  // Stop timer when game is over
             self.uiManager.hideSuperJumpIndicator()
             self.uiManager.hideRocketIndicator()
             self.healthManager.pendingAbilitySelection = false
@@ -278,10 +355,33 @@ class GameScene: SKScene {
 
             self.stateManager.splashTriggered = false
 
+            // PERFORMANCE IMPROVEMENT: Spawn new objects only after successful jumps
+            // This is much more efficient than spawning every few frames
+            self.spawnManager.spawnObjects(
+                sceneSize: self.size,
+                lilyPads: &self.lilyPads,
+                enemies: &self.enemies,
+                tadpoles: &self.tadpoles,
+                bigHoneyPots: &self.bigHoneyPots,
+                worldOffset: self.worldManager.worldNode.position.y,
+                frogPosition: self.frogController.position,
+                superJumpActive: self.frogController.superJumpActive
+            )
+            
+            // PERFORMANCE IMPROVEMENT: Run cleanup after landing too
+            // Clean up objects that are now behind the frog's new position
+            self.spawnManager.performCleanup(
+                lilyPads: &self.lilyPads,
+                enemies: &self.enemies,
+                frogPosition: self.frogController.position,
+                sceneSize: self.size,
+                worldNode: self.worldManager.worldNode
+            )
+
             if self.healthManager.pendingAbilitySelection && self.gameState == .playing {
                 // Keep the flag true until the UI actually appears so touches are ignored
                 // and lock input during the animation window.
-                self.stateManager.lockInput(for: 1.0)
+                self.stateManager.lockInput(for:1.0)
                 let vfx = self.visualEffectsController!
                 vfx.playUpgradeCue()
 
@@ -291,15 +391,27 @@ class GameScene: SKScene {
 
                 // Delay showing the ability selection to let the animation be seen.
                 let delay = SKAction.wait(forDuration: 0.9)
-                self.run(delay) { [weak self] in
-                    guard let self = self else { return }
-                    // Ensure we are still in a valid state to present selection
-                    guard self.gameState == .playing else { return }
-                    // Now transition into ability selection and consume the pending flag.
+                let abilitySelectionAction = SKAction.run { [weak self] in
+                    guard let self = self else { 
+                        // If self is nil, we can't clear the flag, but this shouldn't happen in normal gameplay
+                        return 
+                    }
+                    
+                    // IMPORTANT: Always clear the pending flag, even if we can't show UI
                     self.healthManager.pendingAbilitySelection = false
-                    self.gameState = .abilitySelection
-                    self.uiManager.showAbilitySelection(sceneSize: self.size)
+                    
+                    // Only show ability selection if we're still in a valid state
+                    if self.gameState == .playing {
+                        self.gameState = .abilitySelection
+                        self.uiManager.showAbilitySelection(sceneSize: self.size)
+                    } else {
+                        print("🚨 Ability selection cancelled due to game state change: \(self.gameState)")
+                    }
                 }
+                
+                // Store the action with a key so we can cancel it if needed
+                let sequence = SKAction.sequence([delay, abilitySelectionAction])
+                self.run(sequence, withKey: "abilitySelectionDelay")
             }
         }
         
@@ -319,13 +431,15 @@ class GameScene: SKScene {
         abilityManager.onExtraHeartSelected = { [weak self] in
             guard let self = self else { return }
             self.healthManager.increaseMaxHealth()
-            self.healthManager.healHealth()
         }
         
         abilityManager.onSuperJumpSelected = { [weak self] in
             guard let self = self else { return }
             self.frogController.activateSuperJump()
             self.uiManager.showSuperJumpIndicator(sceneSize: self.size)
+            
+            // Start super jump music
+            self.soundController.handleSuperJumpAbilityActivated()
         }
         
         abilityManager.onRefillHeartsSelected = { [weak self] in
@@ -334,23 +448,29 @@ class GameScene: SKScene {
         
         abilityManager.onLifeVestSelected = { [weak self] in
             guard let self = self else { return }
+            print("🦺 Life Vest ability selected - adding charge")
             self.frogController.lifeVestCharges = min(6, self.frogController.lifeVestCharges + 1)
+            print("🦺 Life Vest charges now: \(self.frogController.lifeVestCharges)")
             self.updateHUD()
         }
         
         abilityManager.onScrollSaverSelected = { [weak self] in
+            print("📜 Scroll Saver ability selected")
             self?.healthManager.addScrollSaverCharge()
         }
         
         abilityManager.onFlySwatterSelected = { [weak self] in
+            print("🪰 Fly Swatter ability selected")
             self?.healthManager.addFlySwatterCharge()
         }
         
         abilityManager.onHoneyJarSelected = { [weak self] in
+            print("🍯 Honey Jar ability selected")
             self?.healthManager.addHoneyJarCharge()
         }
         
         abilityManager.onAxeSelected = { [weak self] in
+            print("🪓 Axe ability selected")
             self?.healthManager.addAxeCharge()
         }
         
@@ -358,6 +478,9 @@ class GameScene: SKScene {
             guard let self = self else { return }
             self.frogController.activateRocket()
             self.uiManager.showRocketIndicator(sceneSize: self.size)
+            
+            // Start rocket flight music
+            self.soundController.handleRocketAbilityActivated()
             
             self.touchInputController.initializeRocketTarget(frogContainerX: self.frogContainer.position.x)
             
@@ -396,6 +519,9 @@ class GameScene: SKScene {
             // Setup spawn manager
             spawnManager = SpawnManager(scene: self, worldNode: worldManager.worldNode)
             spawnManager.startGracePeriod(duration: 1.5)
+            
+            // Note: Enemy spawning now uses a pending array to avoid simultaneous access issues
+            // Enemies are flushed to the main array safely in the update loop
             
             // Setup frog container
             let frogRootNode = frogController.setupFrog(sceneSize: size)
@@ -655,30 +781,81 @@ class GameScene: SKScene {
     
     // MARK: - Game State Management
     private func handleStateChange(from oldState: GameState, to newState: GameState) {
+        print("🎮 Game state changed from \(oldState) to \(newState)")
         uiManager.hideMenus()
+        
+        // Cancel any active slingshot aiming when state changes
+        if slingshotController.slingshotActive && newState != .playing {
+            print("🎯 Game state changed to \(newState) - canceling slingshot aiming")
+            slingshotController.cancelCurrentAiming()
+        }
+        
+        // Cancel pending ability selection if game state changes away from playing
+        if newState != .playing && newState != .abilitySelection {
+            if let _ = action(forKey: "abilitySelectionDelay") {
+                print("🚨 Cancelling pending ability selection action due to state change to \(newState)")
+                removeAction(forKey: "abilitySelectionDelay")
+                healthManager.forceClearAbilitySelection(reason: "state change to \(newState)")
+            }
+        }
+        
+        // Handle audio state changes
+        print("🎵 Calling soundController.handleGameStateChange(to: \(newState))")
+        soundController.handleGameStateChange(to: newState)
         
         switch newState {
         case .menu:
             uiManager.setUIVisible(false)
             menuBackdrop?.run(SKAction.fadeAlpha(to: 1.0, duration: 0.2))
             worldManager.worldNode.isPaused = true
+        case .initialUpgradeSelection:
+            uiManager.setUIVisible(false)
+            menuBackdrop?.run(SKAction.fadeAlpha(to: 0.9, duration: 0.2))
+            worldManager.worldNode.isPaused = true
         case .playing:
             uiManager.setUIVisible(true)
             menuBackdrop?.run(SKAction.fadeAlpha(to: 0.0, duration: 0.2))
             worldManager.worldNode.isPaused = false
+            
+            // If returning from ability selection, restore normal audio
+            if oldState == .abilitySelection {
+                soundController.resumeFromAbilitySelection()
+            }
         case .paused, .abilitySelection, .gameOver:
           //  menuBackdrop?.run(SKAction.fadeAlpha(to: 0.9, duration: 0.2))
             worldManager.worldNode.isPaused = true
         }
     }
     
+    private func handleWaterStateChange(from oldState: WaterState, to newState: WaterState) {
+        // Visual or audio feedback when water state changes
+        switch newState {
+        case .water:
+            showFloatingText("Water Mode: Watch for splashes!", color: .systemBlue)
+            print("💧 Water state changed to WATER - frog can drown")
+        case .ice:
+            showFloatingText("Ice Mode: Slide to safety!", color: .systemCyan)
+            SoundController.shared.playIceCrack()
+            print("🧊 Water state changed to ICE - frog will slide")
+        }
+        
+        // Reset frog state when switching water modes
+        if frogController.onIce && newState == .water {
+            frogController.forceStopSliding()
+        }
+    }
+    
     func showMainMenu() {
         // Menu now handles its own dimming and structure. Backdrop fade is kept for consistency.
+        stopLevelTimer()  // Stop timer when going to main menu
         menuBackdrop?.alpha = 1.0
         frogContainer.alpha = 1.0
         uiManager.hideSuperJumpIndicator()
         uiManager.hideRocketIndicator()
         healthManager.pendingAbilitySelection = false
+        
+        // Hide level indicator during menu
+        childNode(withName: "levelIndicator")?.removeFromParent()
         
         // Hide background tree during menu
         rightTree?.alpha = 0.0
@@ -687,20 +864,102 @@ class GameScene: SKScene {
         spawnManager.resumeSpawningAfterAbilitySelection()
         
         // Ensure spawn state and pad tadpole flags are reset when returning to menu
-        spawnManager.reset(for: &lilyPads, tadpoles: &tadpoles)
+        spawnManager.reset(for: &lilyPads, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots)
         
         gameState = .menu
         uiManager.showMainMenu(sceneSize: size)
     }
     
     // MARK: - Game Start
+    func startNewGame() {
+        print("🎮 Starting completely new game - resetting all progress")
+        // Force reset all progress for a brand new game
+        scoreManager.resetScore()
+        startGame()
+    }
+    
     func startGame() {
         print("GameScene.startGame() ENTERED")
-            uiManager.hideMenus()
-            print("After hideMenus()")
+        print("🔍 Current gameState: \(gameState)")
+        
+        // Reset level system only for completely new games (not level progression)
+        if gameState == .menu || gameState == .gameOver {
+            // Sync currentLevel with ScoreManager's level
+            currentLevel = scoreManager.getCurrentLevel()
+            baseSpawnRateMultiplier = 1.0 + (CGFloat(currentLevel - 1) * 0.1)
+            print("🎮 Starting game at Level \(currentLevel) (from ScoreManager)")
+            print("🎮 Base spawn rate multiplier: \(String(format: "%.2f", baseSpawnRateMultiplier))x")
+            print("🎮 This should show initial upgrade selection")
+        } else {
+            print("🎮 Continuing from state \(gameState) - no level reset")
+        }
+        
+        healthManager.reset(startingHealth: GameConfig.startingHealth)
+        visualEffectsController.stopLowHealthFlash()
+        uiManager.updateStarProgress(current: 0, threshold: GameConfig.tadpolesForAbility)
+        
+        stateManager.cancelPendingGameOver()
+        
+        // Cancel any pending ability selection actions from previous game
+        if let _ = action(forKey: "abilitySelectionDelay") {
+            print("🚨 Cancelling pending ability selection action from previous game")
+            removeAction(forKey: "abilitySelectionDelay")
+        }
+        
+        frogController.lifeVestCharges = 0
+        uiManager.hideMenus()  // Clear any special track state that might be lingering from previous game
+        soundController.handleSpecialAbilityEnded()
+        
+        gameLoopCoordinator.reset()
+        landingController.reset()
+        touchInputController.reset()
+        
+        // Reset spawn-related state and clear any lingering pad-tadpole links
+        spawnManager.reset(for: &lilyPads, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots)
+        
+        // Reset edge spike bushes
+        edgeSpikeBushManager.reset()
+        
+        // Reset finish line
+        finishLine?.node.removeFromParent()
+        finishLine = nil
+        hasSpawnedFinishLine = false
+        frogPreviousY = 0
+        
+        worldManager.reset()
+        
+        // Reset background tree position
+        resetBackgroundTree()
+        
+        // Reset scoring anchor after world reset
+        lastWorldYForScore = worldManager.worldNode.position.y
+        
+        // Update spawn manager with current level's spawn rate multiplier
+        spawnManager.updateSpawnRateMultiplier(baseSpawnRateMultiplier)
+        
+        // Ensure spawning is resumed for new game
+        spawnManager.resumeSpawningAfterAbilitySelection()
+        hasInitializedScoreAnchor = true
+        // First show the initial upgrade selection
+        gameState = .initialUpgradeSelection
+        uiManager.showInitialUpgradeSelection(sceneSize: size)
+    }
+    
+    // This method is called after the player selects their initial upgrade
+    func proceedToGameplay() {
+        print("GameScene.proceedToGameplay() ENTERED")
+        
+        print("After hideMenus()")
         uiManager.hideSuperJumpIndicator()
         uiManager.hideRocketIndicator()
         menuBackdrop?.run(SKAction.fadeOut(withDuration: 0.2))
+       // stateManager.createIceLevel()
+        
+        // CRITICAL FIX: Reset audio state and start gameplay music immediately
+        // This ensures music plays even when coming from game over screen
+        soundController.stopBackgroundMusic(fadeOut: false)
+        soundController.startGameplayMusic()
+        print("🎵 Gameplay music started immediately in startGame()")
         
         // Make sure background is present and sized
         if let bg = backgroundNode, let texture = bg.texture {
@@ -714,18 +973,21 @@ class GameScene: SKScene {
             bg.position = CGPoint(x: size.width/2, y: size.height/2)
         }
         
-        stateManager.cancelPendingGameOver()
+       
+        
         gameState = .playing
         stateManager.lockInput(for: 0.2)
+        
+        // Show current level indicator
+        showLevelIndicator()
         
         slingshotController.cancelCurrentAiming()
         
         // Reset managers
-        scoreManager.resetScore()
+        // Don't reset score here - it should be managed by the caller
+        // proceedToGameplay is used for both new games and level progression
         uiManager.highlightScore(isHighScore: false)
-        healthManager.reset(startingHealth: GameConfig.startingHealth)
-        visualEffectsController.stopLowHealthFlash()
-        uiManager.updateStarProgress(current: 0, threshold: GameConfig.tadpolesForAbility)
+       
         
         stateManager.splashTriggered = false
         frogController.superJumpActive = false
@@ -736,35 +998,36 @@ class GameScene: SKScene {
         stateManager.hasLandedOnce = false
         isRocketFinalApproach = false
         
-        gameLoopCoordinator.reset()
-        landingController.reset()
-        touchInputController.reset()
+      
         
-        frogController.lifeVestCharges = 0
         frogController.rocketFramesRemaining = 0
         frogController.suppressWaterCollisionUntilNextJump = false
         frogController.inWater = false
         
         frogContainer.zPosition = 50
         
+        // COMPREHENSIVE CLEANUP: Remove all existing nodes before clearing arrays
+        print("🧹 Removing all existing world nodes from proceedToGameplay...")
+        for enemy in enemies {
+            enemy.node.removeFromParent()
+        }
+        for tadpole in tadpoles {
+            tadpole.node.removeFromParent()
+        }
+        for lilyPad in lilyPads {
+            lilyPad.node.removeFromParent()
+        }
+        
         enemies.removeAll()
         tadpoles.removeAll()
         lilyPads.removeAll()
         
-        // Reset spawn-related state and clear any lingering pad-tadpole links
-        spawnManager.reset(for: &lilyPads, tadpoles: &tadpoles)
+        // CRITICAL FIX: Clear spatial grid after clearing lily pads array
+        // This prevents old lily pads from blocking new spawns
+        spawnManager.clearSpatialGrid()
+        print("🧹 Spatial grid cleared in proceedToGameplay")
         
-        worldManager.reset()
         
-        // Reset background tree position
-        resetBackgroundTree()
-        
-        // Reset scoring anchor after world reset
-        lastWorldYForScore = worldManager.worldNode.position.y
-        
-        // Ensure spawning is resumed for new game
-        spawnManager.resumeSpawningAfterAbilitySelection()
-        hasInitializedScoreAnchor = true
         
         let startWorldPos = CGPoint(x: size.width / 2, y: 0)
         
@@ -773,6 +1036,9 @@ class GameScene: SKScene {
         startPad.node.zPosition = 10
         worldManager.worldNode.addChild(startPad.node)
         lilyPads.append(startPad)
+        
+        // CRITICAL FIX: Add starting pad to spatial grid
+        spawnManager.addToSpatialGrid(startPad)
         
         let desiredScreenPos = CGPoint(x: size.width / 2, y: size.height * 0.4)
         worldManager.worldNode.position = CGPoint(
@@ -802,15 +1068,19 @@ class GameScene: SKScene {
             lilyPads: &lilyPads,
             enemies: &enemies,
             tadpoles: &tadpoles,
+            bigHoneyPots: &bigHoneyPots,
             worldOffset: worldManager.worldNode.position.y
         )
         
         // Ensure spawning is resumed for new game
         spawnManager.resumeSpawningAfterAbilitySelection()
         
-        updateHUD()
+        // Initialize level timer
+        startLevelTimer()
         
-        print("ÃƒÂ°Ã…Â¸Ã‚ÂÃ‚Â¸ Game started! Frog world position: \(frogController.position)")
+        //updateHUD()
+        
+        print("Game started! Frog world position: \(frogController.position)")
     }
     
     // MARK: - Game Over
@@ -818,43 +1088,215 @@ class GameScene: SKScene {
         stateManager.triggerGameOver(reason)
     }
     
+    // MARK: - Level Timer Management
+    
+    private func startLevelTimer() {
+        levelStartTime = CACurrentMediaTime()
+        levelTimeRemaining = GameConfig.levelTimeLimit
+        levelTimerActive = true
+        print("⏱️ Started level timer: \(GameConfig.levelTimeLimit) seconds")
+    }
+    
+    private func updateLevelTimer() {
+        guard levelTimerActive else { return }
+        
+        let currentTime = CACurrentMediaTime()
+        let elapsedTime = currentTime - levelStartTime
+        levelTimeRemaining = max(0, GameConfig.levelTimeLimit - elapsedTime)
+        
+        // Update timer display
+        hudController.updateTimer(timeRemaining: levelTimeRemaining)
+        
+        // Check if time is up
+        if levelTimeRemaining <= 0 {
+            levelTimerActive = false
+            hudController.hideTimer()
+            print("⏱️ Time's up! Game over.")
+            gameOver(.timeUp)
+        }
+    }
+    
+    private func stopLevelTimer() {
+        levelTimerActive = false
+        hudController.hideTimer()
+        print("⏱️ Level timer stopped")
+    }
+    
+    private func calculateTimeBonus() -> Int {
+        guard levelTimeRemaining > 0 else { return 0 }
+        
+        let secondsRemaining = Int(ceil(levelTimeRemaining))
+        let bonus = secondsRemaining * GameConfig.timeBonus
+        
+        print("⏱️ Time bonus: \(secondsRemaining) seconds × \(GameConfig.timeBonus) points = \(bonus) points")
+        return bonus
+    }
+    
     // MARK: - Ability Selection
     func selectAbility(_ abilityStr: String) {
+        print("🎯 Selecting ability: \(abilityStr)")
         abilityManager.selectAbility(abilityStr)
         healthManager.pendingAbilitySelection = false
+        
+        // Show visual feedback for the selected ability
+        if abilityStr.contains("extraHeart") {
+            showFloatingText("Extra Heart!", color: .systemRed)
+        } else if abilityStr.contains("superJump") {
+            showFloatingText("Super Jump!", color: .systemYellow)
+        } else if abilityStr.contains("refillHearts") {
+            showFloatingText("Hearts Restored!", color: .systemGreen)
+        } else if abilityStr.contains("lifeVest") {
+            showFloatingText("Life Vest!", color: .systemBlue)
+        } else if abilityStr.contains("scrollSaver") {
+            showFloatingText("Scroll Saver!", color: .systemCyan)
+        } else if abilityStr.contains("flySwatter") {
+            showFloatingText("Fly Swatter!", color: .systemOrange)
+        } else if abilityStr.contains("honeyJar") {
+            showFloatingText("Honey Protection!", color: .systemYellow)
+        } else if abilityStr.contains("axe") {
+            showFloatingText("Axe!", color: .systemBrown)
+        } else if abilityStr.contains("rocket") {
+            showFloatingText("Rocket Boost!", color: .systemPurple)
+        }
+        
+        // Update HUD to reflect the new ability/upgrade
+        print("🔄 Updating HUD after ability selection")
+        updateHUD()
         
         // Resume spawning when ability selection ends
         spawnManager.resumeSpawningAfterAbilitySelection()
         
+        // Hide the ability selection menu
+        uiManager.hideMenus()
+        
         gameState = .playing
+        print("✅ Ability selection complete, game state: \(gameState)")
     }
+    
+    // MARK: - Initial Upgrade Selection
+    func handleInitialUpgradeSelection(_ buttonName: String) {
+        // Parse the upgrade type from button name
+        let upgradeString = buttonName.replacingOccurrences(of: "initialUpgrade_", with: "")
+        
+        print("🎯 Selecting initial upgrade: \(upgradeString)")
+        
+        // Apply the selected upgrade using the same ability manager system as selectAbility
+        // Match the AbilityType enum values used in UIManager
+        switch upgradeString {
+        case "lifeVest":  // Fixed: was "lifeVests" (plural)
+            abilityManager.onLifeVestSelected?()
+            showFloatingText("Life Vest Added!", color: .systemYellow)
+        case "honeyJar":  // Fixed: was "honeypot"
+            abilityManager.onHoneyJarSelected?()
+            showFloatingText("Honey Protection Added!", color: .systemOrange)
+        case "extraHeart":
+            abilityManager.onExtraHeartSelected?()
+            showFloatingText("Extra Heart Added!", color: .systemRed)
+        default:
+            print("Unknown initial upgrade: \(upgradeString)")
+        }
+        
+        // Update HUD to reflect the new upgrade (same as selectAbility)
+        print("🔄 Updating HUD after initial upgrade selection")
+        updateHUD()
+        
+        // Hide the upgrade selection and proceed to gameplay
+        uiManager.hideMenus()
+        
+        
+
+        proceedToGameplay()
+    }
+    
+    // MARK: - Performance Tracking
+    private var lastFrameTime: TimeInterval = 0
+    private var frameTimes: [TimeInterval] = []
+    private let maxFrameTimesSamples = 60  // Track last 60 frames
     
     // MARK: - Update Loop
     override func update(_ currentTime: TimeInterval) {
         guard gameState == .playing else { return }
         
-        // PERFORMANCE MONITORING: Log collision stats occasionally
-        if gameLoopCoordinator.getFrameCount() % 300 == 0 { // Every 5 seconds at 60fps
+        // PERFORMANCE: Track frame times to identify stutters
+        if lastFrameTime > 0 {
+            let deltaTime = currentTime - lastFrameTime
+            frameTimes.append(deltaTime)
+            if frameTimes.count > maxFrameTimesSamples {
+                frameTimes.removeFirst()
+            }
+            
+            // Alert on frame drops (> 20ms = < 50 FPS)
+            if deltaTime > 0.020 && gameLoopCoordinator.getFrameCount() % 60 == 0 {
+                let avgFrameTime = frameTimes.reduce(0, +) / Double(frameTimes.count)
+                let fps = 1.0 / avgFrameTime
+                print("⚠️  Frame drop detected: \(String(format: "%.1f", deltaTime * 1000))ms (Avg FPS: \(String(format: "%.1f", fps)))")
+            }
+        }
+        lastFrameTime = currentTime
+        
+        // PERFORMANCE MONITORING: Log object counts occasionally
+        if gameLoopCoordinator.getFrameCount() % 600 == 0 { // Every 10 seconds at 60fps
             let logCount = enemies.filter { $0.type == .log }.count
+            let beeCount = enemies.filter { $0.type == .bee }.count
+            let snakeCount = enemies.filter { $0.type == .snake }.count
+            let dragonflyCount = enemies.filter { $0.type == .dragonfly }.count
+            let spikeBushCount = enemies.filter { $0.type == .spikeBush }.count
             let padCount = lilyPads.count
-            print("🔧 Performance: \(logCount) logs, \(padCount) lily pads active")
+            let tadpoleCount = tadpoles.count
+            let totalNodes = scene?.children.count ?? 0
+            
+            print("🔧 Performance Snapshot:")
+            print("   - Total scene nodes: \(totalNodes)")
+            print("   - Lily pads: \(padCount)")
+            print("   - Logs: \(logCount), Bees: \(beeCount), Snakes: \(snakeCount)")
+            print("   - Dragonflies: \(dragonflyCount), Spike bushes: \(spikeBushCount)")
+            print("   - Tadpoles: \(tadpoleCount)")
+            print("   - Frame: \(gameLoopCoordinator.getFrameCount())")
+            
+            // Alert if object counts are getting excessive
+            if totalNodes > 200 {
+                print("⚠️  HIGH NODE COUNT: \(totalNodes) nodes in scene")
+            }
+            if logCount > 15 {
+                print("⚠️  HIGH LOG COUNT: \(logCount) logs active")
+            }
+            
+            // CRITICAL: Emergency cleanup if we have way too many objects
+            if padCount > 50 || logCount > 25 || totalNodes > 400 {
+                print("🚨 EMERGENCY: Object count dangerously high - triggering force cleanup")
+                print("   - Pads: \(padCount), Logs: \(logCount), Total nodes: \(totalNodes)")
+                forceCompleteCleanup()
+                
+                // Respawn essential objects
+                spawnManager.spawnInitialObjects(
+                    sceneSize: size,
+                    lilyPads: &lilyPads,
+                    enemies: &enemies,
+                    tadpoles: &tadpoles,
+                    bigHoneyPots: &bigHoneyPots,
+                    worldOffset: worldManager.worldNode.position.y
+                )
+            }
         }
         
-        // Keep background covering the screen
-        if let bg = backgroundNode, let texture = bg.texture {
-            if bg.parent == nil { addChild(bg) }
-            let texSize = texture.size()
-            let scaleX = size.width / texSize.width
-            let scaleY = size.height / texSize.height
-            let scale = max(scaleX, scaleY)
-            let desiredSize = CGSize(width: texSize.width * scale, height: texSize.height * scale)
-            if bg.size != desiredSize { bg.size = desiredSize }
-            let desiredPos = CGPoint(x: size.width/2, y: size.height/2)
-            if bg.position != desiredPos { bg.position = desiredPos }
+        // PERFORMANCE: Only update background if it's not already configured
+        if let bg = backgroundNode, bg.parent == nil {
+            addChild(bg)
+            if let texture = bg.texture {
+                let texSize = texture.size()
+                let scaleX = size.width / texSize.width
+                let scaleY = size.height / texSize.height
+                let scale = max(scaleX, scaleY)
+                bg.size = CGSize(width: texSize.width * scale, height: texSize.height * scale)
+                bg.position = CGPoint(x: size.width/2, y: size.height/2)
+            }
         }
         
         gameLoopCoordinator.incrementFrame()
         let frameCount = gameLoopCoordinator.getFrameCount()
+        
+        // Update level timer
+        updateLevelTimer()
         
         // Debug state every 10 seconds if frog seems stuck
         if frameCount % 600 == 0 { // Every 10 seconds at 60fps
@@ -867,20 +1309,36 @@ class GameScene: SKScene {
                     stateManager.forceUnlockInput()
                 }
                 
+                // Also cancel any stuck slingshot aiming
+                if slingshotController.slingshotActive {
+                    print("🎯 Found stuck slingshot during recovery - canceling")
+                    slingshotController.cancelCurrentAiming()
+                }
+                
                 // Try to recover the frog state
                 _ = attemptStateRecovery()
             }
+            
+            // Check for stuck ability selection state
+            if healthManager.pendingAbilitySelection && gameState == .playing && 
+               frogController.isGrounded && !frogController.isJumping {
+                print("🚨 Detected stuck pendingAbilitySelection - clearing")
+                
+                // Cancel any pending ability selection actions
+                if let _ = action(forKey: "abilitySelectionDelay") {
+                    print("🚨 Also cancelling stuck ability selection action")
+                    removeAction(forKey: "abilitySelectionDelay")
+                }
+                
+                healthManager.forceClearAbilitySelection(reason: "periodic stuck detection")
+            }
         }
         
-        spawnManager.spawnObjects(
-               sceneSize: size,
-               lilyPads: &lilyPads,
-               enemies: &enemies,
-               tadpoles: &tadpoles,
-               worldOffset: worldManager.worldNode.position.y,
-               frogPosition: frogController.position,
-               superJumpActive: frogController.superJumpActive
-           )
+        // PERFORMANCE: Spawn objects only after successful jumps (handled in landing callback)
+        // Removed frequent spawn calls from update loop for better performance
+           
+        // PERFORMANCE: Cleanup now handled on landing events instead of time-based
+        // This is much more efficient than running cleanup every N frames
         
         if stateManager.inputLocked { return }
         
@@ -929,8 +1387,10 @@ class GameScene: SKScene {
         worldManager.worldNode.position.x = screenCenter.x - frogController.position.x
         worldManager.worldNode.position.y = screenCenter.y - frogController.position.y
         
-        // Update parallax background tree for depth effect
-        updateBackgroundTreeParallax()
+        // PERFORMANCE: Update parallax background every 3 frames for smoother but efficient motion
+        if frameCount % 3 == 0 {
+            updateBackgroundTreeParallax()
+        }
         
         // Distance-based scoring: when the world moves downward relative to the screen, the frog advanced upward in world space.
         if hasInitializedScoreAnchor {
@@ -983,6 +1443,34 @@ class GameScene: SKScene {
         
         frogController.updateJump()
         
+        // Update ice sliding if active
+        if frogController.onIce {
+            frogController.updateSliding()
+            
+            // Check for lily pad collision while sliding
+            let slideCollisionDistance: CGFloat = 60
+            for pad in lilyPads {
+                let dx = frogController.position.x - pad.position.x
+                let dy = frogController.position.y - pad.position.y
+                let distance = sqrt(dx*dx + dy*dy)
+                
+                if distance < slideCollisionDistance {
+                    // Stop sliding and land on the pad
+                    frogController.forceStopSliding()
+                    frogController.landOnPad(pad)
+                    
+                    // Play landing sound and effect
+                    SoundController.shared.playFrogLand()
+                    effectsManager?.createLandingEffect(at: convert(frogController.position, from: worldManager.worldNode), intensity: 0.5, lilyPad: pad)
+                    HapticFeedbackManager.shared.impact(.light)
+                    
+                    showFloatingText("Landed!", color: .systemGreen)
+                    print("🧊 Frog slid into lily pad and stopped")
+                    break
+                }
+            }
+        }
+        
         // Update the frog's facing direction based on movement/state
         facingDirectionController.updateFacingDirection(
             isPlaying: gameState == .playing,
@@ -996,7 +1484,7 @@ class GameScene: SKScene {
 //        scoreManager.addScore(scrollScore)
         
         if !frogController.isJumping && !frogController.isGrounded {
-            _ = landingController.checkLanding(
+            let landingResult = landingController.checkLanding(
                 frogPosition: frogController.position,
                 lilyPads: lilyPads,
                 isJumping: frogController.isJumping,
@@ -1012,8 +1500,29 @@ class GameScene: SKScene {
             return
         }
         
-        // Update enemies with collision handling
-        updateEnemies(frogScreenPoint: frogScreenPoint)
+        // PERFORMANCE: Reduce frequency of expensive collision updates
+        if frameCount % 2 == 0 {  // Run collision updates every other frame
+            // Update enemies with collision handling
+            updateEnemies(frogScreenPoint: frogScreenPoint)
+            
+            // Update and check collisions with edge spike bushes
+            edgeSpikeBushManager.updateAndSpawn(
+                worldOffset: worldManager.worldNode.position.y,
+                sceneSize: size,
+                frogPosition: frogController.position
+            )
+            
+            // Check collisions with edge spike bushes using the collision manager
+            let edgeSpikeBushes = edgeSpikeBushManager.getAllEdgeSpikeBushes()
+            for bush in edgeSpikeBushes {
+                if collisionManager.checkCollision(enemy: bush, frogPosition: frogController.position, frogIsJumping: frogController.isJumping) {
+                    if !frogController.invincible && !frogController.rocketActive {
+                        handleEdgeSpikeBushCollision()
+                        break // Only process one collision per frame
+                    }
+                }
+            }
+        }
         
         // Update logs movement
         let leftWorldX = convert(CGPoint(x: -100, y: 0), to: worldManager.worldNode).x
@@ -1025,6 +1534,9 @@ class GameScene: SKScene {
             leftWorldX: leftWorldX,
             rightWorldX: rightWorldX
         )
+        
+        // THREAD SAFETY: Flush any pending enemies to avoid simultaneous access issues
+        spawnManager.flushPendingEnemies(to: &enemies)
         
         // Update tadpoles
         collisionManager.updateTadpoles(
@@ -1039,12 +1551,61 @@ class GameScene: SKScene {
             }
         )
         
-        collisionManager.updateLilyPads(
-            lilyPads: &lilyPads,
+        // Update big honey pots
+        collisionManager.updateBigHoneyPots(
+            bigHoneyPots: &bigHoneyPots,
+            frogPosition: frogController.position,
+            frogScreenPosition: frogScreenPoint,
             worldOffset: worldManager.worldNode.position.y,
             screenHeight: size.height,
-            frogPosition: frogController.position
+            rocketActive: frogController.rocketActive,
+            onCollect: { [weak self] in
+                self?.handleBigHoneyPotCollect()
+            }
         )
+        
+        // PERFORMANCE: Update lily pads every other frame to reduce overhead
+        if frameCount % 2 == 1 {  // Alternate with enemy updates
+            collisionManager.updateLilyPads(
+                lilyPads: &lilyPads,
+                worldOffset: worldManager.worldNode.position.y,
+                screenHeight: size.height,
+                frogPosition: frogController.position
+            )
+        }
+        
+        // MARK: - Finish Line Logic
+        // Check if score has reached threshold and spawn finish line if not already spawned
+        // Level-based finish line scoring: each level requires 25,000 points
+        let finishLineThreshold = currentLevel * 25000 // Level 1: 25,000, Level 2: 50,000, Level 3: 75,000, etc.
+        if score >= finishLineThreshold && !hasSpawnedFinishLine {
+            print("🏁 Spawning finish line at score \(score) (threshold: \(finishLineThreshold)) for Level \(currentLevel)")
+            spawnFinishLine()
+        }
+        
+        // Check for finish line crossing
+        if let finishLine = finishLine {
+            // CRITICAL: Only check for crossing if we haven't already triggered level completion
+            if action(forKey: "levelTransition") == nil {
+                // Debug the crossing detection
+                let currentY = frogController.position.y
+                let finishY = finishLine.position.y
+                let crossed = finishLine.checkCrossing(frogPosition: frogController.position, frogPreviousY: frogPreviousY)
+                
+                // Add debug output every 60 frames when near finish line
+                if gameLoopCoordinator.getFrameCount() % 60 == 0 && abs(currentY - finishY) < 200 {
+                    print("🏁 Finish line debug: frogY=\(Int(currentY)), finishY=\(Int(finishY)), prevY=\(Int(frogPreviousY)), crossed=\(crossed)")
+                }
+                
+                if crossed {
+                    print("🏁 Finish line crossed detected in update loop")
+                    handleFinishLineCrossed()
+                }
+            }
+        }
+        
+        // Store frog's current Y position for next frame's finish line crossing detection
+        frogPreviousY = frogController.position.y
         
         frogController.updateInvincibility()
         if !frogController.invincible {
@@ -1141,6 +1702,12 @@ class GameScene: SKScene {
         
         frogController.activateInvincibility()
         
+        // Handle spike bushes - they damage the frog but remain in place
+        if enemy.type == EnemyType.spikeBush || enemy.type == EnemyType.edgeSpikeBush {
+            // Spike bushes damage frog but don't get destroyed
+            return .hitOnly
+        }
+        
         // Always remove bees, dragonflies, and snakes when they hit the frog
         if enemy.type == EnemyType.bee || enemy.type == EnemyType.dragonfly || enemy.type == EnemyType.snake {
             return .destroyed(cause: destroyCause)
@@ -1153,7 +1720,7 @@ class GameScene: SKScene {
         }
     }
     
-    private func handleLogBounce(enemy: Enemy) {
+ func handleLogBounce(enemy: Enemy) {
         let dx = frogController.position.x - enemy.position.x
         let dy = frogController.position.y - enemy.position.y
         let len = max(0.001, sqrt(dx*dx + dy*dy))
@@ -1188,18 +1755,61 @@ class GameScene: SKScene {
         HapticFeedbackManager.shared.impact(.heavy)
     }
     
+    private func handleEdgeSpikeBushCollision() {
+        // Damage the frog's health
+        healthManager.damageHealth()
+        
+        // Show scared reaction on the frog
+        frogController.showScared(duration: 1.0)
+        
+        // Activate invincibility frames
+        frogController.activateInvincibility()
+        
+        // Play ice crack sound to indicate hitting the spike bushes
+        soundController.playIceCrack()
+        
+        // Add some visual feedback
+        showFloatingText("Ouch!", color: .systemRed)
+        
+        // Heavy haptic feedback
+        HapticFeedbackManager.shared.impact(.heavy)
+    }
+    
     // MARK: - Tadpole Collection
     private func handleTadpoleCollect() {
         if frogController.rocketActive { return }
         
         let abilityTriggered = healthManager.collectTadpole()
         scoreManager.addScore(100)
+        soundController.playCollectSound()
+        soundController.playScoreSound(scoreValue: 100)
         
         showFloatingScore("+100", color: .systemYellow)
         
         if abilityTriggered {
             // Ability selection will be shown on next landing
         }
+    }
+    
+    // MARK: - Big Honey Pot Collection
+    private func handleBigHoneyPotCollect() {
+        if frogController.rocketActive { return }
+        
+        // Max out honey jar charges (set to 4 as specified)
+        healthManager.maxOutHoneyJarCharges()
+        
+        // Give significant score bonus for collecting big honey pot
+        scoreManager.addScore(500)
+        soundController.playCollectSound()
+        soundController.playScoreSound(scoreValue: 500)
+        
+        showFloatingScore("+500 - Honey Maxed!", color: .systemOrange)
+        
+        // Visual feedback
+        showFloatingText("Honey Pot Maxed!", color: .systemOrange)
+        
+        // Light haptic feedback for positive collection
+        HapticFeedbackManager.shared.impact(.medium)
     }
     
     // MARK: - Scrolled Off Screen
@@ -1241,6 +1851,27 @@ class GameScene: SKScene {
             HapticFeedbackManager.shared.impact(.medium)
             landingController.setRocketGracePeriod(frames: 180) // 3 seconds of slow scroll grace
             facingDirectionController.clearLockedFacing()
+            
+            // PERFORMANCE IMPROVEMENT: Spawn new objects after rocket landing too
+            spawnManager.spawnObjects(
+                sceneSize: size,
+                lilyPads: &lilyPads,
+                enemies: &enemies,
+                tadpoles: &tadpoles,
+                bigHoneyPots: &bigHoneyPots,
+                worldOffset: worldManager.worldNode.position.y,
+                frogPosition: frogController.position,
+                superJumpActive: frogController.superJumpActive
+            )
+            
+            // PERFORMANCE IMPROVEMENT: Cleanup after rocket landing
+            spawnManager.performCleanup(
+                lilyPads: &lilyPads,
+                enemies: &enemies,
+                frogPosition: frogController.position,
+                sceneSize: size,
+                worldNode: worldManager.worldNode
+            )
         } else {
             // Missed landing
             handleMissedLanding()
@@ -1273,6 +1904,27 @@ class GameScene: SKScene {
             
             // Show success feedback
             showFloatingText("Nice Landing!", color: .systemGreen)
+            
+            // PERFORMANCE IMPROVEMENT: Spawn new objects after manual rocket landing
+            spawnManager.spawnObjects(
+                sceneSize: size,
+                lilyPads: &lilyPads,
+                enemies: &enemies,
+                tadpoles: &tadpoles,
+                bigHoneyPots: &bigHoneyPots,
+                worldOffset: worldManager.worldNode.position.y,
+                frogPosition: frogController.position,
+                superJumpActive: frogController.superJumpActive
+            )
+            
+            // PERFORMANCE IMPROVEMENT: Cleanup after manual rocket landing
+            spawnManager.performCleanup(
+                lilyPads: &lilyPads,
+                enemies: &enemies,
+                frogPosition: frogController.position,
+                sceneSize: size,
+                worldNode: worldManager.worldNode
+            )
         } else {
             // No lily pad nearby - show feedback but don't land
             showFloatingText("No lily pad nearby!", color: .systemRed)
@@ -1285,11 +1937,21 @@ class GameScene: SKScene {
         stateManager.splashTriggered = true
         
         if frogController.suppressWaterCollisionUntilNextJump {
-            print("ðŸŒŠ Suppressing water collision until next jump")
+            print("🌊 Suppressing water collision until next jump")
             healthManager.pendingAbilitySelection = false
             return
         }
         
+        // Check water state to determine behavior
+        switch stateManager.waterState {
+        case .ice:
+            handleIceLanding()
+        case .water:
+            handleUnsafePadWaterSplash()
+        }
+    }
+    
+    private func handleUnsafePadWaterSplash() {
         frogController.splash()
         facingDirectionController.clearLockedFacing()
         HapticFeedbackManager.shared.notification(.error)
@@ -1337,11 +1999,25 @@ class GameScene: SKScene {
         stateManager.splashTriggered = true
         
         if frogController.suppressWaterCollisionUntilNextJump {
-            print("ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂºÃ…Â¸ Suppressing water collision until next jump")
+            print("🌊 Suppressing water collision until next jump")
             healthManager.pendingAbilitySelection = false
             return
         }
         
+        print("🔍 handleMissedLanding - waterState: \(stateManager.waterState)")
+        
+        // Check water state to determine behavior
+        switch stateManager.waterState {
+        case .ice:
+            print("🧊 Routing to ice landing")
+            handleIceLanding()
+        case .water:
+            print("💧 Routing to water splash")
+            handleWaterSplash()
+        }
+    }
+    
+    private func handleWaterSplash() {
         frogController.splash()
         facingDirectionController.clearLockedFacing()
         HapticFeedbackManager.shared.notification(.error)
@@ -1374,6 +2050,50 @@ class GameScene: SKScene {
         }
     }
     
+    private func handleIceLanding() {
+        print("🧊 handleIceLanding CALLED")
+        
+        // Reset splash trigger since ice doesn't cause drowning
+        stateManager.splashTriggered = false
+        
+        // Return to idle pose on land - use the frog controller's methods
+        frogController.setToIdlePose()
+        
+        // Start sliding on ice with velocity based on slingshot pull intensity
+        let pullIntensity = self.slingshotController.lastPullIntensity
+        let baseSlideSpeed: CGFloat = 15.0 // Base sliding speed
+        let slideSpeed = pullIntensity * baseSlideSpeed
+        
+        // Use the frog's current velocity direction, but scale by pull intensity
+        let currentVel = frogController.velocity
+        let velMagnitude = sqrt(currentVel.dx * currentVel.dx + currentVel.dy * currentVel.dy)
+        
+        let slideVelocity: CGVector
+        if velMagnitude > 0 {
+            // Normalize current velocity and scale by slide speed
+            let normalizedVel = CGVector(dx: currentVel.dx / velMagnitude, dy: currentVel.dy / velMagnitude)
+            slideVelocity = CGVector(dx: normalizedVel.dx * slideSpeed, dy: normalizedVel.dy * slideSpeed)
+        } else {
+            // Fallback: slide forward with pull intensity
+            slideVelocity = CGVector(dx: 0, dy: slideSpeed)
+        }
+        
+        frogController.startSlidingOnIce(initialVelocity: slideVelocity)
+        facingDirectionController.clearLockedFacing()
+        
+        // Create ice crack effect instead of splash
+        effectsManager?.createIceEffect(at: frogController.position)
+        
+        // Play ice sounds
+        SoundController.shared.playIceCrack()
+        
+        // Light haptic feedback for ice landing
+        HapticFeedbackManager.shared.impact(.light)
+        
+        
+        
+    }
+    
     private func triggerSplashOnce(gameOverDelay: TimeInterval) {
         if stateManager.splashTriggered { return }
         stateManager.splashTriggered = true
@@ -1396,7 +2116,7 @@ class GameScene: SKScene {
     // MARK: - UI Helpers
     private func showFloatingScore(_ text: String, color: UIColor) {
         let label = SKLabelNode(text: text)
-        label.fontName = "Arial-BoldMT"
+        label.fontName = "ArialRoundedMTBold"
         label.fontSize = 22
         label.fontColor = color
         label.verticalAlignmentMode = .center
@@ -1418,9 +2138,333 @@ class GameScene: SKScene {
         ]))
     }
     
+    private func showLevelIndicator() {
+        // Create a small level indicator in the top-left corner
+        let levelLabel = SKLabelNode(text: "Level \(currentLevel)")
+        levelLabel.fontName = "ArialRoundedMT"
+        levelLabel.fontSize = 18
+        levelLabel.fontColor = .white
+        levelLabel.position = CGPoint(x: 50, y: size.height - 50)
+        levelLabel.zPosition = 1001
+        levelLabel.name = "levelIndicator"
+        
+        // Remove any existing level indicator
+        childNode(withName: "levelIndicator")?.removeFromParent()
+        
+        addChild(levelLabel)
+    }
+    
+    // MARK: - Finish Line Management
+    
+    private func spawnFinishLine() {
+        hasSpawnedFinishLine = true
+        
+        print("🏁 Spawning finish line - current frog position: (\(Int(frogController.position.x)), \(Int(frogController.position.y)))")
+        
+        // Find the highest lily pad that's still accessible to the frog
+        var bestPads: [LilyPad] = []
+        let searchRange = frogController.position.y + 200 ... frogController.position.y + 600
+        
+        for pad in lilyPads {
+            if searchRange.contains(pad.position.y) {
+                bestPads.append(pad)
+            }
+        }
+        
+        print("🏁 Found \(bestPads.count) lily pads in range \(Int(searchRange.lowerBound))...\(Int(searchRange.upperBound))")
+        
+        // Sort by distance from frog and pick a good candidate
+        bestPads.sort { pad1, pad2 in
+            let dist1 = abs(pad1.position.y - (frogController.position.y + 400))
+            let dist2 = abs(pad2.position.y - (frogController.position.y + 400))
+            return dist1 < dist2
+        }
+        
+        // Position the finish line
+        let finishLineY: CGFloat
+        let finishLineX: CGFloat
+        
+        if let bestPad = bestPads.first {
+            // Place finish line above the lily pad
+            finishLineY = bestPad.position.y + 80
+            finishLineX = bestPad.position.x
+            print("🏁 Placing finish line near lily pad at (\(Int(bestPad.position.x)), \(Int(bestPad.position.y)))")
+        } else {
+            // Default position if no suitable lily pad is found
+            finishLineY = frogController.position.y + 400
+            finishLineX = frogController.position.x
+            print("🏁 No suitable lily pad found, placing finish line at default position")
+        }
+        
+        let finishLinePosition = CGPoint(x: finishLineX, y: finishLineY)
+        
+        // Create the finish line
+        finishLine = FinishLine(
+            position: finishLinePosition,
+            width: GameConfig.finishLineWidth
+        )
+        
+        // Set up crossing callback (this is redundant with the checkCrossing method but kept for safety)
+        finishLine?.onCrossed = { [weak self] in
+            print("🏁 onCrossed callback triggered!")
+            self?.handleFinishLineCrossed()
+        }
+        
+        // Add to world node so it moves with the world
+        if let finishLineNode = finishLine?.node {
+            worldManager.worldNode.addChild(finishLineNode)
+            print("🏁 Finish line node added to world at position: \(finishLinePosition)")
+        } else {
+            print("🚨 ERROR: Failed to create finish line node!")
+        }
+        
+        // Show a message to the player
+        showFloatingScore("🏁 FINISH LINE!", color: .systemGreen)
+        
+        // Play a special sound (if available)
+        soundController.playCollectSound()
+        
+        print("🏁 Finish line spawned successfully!")
+        print("🏁 Final position: (\(Int(finishLinePosition.x)), \(Int(finishLinePosition.y)))")
+        print("🏁 Distance from frog: \(Int(finishLinePosition.y - frogController.position.y)) units")
+    }
+    
+    private func handleFinishLineCrossed() {
+        // CRITICAL: Prevent multiple triggers of finish line crossing
+        guard let finishLine = finishLine else {
+            print("🚨 handleFinishLineCrossed called but no finish line exists!")
+            return
+        }
+        
+        print("🏁 Frog crossed the finish line! Level \(currentLevel) complete!")
+        print("🏁 Current score: \(score)")
+        
+        // Calculate and award time bonus
+        let timeBonus = calculateTimeBonus()
+        if timeBonus > 0 {
+            scoreManager.addScore(timeBonus)
+            showFloatingScore("+\(timeBonus) TIME BONUS", color: .cyan)
+        }
+        
+        // Stop the level timer
+        stopLevelTimer()
+        
+        // IMMEDIATELY remove the finish line to prevent multiple triggers
+        finishLine.node.removeFromParent()
+        self.finishLine = nil
+        hasSpawnedFinishLine = true // Keep this true until we start the next level
+        
+        // Complete level in ScoreManager (this handles level progression and bonus scoring)
+        scoreManager.completeLevel()
+        
+        // Show completion message and updated score
+        showFloatingScore("LEVEL COMPLETE!", color: .systemGreen)
+        showFloatingScore("+\(GameConfig.levelCompletionBonus) BONUS", color: .systemYellow)
+        
+        // Play completion sound
+        soundController.playCollectSound()
+        
+        // Heavy haptic feedback
+        HapticFeedbackManager.shared.impact(.heavy)
+        
+        // Transition to next level after a short delay
+        let delay = SKAction.wait(forDuration: 0.5)
+        let nextLevel = SKAction.run { [weak self] in
+            print("🏁 About to start next level from Level \(self?.scoreManager.getCurrentLevel() ?? -1)")
+            self?.startNextLevel()
+        }
+        run(SKAction.sequence([delay, nextLevel]), withKey: "levelTransition")
+    }
+    
+    private func startNextLevel() {
+        print("🎮 Starting next level...")
+        
+       
+        
+        let oldLevel = currentLevel
+        
+        // Get current level from ScoreManager (it was already incremented in completeLevel())
+        currentLevel = scoreManager.getCurrentLevel()
+        baseSpawnRateMultiplier = 1.0 + (CGFloat(currentLevel - 1) * 0.1)
+        
+        print("🎯 Advanced from Level \(oldLevel) to Level \(currentLevel)")
+        print("📈 Enemy spawn rate multiplier: \(String(format: "%.1f", baseSpawnRateMultiplier))x (base + \(String(format: "%.0f", (baseSpawnRateMultiplier - 1.0) * 100))%)")
+        
+        // Remove finish line
+        finishLine?.node.removeFromParent()
+        finishLine = nil
+        hasSpawnedFinishLine = false
+        
+        // Cancel any pending level transitions
+        removeAction(forKey: "levelTransition")
+        
+        // Remove any existing level labels to prevent overlap
+        enumerateChildNodes(withName: "levelLabel") { node, _ in
+            node.removeFromParent()
+        }
+        enumerateChildNodes(withName: "difficultyLabel") { node, _ in
+            node.removeFromParent()
+        }
+        
+        // Show level advancement message
+        let levelLabel = SKLabelNode(text: "LEVEL \(currentLevel)")
+        levelLabel.fontName = "ArialRoundedMTBold"
+        levelLabel.fontSize = 48
+        levelLabel.fontColor = .systemYellow
+        levelLabel.position = CGPoint(x: size.width/2, y: size.height/2 + 30 + 100)
+        levelLabel.zPosition = 1000
+        levelLabel.name = "levelLabel" // Add name for easy removal
+        addChild(levelLabel)
+        
+        // Show difficulty increase subtitle
+        let difficultyLabel = SKLabelNode(text: "Enemy spawn rate +10%")
+        difficultyLabel.fontName = "ArialRoundedMTBold"
+        difficultyLabel.fontSize = 24
+        difficultyLabel.fontColor = .systemOrange
+        difficultyLabel.position = CGPoint(x: size.width/2, y: size.height/2 - 20 + 70)
+        difficultyLabel.zPosition = 1000
+        difficultyLabel.name = "difficultyLabel" // Add name for easy removal
+        addChild(difficultyLabel)
+        
+        // Animate the level labels
+        for label in [levelLabel, difficultyLabel] {
+            label.setScale(0)
+            let scaleUp = SKAction.scale(to: 1.2, duration: 0.3)
+            let scaleNormal = SKAction.scale(to: 1.0, duration: 0.2)
+            let wait = SKAction.wait(forDuration: 1.5)
+            let fadeOut = SKAction.fadeOut(withDuration: 0.5)
+            let remove = SKAction.removeFromParent()
+            
+            label.run(SKAction.sequence([
+                scaleUp, scaleNormal, wait, fadeOut, remove
+            ]))
+        }
+        
+        // Update spawn manager with new level's spawn rate multiplier
+        spawnManager.updateSpawnRateMultiplier(baseSpawnRateMultiplier)
+        
+        // Update the level indicator in the corner
+        showLevelIndicator()
+        
+        // Continue playing without resetting the game completely
+        // Just reset necessary game objects while preserving level progression
+        continueLevelProgression()
+    }
+    
+    // MARK: - Level Progression Helper
+    private func continueLevelProgression() {
+        print("🎮 Continuing level progression...")
+        print("🧹 Starting comprehensive cleanup for Level \(currentLevel)...")
+        
+        // STEP 1: Complete visual cleanup - remove all existing nodes from world
+        print("🧹 Removing all existing world nodes...")
+        for enemy in enemies {
+            enemy.node.removeFromParent()
+        }
+        for tadpole in tadpoles {
+            tadpole.node.removeFromParent()
+        }
+        for lilyPad in lilyPads {
+            lilyPad.node.removeFromParent()
+        }
+        
+        // STEP 2: Clear game object arrays
+        print("🧹 Clearing object arrays...")
+        enemies.removeAll()
+        tadpoles.removeAll()
+        lilyPads.removeAll()
+        
+        // STEP 3: Clear spatial grid after clearing lily pads array
+        print("🧹 Clearing spatial grid...")
+        spawnManager.clearSpatialGrid()
+        
+        // STEP 4: Reset world manager completely
+        print("🧹 Resetting world manager...")
+        worldManager.reset()
+        
+        // STEP 5: Reset all level-specific state
+        print("🧹 Resetting level state...")
+        hasSpawnedFinishLine = false
+        frogPreviousY = 0
+        isRocketFinalApproach = false
+        
+        // STEP 6: Reset spawn manager state for new level
+        print("🧹 Resetting spawn manager state...")
+        spawnManager.reset(for: &lilyPads, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots)
+        
+        // STEP 7: Reset frog state for new level
+        print("🐸 Resetting frog state for new level...")
+        frogController.superJumpActive = false
+        frogController.rocketActive = false
+        frogController.invincible = false
+        frogController.inWater = false
+        frogController.onIce = false
+        frogController.isJumping = false
+        frogController.suppressWaterCollisionUntilNextJump = false
+        frogController.velocity = .zero
+        frogController.slideVelocity = .zero
+        
+        // Hide all ability indicators
+        uiManager.hideSuperJumpIndicator()
+        uiManager.hideRocketIndicator()
+        uiManager.hideRocketLandButton()
+        
+        // STEP 8: Create fresh starting pad at current position
+        print("🪷 Creating new starting pad...")
+        let startWorldPos = CGPoint(x: size.width / 2, y: frogController.position.y)
+        let startPad = makeLilyPad(position: startWorldPos, radius: 60)
+        startPad.node.position = startPad.position
+        startPad.node.zPosition = 10
+        worldManager.worldNode.addChild(startPad.node)
+        lilyPads.append(startPad)
+        
+        // STEP 9: Add starting pad to spatial grid
+        spawnManager.addToSpatialGrid(startPad)
+        print("🪷 Starting pad added to spatial grid at: \(startWorldPos)")
+        
+        // STEP 10: Land frog on the new starting pad
+        frogController.landOnPad(startPad)
+        frogController.isGrounded = true
+        print("🐸 Frog landed on new starting pad")
+        
+        // STEP 11: Spawn fresh initial objects for the new level
+        print("🎯 Spawning initial objects for Level \(currentLevel)...")
+        spawnManager.spawnInitialObjects(
+            sceneSize: size,
+            lilyPads: &lilyPads,
+            enemies: &enemies,
+            tadpoles: &tadpoles,
+            bigHoneyPots: &bigHoneyPots,
+            worldOffset: worldManager.worldNode.position.y
+        )
+        
+        // STEP 12: Resume spawning with new level parameters
+        spawnManager.resumeSpawningAfterAbilitySelection()
+        print("🎯 Spawning resumed with \(String(format: "%.1f", baseSpawnRateMultiplier))x rate multiplier")
+        
+        // STEP 13: Start timer for new level
+        startLevelTimer()
+        
+        // STEP 13.5: Advance the finish line for the next level
+        spawnManager.advanceToNextLevel(currentScore: score)
+
+        // STEP 14: Show initial upgrade selection for new level
+        gameState = .initialUpgradeSelection
+        uiManager.showInitialUpgradeSelection(sceneSize: size)
+        
+        print("✅ Level \(currentLevel) progression complete!")
+        print("📊 Final state: \(lilyPads.count) lily pads, \(enemies.count) enemies, \(tadpoles.count) tadpoles")
+        
+        // Verify cleanup was successful
+        let cleanupSuccessful = verifyLevelCleanup()
+        if !cleanupSuccessful {
+            print("🚨 WARNING: Level cleanup verification failed!")
+        }
+    }
+    
     private func showFloatingText(_ text: String, color: UIColor) {
         let label = SKLabelNode(text: text)
-        label.fontName = "Arial-BoldMT"
+        label.fontName = "ArialRoundedMTBold"
         label.fontSize = 24
         label.fontColor = color
         label.verticalAlignmentMode = .center
@@ -1473,17 +2517,91 @@ class GameScene: SKScene {
         print("  - isGrounded: \(frogController.isGrounded)")
         print("  - isJumping: \(frogController.isJumping)")
         print("  - inWater: \(frogController.inWater)")
+        print("  - onIce: \(frogController.onIce)")
+        print("  - slideVelocity: \(frogController.slideVelocity)")
         print("  - rocketActive: \(frogController.rocketActive)")
         print("  - currentLilyPad: \(frogController.currentLilyPad != nil ? "YES" : "NO")")
         print("  - inputLocked: \(stateManager.inputLocked)")
+        print("  - waterState: \(stateManager.waterState)")
         print("  - gameState: \(gameState)")
         print("  - pendingAbilitySelection: \(healthManager.pendingAbilitySelection)")
+    }
+    
+    // MARK: - Debug Methods
+    
+    // Debug function specifically for slingshot input blocking
+    func debugSlingshotBlocking() {
+        print("🔍 SLINGSHOT DEBUG:")
+        print("  - gameState: \(gameState)")
+        print("  - inputLocked: \(stateManager.inputLocked)")
+        print("  - pendingAbilitySelection: \(healthManager.pendingAbilitySelection)")
+        print("  - isGrounded: \(frogController.isGrounded)")
+        print("  - isJumping: \(frogController.isJumping)")
+        print("  - inWater: \(frogController.inWater)")
+        print("  - onIce: \(frogController.onIce)")
+        print("  - rocketActive: \(frogController.rocketActive)")
+        print("  - currentLilyPad: \(frogController.currentLilyPad != nil ? "YES" : "NO")")
+        print("  - canAcceptSlingshotInput: \(canAcceptSlingshotInput())")
+        print("  - currentLevel: \(currentLevel)")
+        print("  - spawnRateMultiplier: \(String(format: "%.2f", baseSpawnRateMultiplier))x")
+        
+        // Additional detailed checks
+        if gameState != .playing {
+            print("  ❌ BLOCKED: Game not in playing state")
+        }
+        if stateManager.inputLocked {
+            print("  ❌ BLOCKED: Input is locked")
+        }
+        if healthManager.pendingAbilitySelection {
+            print("  ❌ BLOCKED: Ability selection pending")
+            
+            // SAFETY CHECK: If we've been pending for too long and game state is normal, force clear it
+            if gameState == .playing && frogController.isGrounded && !frogController.isJumping {
+                print("  🚨 SAFETY: Clearing stuck pendingAbilitySelection")
+                healthManager.forceClearAbilitySelection(reason: "stuck detection in debug")
+            }
+        }
+        if frogController.rocketActive {
+            print("  ❌ BLOCKED: Rocket is active")
+        }
+        if !frogController.isGrounded && !frogController.inWater && !frogController.onIce {
+            print("  ❌ BLOCKED: Frog not grounded/inWater/onIce")
+        }
+        if canAcceptSlingshotInput() {
+            print("  ✅ Slingshot input should be ALLOWED")
+        } else {
+            print("  ❌ Slingshot input is BLOCKED")
+        }
+    }
+    
+    // MARK: - Input Validation Helpers
+    private func canAcceptSlingshotInput() -> Bool {
+        return frogController.isGrounded || frogController.inWater || frogController.onIce
+    }
+    
+    private func debugWaterStateAndTouch() {
+        print("🔍 WATER STATE DEBUG:")
+        print("  - waterState: \(stateManager.waterState)")
+        print("  - isGrounded: \(frogController.isGrounded)")
+        print("  - isJumping: \(frogController.isJumping)")
+        print("  - inWater: \(frogController.inWater)")
+        print("  - onIce: \(frogController.onIce)")
+        print("  - slideVelocity: \(frogController.slideVelocity)")
+        print("  - canAcceptInput: \(canAcceptSlingshotInput())")
     }
     
     // Manual recovery function for testing/debugging
     func manualRecovery() {
         debugFrogState()
+        debugSlingshotBlocking()  // Also call the new debug function
         stateManager.forceUnlockInput()
+        
+        // Clear stuck ability selection state
+        if healthManager.pendingAbilitySelection {
+            print("🚨 Manual recovery: Clearing stuck pendingAbilitySelection")
+            healthManager.forceClearAbilitySelection(reason: "manual recovery")
+        }
+        
         if attemptStateRecovery() {
             print("✅ Manual recovery successful")
         } else {
@@ -1491,10 +2609,218 @@ class GameScene: SKScene {
         }
     }
     
+    // MARK: - Ice Testing Methods
+    func testIceMode() {
+        print("🧊 TESTING ICE MODE")
+        stateManager.createIceLevel()
+        debugWaterStateAndTouch()
+    }
+    
+    func forceIceSliding() {
+        print("🧊 FORCING ICE SLIDING")
+        let testVelocity = CGVector(dx: 5.0, dy: 2.0)
+        frogController.startSlidingOnIce(initialVelocity: testVelocity)
+        debugWaterStateAndTouch()
+    }
+    
+    // Call this method to test ice sliding directly
+    func quickIceTest() {
+        print("🧊 QUICK ICE TEST")
+        stateManager.setWaterState(.ice)
+        print("🧊 Water state set to ice: \(stateManager.waterState)")
+        
+        // Force the frog into a sliding state
+        let slideVelocity = CGVector(dx: 4.0, dy: -2.0)
+        frogController.startSlidingOnIce(initialVelocity: slideVelocity)
+        
+        print("🧊 Frog should now be sliding - onIce: \(frogController.onIce)")
+        print("🧊 Slide velocity: \(frogController.slideVelocity)")
+    }
+    
+    // Check and fix stuck ability selection
+    func checkAndFixAbilitySelection() {
+        print("🔧 ABILITY SELECTION CHECK:")
+        print("  - pendingAbilitySelection: \(healthManager.pendingAbilitySelection)")
+        print("  - gameState: \(gameState)")
+        print("  - isGrounded: \(frogController.isGrounded)")
+        print("  - isJumping: \(frogController.isJumping)")
+        print("  - spawningPaused: \(spawnManager.isSpawningPaused)")  // Fixed property access
+        
+        if healthManager.pendingAbilitySelection && gameState == .playing && 
+           frogController.isGrounded && !frogController.isJumping {
+            print("🚨 FIXING: Clearing stuck pendingAbilitySelection")
+            healthManager.forceClearAbilitySelection(reason: "manual check and fix")
+        } else {
+            print("✅ Ability selection state looks normal")
+        }
+    }
+    
+    // Test method to check current ice/spawn state
+    func debugIceSpawnState() {
+        print("🧊 ICE SPAWN STATE DEBUG:")
+        print("  - waterState: \(stateManager.waterState)")
+        print("  - frog onIce: \(frogController.onIce)")
+        print("  - slide velocity: \(frogController.slideVelocity)")
+        print("  - frog position: \(frogController.position)")
+        print("  - lily pads ahead count: \(lilyPads.filter { $0.position.y > frogController.position.y }.count)")
+    }
+    
+    // MARK: - Level Testing Methods
+    
+    /// Verify level cleanup was successful
+    func verifyLevelCleanup() -> Bool {
+        print("🔍 LEVEL CLEANUP VERIFICATION:")
+        
+        var allClear = true
+        
+        // Check arrays are empty
+        if !enemies.isEmpty {
+            print("  ❌ Enemies array not empty: \(enemies.count) remaining")
+            allClear = false
+        }
+        if !tadpoles.isEmpty {
+            print("  ❌ Tadpoles array not empty: \(tadpoles.count) remaining")
+            allClear = false
+        }
+        if !lilyPads.isEmpty {
+            print("  ❌ LilyPads array not empty: \(lilyPads.count) remaining")
+            allClear = false
+        }
+        
+        // Check world node has no orphaned children
+        let worldChildren = worldManager.worldNode.children
+        let enemyNodes = worldChildren.filter { $0.name?.contains("enemy") == true || $0.name?.contains("log") == true || $0.name?.contains("bee") == true }
+        let tadpoleNodes = worldChildren.filter { $0.name?.contains("tadpole") == true }
+        let padNodes = worldChildren.filter { $0.name?.contains("lilypad") == true || $0.name?.contains("pad") == true }
+        
+        if !enemyNodes.isEmpty {
+            print("  ❌ Orphaned enemy nodes in world: \(enemyNodes.count)")
+            allClear = false
+        }
+        if !tadpoleNodes.isEmpty {
+            print("  ❌ Orphaned tadpole nodes in world: \(tadpoleNodes.count)")
+            allClear = false
+        }
+        if padNodes.count > 1 { // Allow 1 for the starting pad
+            print("  ❌ Too many lily pad nodes in world: \(padNodes.count) (expected 1 starting pad)")
+            allClear = false
+        }
+        
+        // Check finish line state
+        if finishLine != nil {
+            print("  ❌ Finish line not cleared")
+            allClear = false
+        }
+        if hasSpawnedFinishLine && currentLevel > 1 {
+            print("  ❌ hasSpawnedFinishLine not reset for new level")
+            allClear = false
+        }
+        
+        if allClear {
+            print("  ✅ Level cleanup verification PASSED")
+        } else {
+            print("  ❌ Level cleanup verification FAILED")
+        }
+        
+        return allClear
+    }
+    
+    /// Force cleanup all game objects (emergency method)
+    func forceCompleteCleanup() {
+        print("🚨 FORCE CLEANUP: Removing ALL game objects")
+        
+        // Remove all nodes from world that might be game objects
+        let worldChildren = worldManager.worldNode.children
+        for child in worldChildren {
+            if let name = child.name,
+               name.contains("enemy") || name.contains("log") || name.contains("bee") || 
+               name.contains("snake") || name.contains("dragonfly") || name.contains("bush") ||
+               name.contains("tadpole") || name.contains("lilypad") || name.contains("pad") ||
+               name.contains("finish") {
+                child.removeFromParent()
+                print("  🗑️ Removed orphaned node: \(name)")
+            }
+        }
+        
+        // Clear all arrays
+        enemies.removeAll()
+        tadpoles.removeAll()
+        lilyPads.removeAll()
+        
+        // Clear spatial grid
+        spawnManager.clearSpatialGrid()
+        
+        // Reset finish line
+        finishLine?.node.removeFromParent()
+        finishLine = nil
+        hasSpawnedFinishLine = false
+        
+        print("🚨 Force cleanup complete")
+    }
+    
+    /// Test method to manually advance to next level (for debugging)
+    func testAdvanceLevel() {
+        print("🧪 TESTING: Manually advancing to next level")
+        handleFinishLineCrossed()
+    }
+    
+    /// Test method to manually spawn finish line (for debugging)
+    func testSpawnFinishLine() {
+        print("🧪 TESTING: Manually spawning finish line")
+        spawnFinishLine()
+    }
+    
+    /// Debug finish line state
+    func debugFinishLineState() {
+        print("🏁 FINISH LINE DEBUG:")
+        print("   - Score: \(score)")
+        print("   - Current Level: \(currentLevel)")
+        print("   - Threshold: \(currentLevel * 25000)")
+        print("   - Has spawned: \(hasSpawnedFinishLine)")
+        print("   - Finish line exists: \(finishLine != nil)")
+        print("   - Frog position Y: \(Int(frogController.position.y))")
+        print("   - Previous frog Y: \(Int(frogPreviousY))")
+        
+        if let finishLine = finishLine {
+            print("   - Finish line Y: \(Int(finishLine.position.y))")
+            print("   - Finish line X: \(Int(finishLine.position.x))")
+            print("   - Distance to finish: \(Int(finishLine.position.y - frogController.position.y))")
+        }
+        
+        if let levelTransitionAction = action(forKey: "levelTransition") {
+            print("   - Level transition in progress: YES")
+        } else {
+            print("   - Level transition in progress: NO")
+        }
+    }
+    
+    /// Test method to get current level info
+    func debugLevelInfo() {
+        print("🎯 LEVEL INFO:")
+        print("  - Current Level: \(currentLevel)")
+        print("  - Base Spawn Rate Multiplier: \(String(format: "%.2f", baseSpawnRateMultiplier))x")
+        print("  - Increase from Level 1: +\(String(format: "%.0f", (baseSpawnRateMultiplier - 1.0) * 100))%")
+        print("  - SpawnManager Multiplier: \(String(format: "%.2f", spawnManager.levelSpawnRateMultiplier))x")
+    }
+    
+    // TEMPORARY: Override input validation to allow ice sliding
+    private func shouldAllowSlingshotInput() -> Bool {
+        let result = frogController.isGrounded || frogController.inWater || frogController.onIce
+        if !result {
+            print("🚫 Input blocked - isGrounded: \(frogController.isGrounded), inWater: \(frogController.inWater), onIce: \(frogController.onIce)")
+        }
+        return result
+    }
+    
     // MARK: - Touch Handling
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
         let location = touch.location(in: self)
+        
+        // Debug water state when touches begin
+        if gameState == .playing {
+            debugWaterStateAndTouch()
+        }
         
         let nodesAtPoint = nodes(at: location)
         
@@ -1502,6 +2828,9 @@ class GameScene: SKScene {
         if let tapped = nodesAtPoint.first(where: { node in
             guard let name = node.name else { return false }
             return name == "playGameButton" ||
+                   name == "leaderboardButton" ||
+                   name == "tutorialButton" ||
+                   name == "closeTutorialButton" ||
                    name == "pauseButton" ||
                    name == "continueButton" ||
                    name == "resumeButton" ||
@@ -1524,48 +2853,83 @@ class GameScene: SKScene {
             if let nodeName = node.name {
                 // Main Menu Buttons
                 if nodeName == "playGameButton" {
-                    startGame()
+                    soundController.playSoundEffect(.buttonTap)
+                    startNewGame()
                     return
                 }
-                if nodeName == "profileButton" || nodeName == "leaderboardButton" || nodeName == "settingsButton" || nodeName == "audioButton" {
-                    // Placeholder for future navigation, currently just close menu
+                if nodeName == "leaderboardButton" {
+                    soundController.playSoundEffect(.buttonTap)
+                    // Present Game Center leaderboard via UIManager
+                    uiManager.presentLeaderboard(leaderboardID: uiManager.leaderboardID)
+                    return
+                }
+                if nodeName == "tutorialButton" {
+                    soundController.playSoundEffect(.buttonTap)
+                    // Show tutorial modal via UIManager
+                    uiManager.showTutorialModal(sceneSize: size)
+                    return
+                }
+                if nodeName == "closeTutorialButton" {
+                    soundController.playSoundEffect(.buttonTap)
+                    // Close tutorial modal via UIManager
+                    uiManager.hideTutorialModal()
+                    return
+                }
+                if nodeName == "profileButton" || nodeName == "settingsButton" || nodeName == "audioButton" {
+                    soundController.playSoundEffect(.buttonTap)
+                    // Placeholder for future navigation
                     print("Tapped \(nodeName), navigating...")
                     return
                 }
                 if nodeName == "exitButton" || nodeName == "backToMenuButton" {
+                    soundController.playSoundEffect(.buttonTap)
                     showMainMenu()
                     return
                 }
                 if nodeName == "tryAgainButton" || nodeName == "restartButton" {
-                    startGame()
+                    soundController.playSoundEffect(.buttonTap)
+                    startNewGame()
                     return
                 }
                 
                 // Ability selection buttons
                 if nodeName.contains("ability") {
+                    soundController.playSoundEffect(.buttonTap)
+                    print("🎯 Ability button tapped: \(nodeName)")
                     selectAbility(nodeName)
+                    return
+                }
+                
+                // Initial upgrade selection buttons
+                if nodeName.hasPrefix("initialUpgrade_") {
+                    soundController.playSoundEffect(.buttonTap)
+                    handleInitialUpgradeSelection(nodeName)
                     return
                 }
                 // Pause button handler
                            if nodeName == "pauseButton" {
+                               soundController.playSoundEffect(.buttonTap)
                                gameState = .paused
                                uiManager.showPauseMenu(sceneSize: size)
                                return
                            }
                 // Pause menu buttons
                            if nodeName == "continueButton" || nodeName == "resumeButton" {
+                               soundController.playSoundEffect(.buttonTap)
                                gameState = .playing
                                uiManager.hideMenus()
                                return
                            }
                            
                            if nodeName == "quitButton" || nodeName == "quitToMenuButton" {
+                               soundController.playSoundEffect(.buttonTap)
                                showMainMenu()
                                return
                            }
                 
                 // Rocket land button handler
                 if nodeName == "rocketLandButton" {
+                    soundController.playSoundEffect(.buttonTap)
                     handleRocketLandButtonTap()
                     return
                 }
@@ -1587,7 +2951,7 @@ class GameScene: SKScene {
             } else if location.x < screenCenter - 40 {
                 touchInputController.applyTapNudge(isRightSide: false, sceneWidth: size.width)
             }
-            _ = touchInputController.handleTouchBegan(touch, in: self.view!, sceneSize: size, rocketActive: frogController.rocketActive)
+            _ = touchInputController.handleTouchBegan(touch, in: self.view, sceneSize: size, rocketActive: frogController.rocketActive)
             return
         }
         
@@ -1672,7 +3036,7 @@ class GameScene: SKScene {
         
         if gameState == .playing && frogController.rocketActive {
             print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch routed to rocket steering")
-            _ = touchInputController.handleTouchEnded(touch, in: self.view!, sceneSize: size, rocketActive: frogController.rocketActive, hudBarHeight: hudBarHeight)
+            _ = touchInputController.handleTouchEnded(touch, in: self.view, sceneSize: size, rocketActive: frogController.rocketActive, hudBarHeight: hudBarHeight)
             return
         }
         
@@ -1718,10 +3082,16 @@ class GameScene: SKScene {
             uiManager.handleButtonRelease(node: pressed)
             currentlyPressedButton = nil
         }
+        
+        // IMPORTANT: Cancel any active slingshot aiming when touches are cancelled
+        if slingshotController.slingshotActive {
+            print("🎯 Touch cancelled - canceling slingshot aiming")
+            slingshotController.cancelCurrentAiming()
+        }
     }
     
     private func updateFacingFromAiming(location: CGPoint) {
-        if frogController.isGrounded || frogController.inWater {
+        if canAcceptSlingshotInput() {
             let start = convert(frogController.position, from: worldManager.worldNode)
             let pull = CGPoint(x: location.x - start.x, y: location.y - start.y)
             if pull.x != 0 || pull.y != 0 {

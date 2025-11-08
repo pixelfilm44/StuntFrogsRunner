@@ -7,6 +7,8 @@ public enum UpgradeType: CaseIterable, Equatable {
     case refillHearts
     case flySwatters
     case rockets
+    case superJump
+    case axe
 }
 
 public protocol HUDConfigurable {
@@ -43,9 +45,13 @@ extension HUDController: HUDConfigurable {
 
     public func upgradeOptions(for currentScore: Int) -> [UpgradeType] {
         if currentScore <= 4000 {
-            return [.honeypot, .extraHeart, .lifeVests, .refillHearts]
+            return [.honeypot, .extraHeart, .lifeVests, .refillHearts, .superJump]
         } else {
-            return [.honeypot, .extraHeart, .lifeVests, .flySwatters, .refillHearts, .rockets]
+            if currentScore > 8000 { // Lowered from 15000 to 8000
+                return [.honeypot, .extraHeart, .lifeVests, .flySwatters, .refillHearts, .rockets, .superJump, .axe]
+            } else {
+                return [.honeypot, .extraHeart, .lifeVests, .flySwatters, .refillHearts, .rockets, .superJump]
+            }
         }
     }
 }

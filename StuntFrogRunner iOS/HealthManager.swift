@@ -5,7 +5,6 @@
 //  Created by Jeff Mielke on 10/25/25.
 //
 
-
 //
 //  HealthManager.swift
 //  StuntFrog Runner
@@ -67,13 +66,22 @@ class HealthManager {
         }
     }
     
-    var pendingAbilitySelection: Bool = false
+    var pendingAbilitySelection: Bool = false {
+        didSet {
+            if GameConfig.enableAbilitySelectionDebug {
+                print("🔧 pendingAbilitySelection changed to: \(pendingAbilitySelection)")
+            }
+            // Notify spawn manager of state change
+            onAbilitySelectionStateChanged?(pendingAbilitySelection)
+        }
+    }
     
     // MARK: - Callbacks
     var onHealthChanged: ((Int, Int) -> Void)?  // newHealth, oldHealth
     var onMaxHealthChanged: ((Int) -> Void)?
     var onTadpolesChanged: ((Int) -> Void)?
     var onAbilityChargesChanged: (() -> Void)?
+    var onAbilitySelectionStateChanged: ((Bool) -> Void)?  // NEW: Notify when ability selection state changes
     var onHealthDepleted: (() -> Void)?
     
     // MARK: - Initialization
@@ -104,6 +112,21 @@ class HealthManager {
         health += amount
     }
     
+    /// Applies the "Extra Heart" ability.
+    /// - Note: Adds one to max health and fills only the newly added heart.
+    ///         It does NOT replenish any previously lost hearts beyond the new one.
+    func applyExtraHeart() {
+        // This increases capacity by 1 and also increases current health by 1,
+        // which fills only the newly added heart.
+        increaseMaxHealth(by: 1)
+    }
+    
+    /// Applies the "Refill Hearts" ability.
+    /// - Note: Refills all existing hearts up to current max health.
+    func applyRefillHearts() {
+        refillHealth()
+    }
+    
     // MARK: - Tadpole Management
     func collectTadpole() -> Bool {
         tadpolesCollected += 1
@@ -120,6 +143,14 @@ class HealthManager {
     
     func resetTadpoles() {
         tadpolesCollected = 0
+    }
+    
+    // MARK: - Safety Methods for Stuck States
+    func forceClearAbilitySelection(reason: String = "manual") {
+        if GameConfig.enableAbilitySelectionDebug {
+            print("🔧 Force clearing pendingAbilitySelection. Reason: \(reason)")
+        }
+        pendingAbilitySelection = false
     }
     
     // MARK: - Ability Charge Management
@@ -145,6 +176,10 @@ class HealthManager {
     
     func addHoneyJarCharge() {
         honeyJarCharges = min(6, honeyJarCharges + 1)
+    }
+    
+    func maxOutHoneyJarCharges() {
+        honeyJarCharges = 4 // Set to max as specified in requirements
     }
     
     func useHoneyJarCharge() -> Bool {

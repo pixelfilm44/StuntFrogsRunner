@@ -65,17 +65,13 @@ class CollisionManager {
                     let key = ObjectIdentifier(enemy)
                     lastLogCollisionFrame.removeValue(forKey: key)
                 }
+                enemy.stopAnimation()
                 enemy.node.removeFromParent()
                 return true
             }
             
             if enemy.type == .snake {
-                // Horizontal movement with subtle vertical variance
-                let time = CGFloat(CACurrentMediaTime())
-                // Much smaller amplitude for subtle up/down variance
-                let varianceAmplitude: CGFloat = 3.0   // small up/down variance
-                let varianceFrequency: CGFloat = 1.8    // gentle frequency
-
+                // Straight horizontal movement - no vertical variance
                 if let targetPad = enemy.targetLilyPad {
                     // Maintain occupancy only while the snake is near the pad horizontally; otherwise release
                     let dx = enemy.position.x - targetPad.position.x
@@ -83,19 +79,13 @@ class CollisionManager {
                         targetPad.removeEnemyType(enemy.type)
                         enemy.targetLilyPad = nil
                     } else {
-                        // Keep the snake near the pad's Y with small variance
-                        let baseY = targetPad.position.y
-                        let varianceOffset = sin(time * varianceFrequency) * varianceAmplitude
-                        enemy.position.y = baseY + varianceOffset
+                        // Keep the snake at the exact same Y position as the target pad (straight line)
+                        enemy.position.y = targetPad.position.y
                         enemy.node.position.y = enemy.position.y
                     }
-                } else {
-                    // No target pad: add small variance around current baseline
-                    let baseline = enemy.position.y
-                    let varianceOffset = sin(time * varianceFrequency) * varianceAmplitude
-                    enemy.node.position.y = baseline + varianceOffset
-                    enemy.position.y = enemy.node.position.y
                 }
+                // If no target pad, snake maintains its original Y position (straight line)
+                // No vertical variance added - snakes move in perfectly straight horizontal lines
             }
             
             if enemy.type == .snake || enemy.type == .log {
@@ -140,6 +130,23 @@ class CollisionManager {
             } else if enemy.type == .dragonfly {
                 enemy.position.y += enemy.speed
                 enemy.node.position.y = enemy.position.y
+            } else if enemy.type == .chaser {
+                // Set frog reference if not already set
+                if enemy.targetFrog == nil {
+                    enemy.targetFrog = frogController
+                }
+                // Update chaser movement towards frog
+                enemy.updateChaserMovement()
+            } else if enemy.type == .spikeBush {
+                // Spike bushes are static but should stay with their lily pad if it moves
+                if let targetPad = enemy.targetLilyPad {
+                    enemy.position = targetPad.position
+                    enemy.node.position = enemy.position
+                }
+                // If no target lily pad, spike bush remains stationary
+            } else if enemy.type == .edgeSpikeBush {
+                // Edge spike bushes are completely static - no movement needed
+                // They maintain their fixed edge positions
             }
             
             if checkCollision(enemy: enemy, frogPosition: frogPosition, frogIsJumping: frogIsJumping) {
@@ -166,10 +173,11 @@ class CollisionManager {
                             if let targetPad = enemy.targetLilyPad {
                                 targetPad.removeEnemyType(enemy.type)
                             }
+                            enemy.stopAnimation()
                             enemy.node.removeFromParent()
                             return true
                         case .hitOnly:
-                            // No destruction (e.g., no axe) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â perform the legacy bounce behavior ONCE and then remove the log to prevent repeat bonks
+                            // No destruction (e.g., no axe) perform the legacy bounce behavior ONCE and then remove the log to prevent repeat bonks
                             onLogBounce?(enemy)
                             // Clean up any lily pad occupancy
                             if let targetPad = enemy.targetLilyPad {
@@ -180,13 +188,51 @@ class CollisionManager {
                             let key = ObjectIdentifier(enemy)
                             lastLogCollisionFrame.removeValue(forKey: key)
                             // Remove the log node from the scene and signal removal from the enemies array
+                            enemy.stopAnimation()
                             enemy.node.removeFromParent()
                             return true
                         }
+                    }
+                    
+                    // Special handling: Spike bushes cause heart loss and a bounce-back, but are not destroyed
+                    if enemy.type == .spikeBush || enemy.type == .edgeSpikeBush {
+                        print("🌿 PROCESSING SPIKE BUSH HIT! Type: \(enemy.type)")
+                        // Apply damage if not invincible or in rocket state
+                        if let frog = self.frogController, !(frog.invincible) && !rocketActive {
+                            print("🌿 APPLYING SPIKE BUSH DAMAGE!")
+                            // Lose a heart (similar to what happens with bees)
+                            if let scene = self.scene as? GameScene {
+                                scene.healthManager.damageHealth()
+                            }
+                            // Replace bounce calculation and impulse with call to GameScene's log-bounce handler
+                            if let gameScene = self.scene as? GameScene {
+                                gameScene.handleLogBounce(enemy: enemy)
+                            }
+
+                            // Brief invincibility frames to avoid rapid repeated hits
+                           // frog.activateInvincibility(seconds: 1.0)
+                            
+                            // Show scared reaction on the frog
+                            frog.showScared(duration: 1.0)
+
+                           
+                            // Haptic feedback
+                            HapticFeedbackManager.shared.impact(.medium)
+                        } else {
+                            print("🌿 SPIKE BUSH HIT BUT FROG IS INVINCIBLE OR IN ROCKET MODE")
+                        }
+                        // Do not remove the spike bush; keep it as a hazard
+                        return false
                     } else {
                         let outcome = onHit(enemy)
                         switch outcome {
                         case .destroyed(let cause):
+                            // Only play danger zone sound if enemy was not destroyed by a protective ability
+                            // (e.g., bee destroyed by honey jar should not play danger sound since no heart was lost)
+                            if cause != .honeyJar && (enemy.type == .bee || enemy.type == .snake || enemy.type == .dragonfly) {
+                                SoundController.shared.playSoundEffect(.dangerZone)
+                            }
+                            
                             if case .some(.axe) = cause, let scene = self.scene {
                                 var screenPos = enemy.position
                                 if let gameScene = scene as? GameScene {
@@ -199,9 +245,15 @@ class CollisionManager {
                             if let targetPad = enemy.targetLilyPad {
                                 targetPad.removeEnemyType(enemy.type)
                             }
+                            enemy.stopAnimation()
                             enemy.node.removeFromParent()
                             return true
                         case .hitOnly:
+                            // Play danger zone sound for enemies that hit but weren't destroyed
+                            // This means the frog took damage
+                            if enemy.type == .bee || enemy.type == .snake || enemy.type == .dragonfly {
+                                SoundController.shared.playSoundEffect(.dangerZone)
+                            }
                             break
                         }
                     }
@@ -353,11 +405,40 @@ class CollisionManager {
             let dy = frogPosition.y - tadpole.position.y
             let distance = sqrt(dx * dx + dy * dy)
             
-            if distance < (GameConfig.frogSize / 2 + GameConfig.tadpoleSize / 2) {
+            if distance < (GameConfig.frogSize / 2 + GameConfig.tadpoleSize / 2 + GameConfig.tadpolePickupPadding) {
                 // NEW: Clean up lily pad reference when collecting
                 tadpole.lilyPad = nil
                 onCollect()
                 tadpole.node.removeFromParent()
+                return true
+            }
+            
+            return false
+        }
+    }
+    
+    func updateBigHoneyPots(bigHoneyPots: inout [BigHoneyPot], frogPosition: CGPoint, frogScreenPosition: CGPoint, worldOffset: CGFloat, screenHeight: CGFloat, rocketActive: Bool, onCollect: () -> Void) {
+        bigHoneyPots.removeAll { bigHoneyPot in
+            let screenY = bigHoneyPot.position.y + worldOffset
+            if screenY < -100 {
+                // Clean up lily pad reference when removing
+                bigHoneyPot.lilyPad = nil
+                SoundController.shared.playSoundEffect(.specialReward)
+                bigHoneyPot.node.removeFromParent()
+                return true
+            }
+            
+            let dx = frogPosition.x - bigHoneyPot.position.x
+            let dy = frogPosition.y - bigHoneyPot.position.y
+            let distance = sqrt(dx * dx + dy * dy)
+            
+            // Use similar collision detection to tadpoles
+            let collisionDistance: CGFloat = 40 // Reasonable collision radius for big honey pot
+            if distance < collisionDistance {
+                // Clean up lily pad reference when collecting
+                bigHoneyPot.lilyPad = nil
+                onCollect()
+                bigHoneyPot.node.removeFromParent()
                 return true
             }
             
@@ -396,11 +477,24 @@ class CollisionManager {
         updateLilyPads(lilyPads: &lilyPads, worldOffset: worldOffset, screenHeight: screenHeight, frogPosition: frogPosition)
     }
     
-    private func checkCollision(enemy: Enemy, frogPosition: CGPoint, frogIsJumping: Bool) -> Bool {
-        // Bees and snakes should NOT collide with the frog when the frog is jumping
-        // The frog can safely jump over them
+  func checkCollision(enemy: Enemy, frogPosition: CGPoint, frogIsJumping: Bool) -> Bool {
+        // Only bees and snakes can be jumped over when the frog is jumping
+        // Spike bushes, logs, dragonflies, and other enemies still cause collision when jumping
         if frogIsJumping && (enemy.type == .bee || enemy.type == .snake) {
             return false
+        }
+        
+        // DEBUG: Add logging for spike bush collisions
+        if enemy.type == .spikeBush || enemy.type == .edgeSpikeBush {
+            let dx = frogPosition.x - enemy.position.x
+            let dy = frogPosition.y - enemy.position.y
+            let distance = sqrt(dx * dx + dy * dy)
+            let collisionRadius = (GameConfig.frogSize / 2) + (enemy.type == .spikeBush ? GameConfig.spikeBushSize / 2 : GameConfig.edgeSpikeBushSize / 2)
+            
+            if distance < collisionRadius {
+                print("🌿 SPIKE BUSH COLLISION DETECTED! Enemy: \(enemy.type), Distance: \(distance), Required: \(collisionRadius), Jumping: \(frogIsJumping)")
+                return true
+            }
         }
         
         switch enemy.type {
@@ -429,6 +523,9 @@ class CollisionManager {
             case .bee: enemySize = GameConfig.beeSize
             case .dragonfly: enemySize = GameConfig.dragonflySize
             case .log: enemySize = GameConfig.logCollisionWidth
+            case .spikeBush: enemySize = GameConfig.spikeBushSize
+            case .edgeSpikeBush: enemySize = GameConfig.edgeSpikeBushSize
+            case .chaser: enemySize = GameConfig.chaserSize
             }
 
             return distance < (GameConfig.frogSize / 2 + enemySize / 2)

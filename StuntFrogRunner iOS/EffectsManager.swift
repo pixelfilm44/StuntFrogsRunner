@@ -84,6 +84,8 @@ class EffectsManager {
         cachedHitTextActions[.bee] = hitTextAction
         cachedHitTextActions[.dragonfly] = hitTextAction
         cachedHitTextActions[.log] = hitTextAction
+        cachedHitTextActions[.spikeBush] = hitTextAction
+        cachedHitTextActions[.edgeSpikeBush] = hitTextAction
 
         // Warm label font rendering by creating sample labels off-screen
         if let scene = scene {
@@ -93,10 +95,12 @@ class EffectsManager {
                 SKLabelNode(text: "🐍 BITE!"),
                 SKLabelNode(text: "🐝 STING!"),
                 SKLabelNode(text: "🦟 BUZZ!"),
-                SKLabelNode(text: "🪵 BONK!")
+                SKLabelNode(text: "🪵 BONK!"),
+                SKLabelNode(text: "🌿 OUCH!"),
+                SKLabelNode(text: "🌵 SPIKE!")
             ]
             for label in warmLabels {
-                label.fontName = "Arial-BoldMT"
+                label.fontName = "ArialRoundedMTBold"
                 label.fontSize = 40
                 label.alpha = 0.001
                 label.position = CGPoint(x: -1000, y: -1000)
@@ -155,7 +159,7 @@ class EffectsManager {
         let splashText = SKLabelNode(text: "💦 SPLASH! 💦")
         splashText.fontSize = 48
         splashText.fontColor = .white
-        splashText.fontName = "Arial-BoldMT"
+        splashText.fontName = "ArialRoundedMTBold"
         splashText.position = CGPoint(x: position.x, y: position.y + 90)
         splashText.zPosition = 152
         scene.addChild(splashText)
@@ -396,12 +400,16 @@ class EffectsManager {
         case .bee: hitText = "🐝 STING!"
         case .dragonfly: hitText = "🦟 BUZZ!"
         case .log: hitText = "🪵 BONK!"
+        case .spikeBush: hitText = "🌿 OUCH!"
+        case .edgeSpikeBush: hitText = "🌵 SPIKE!"
+        case .chaser: hitText = "CAUGHT!"
+            
         }
         
         let hitLabel = SKLabelNode(text: hitText)
         hitLabel.fontSize = 36
         hitLabel.fontColor = .red
-        hitLabel.fontName = "Arial-BoldMT"
+        hitLabel.fontName = "ArialRoundedMTBold"
         hitLabel.position = position
         hitLabel.zPosition = 150
         scene.addChild(hitLabel)
@@ -473,7 +481,7 @@ class EffectsManager {
         let bounceLabel = SKLabelNode(text: "💥 BONK! 💥")
         bounceLabel.fontSize = 40
         bounceLabel.fontColor = .red
-        bounceLabel.fontName = "Arial-BoldMT"
+        bounceLabel.fontName = "ArialRoundedMTBold"
         bounceLabel.position = position
         bounceLabel.zPosition = 150
         scene.addChild(bounceLabel)
@@ -488,6 +496,104 @@ class EffectsManager {
             SKAction.removeFromParent()
         ])
         bounceLabel.run(labelAnimation)
+    }
+    
+
+    
+    private func createIceEffect(at position: CGPoint, in parent: SKNode) {
+        // Choose z baseline depending on parent layer (world vs scene)
+        let zBase: CGFloat
+        if let gs = scene as? GameScene, parent === gs.worldManager.worldNode {
+            // Pads are at ~10; render cracks slightly above
+            zBase = 12
+        } else {
+            zBase = 150
+        }
+        
+        // Ice crack effect with crystalline pattern
+        let iceBase = SKShapeNode(circleOfRadius: 50)
+        iceBase.fillColor = UIColor(red: 0.8, green: 0.95, blue: 1.0, alpha: 0.6)
+        iceBase.strokeColor = UIColor(red: 0.6, green: 0.85, blue: 1.0, alpha: 0.9)
+        iceBase.lineWidth = 3
+        iceBase.position = position
+        iceBase.zPosition = zBase
+        parent.addChild(iceBase)
+        
+        for i in 0..<8 {
+            let angle = CGFloat(i) * (CGFloat.pi * 2 / 8)
+            let crack = SKShapeNode()
+            let path = CGMutablePath()
+            path.move(to: .zero)
+            let segments = 3
+            var currentPoint = CGPoint.zero
+            for j in 0..<segments {
+                let segmentLength: CGFloat = 20 + CGFloat(j) * 10
+                let jitter: CGFloat = CGFloat.random(in: -5...5)
+                currentPoint = CGPoint(
+                    x: currentPoint.x + cos(angle) * segmentLength + sin(angle + .pi/2) * jitter,
+                    y: currentPoint.y + sin(angle) * segmentLength + cos(angle + .pi/2) * jitter
+                )
+                path.addLine(to: currentPoint)
+            }
+            crack.path = path
+            crack.strokeColor = UIColor(red: 0.4, green: 0.7, blue: 1.0, alpha: 0.8)
+            crack.lineWidth = 2
+            crack.position = position
+            crack.zPosition = zBase + 1
+            parent.addChild(crack)
+            let crackAction = SKAction.sequence([
+                SKAction.group([
+                    SKAction.fadeOut(withDuration: 0.8),
+                    SKAction.scale(to: 1.5, duration: 0.8)
+                ]),
+                SKAction.removeFromParent()
+            ])
+            crack.run(crackAction)
+        }
+        
+        let iceAction = SKAction.sequence([
+            SKAction.group([
+                SKAction.scale(to: 2.0, duration: 0.5),
+                SKAction.fadeOut(withDuration: 0.5)
+            ]),
+            SKAction.removeFromParent()
+        ])
+        iceBase.run(iceAction)
+        
+        for i in 0..<12 {
+            let angle = CGFloat(i) * (CGFloat.pi * 2 / 12)
+            let crystal = SKShapeNode(circleOfRadius: 4)
+            crystal.fillColor = UIColor(red: 0.9, green: 0.95, blue: 1.0, alpha: 0.9)
+            crystal.strokeColor = UIColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1.0)
+            crystal.lineWidth = 1
+            crystal.position = position
+            crystal.zPosition = zBase + 2
+            crystal.zRotation = angle
+            parent.addChild(crystal)
+            let crystalAction = SKAction.sequence([
+                SKAction.group([
+                    SKAction.moveBy(x: cos(angle) * 60, y: sin(angle) * 60, duration: 0.6),
+                    SKAction.fadeOut(withDuration: 0.6),
+                    SKAction.scale(to: 0.1, duration: 0.6)
+                ]),
+                SKAction.removeFromParent()
+            ])
+            crystal.run(crystalAction)
+        }
+        
+       
+    }
+    
+    func createIceEffect(at position: CGPoint) {
+        guard let scene = scene else { return }
+        // Creates ice cracks at the fixed landing position - will not follow the frog as it slides
+        // Choose a stable parent (world node if available, otherwise the scene)
+        if let gs = scene as? GameScene, let world = gs.worldManager.worldNode {
+            // Position is assumed to already be in world coordinates when passed by callers that know about world space.
+            createIceEffect(at: position, in: world)
+        } else {
+            createIceEffect(at: position, in: scene)
+        }
     }
 }
 

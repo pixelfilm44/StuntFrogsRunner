@@ -20,6 +20,9 @@ class HUDController {
     /// Called when the final-approach state toggles so the game can slow/restore scroll speed
     var onRocketFinalApproachChanged: ((Bool) -> Void)?
     private var isShowingRocketBanner: Bool = false
+    
+    // Level timer display
+    private var timerLabel: SKLabelNode?
 
     /// Emits distance-based score gains so the scene/ScoreManager can own the single score source of truth
     var onScoreGained: ((Int) -> Void)?
@@ -129,7 +132,7 @@ class HUDController {
     private func showRocketCountdown(seconds: Int) {
         guard let scene = scene else { return }
         if rocketCountdownLabel == nil {
-            let label = SKLabelNode(fontNamed: "Arial-BoldMT")
+            let label = SKLabelNode(fontNamed: "ArialRoundedMTBold")
             label.fontSize = 120
             label.fontColor = .white
             label.zPosition = 400
@@ -159,6 +162,59 @@ class HUDController {
         rocketCountdownLabel?.removeAction(forKey: "pulse")
         rocketCountdownLabel?.removeFromParent()
         rocketCountdownLabel = nil
+    }
+    
+    // MARK: - Level Timer Display
+    
+    /// Update the timer display with the remaining time for the current level
+    func updateTimer(timeRemaining: Double) {
+        guard let scene = scene else { return }
+        
+        // Create timer label if it doesn't exist
+        if timerLabel == nil {
+            let label = SKLabelNode(fontNamed: "HelveticaNeue-Bold")
+            label.fontSize = 24
+            label.fontColor = .white
+            label.horizontalAlignmentMode = .center
+            label.verticalAlignmentMode = .center
+            label.zPosition = 50
+            label.name = "timerLabel"
+            timerLabel = label
+            scene.addChild(label)
+        }
+        
+        // Position at top-center of screen
+        timerLabel?.position = CGPoint(x: scene.size.width / 2, y: scene.size.height - 80)
+        
+        // Format time as MM:SS
+        let minutes = Int(timeRemaining) / 60
+        let seconds = Int(timeRemaining) % 60
+        timerLabel?.text = String(format: "%02d:%02d", minutes, seconds)
+        
+        // Change color based on remaining time
+        if timeRemaining <= 30 {
+            timerLabel?.fontColor = .red
+            // Add pulsing animation when time is running low
+            if timerLabel?.action(forKey: "urgentPulse") == nil {
+                let scaleUp = SKAction.scale(to: 1.2, duration: 0.5)
+                let scaleDown = SKAction.scale(to: 1.0, duration: 0.5)
+                let pulse = SKAction.repeatForever(SKAction.sequence([scaleUp, scaleDown]))
+                timerLabel?.run(pulse, withKey: "urgentPulse")
+            }
+        } else if timeRemaining <= 60 {
+            timerLabel?.fontColor = .orange
+            timerLabel?.removeAction(forKey: "urgentPulse")
+        } else {
+            timerLabel?.fontColor = .white
+            timerLabel?.removeAction(forKey: "urgentPulse")
+        }
+    }
+    
+    /// Hide the timer display
+    func hideTimer() {
+        timerLabel?.removeAction(forKey: "urgentPulse")
+        timerLabel?.removeFromParent()
+        timerLabel = nil
     }
     
     // MARK: - Score
@@ -258,6 +314,12 @@ class HUDController {
     // MARK: - HUD Updates
     func updateHUD(health: Int, maxHealth: Int, lifeVestCharges: Int, scrollSaverCharges: Int, flySwatterCharges: Int, honeyJarCharges: Int, axeCharges: Int, tadpolesCollected: Int, tadpolesThreshold: Int) {
         guard let hudBar = hudBar else { return }
+        
+        print("📊 HUD Controller updateHUD called with:")
+        print("   Life Vest charges: \(lifeVestCharges)")
+        print("   Honey Jar charges: \(honeyJarCharges)")
+        print("   Fly Swatter charges: \(flySwatterCharges)")
+        print("   Axe charges: \(axeCharges)")
         
         anchorHUDToBottom()
         

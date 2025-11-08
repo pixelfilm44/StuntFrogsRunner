@@ -15,6 +15,13 @@ class Enemy {
     
     weak var targetLilyPad: LilyPad?
     
+    // Additional properties for chaser behavior
+    weak var targetFrog: FrogController?
+    
+    // Animation properties for frame-based enemies like snakes
+    private var animationTextures: [SKTexture] = []
+    private var animationFrameDuration: TimeInterval = 0.15
+    
     init(type: EnemyType, position: CGPoint, speed: CGFloat) {
         self.type = type
         self.position = position
@@ -40,21 +47,136 @@ class Enemy {
             beeSprite.size = CGSize(width: GameConfig.beeSize, height: GameConfig.beeSize)
             self.node = beeSprite
         } else if type == .snake {
-            let snakeTexture = SKTexture(imageNamed: "snake")
-            let snakeSprite = SKSpriteNode(texture: snakeTexture)
+            // Load snake animation frames with a safe upper limit
+            var frameTextures: [SKTexture] = []
+            let maxFramesToCheck = 20 // Safety limit to prevent infinite loops
+            
+            print("🐍 Attempting to load snake animation frames...")
+            
+            // Try to load numbered frames (snake1, snake2, etc.)
+            for frameIndex in 1...maxFramesToCheck {
+                let frameName = "snake\(frameIndex)"
+                
+                // Use a safer approach to check if texture exists
+                if let _ = UIImage(named: frameName) {
+                    let frameTexture = SKTexture(imageNamed: frameName)
+                    frameTextures.append(frameTexture)
+                    print("🐍 Found animation frame: \(frameName)")
+                } else {
+                    // Stop when we can't find the next frame
+                    print("🐍 No more animation frames found after \(frameName)")
+                    break
+                }
+            }
+            
+            // If no numbered frames were found, fall back to the base snake texture
+            if frameTextures.isEmpty {
+                print("🐍 No numbered frames found, trying base 'snake' texture...")
+                if let _ = UIImage(named: "snake") {
+                    let fallbackTexture = SKTexture(imageNamed: "snake")
+                    frameTextures.append(fallbackTexture)
+                    print("🐍 Using base snake texture as fallback")
+                } else {
+                    print("⚠️ No snake texture found at all! Snake will be invisible or use default texture")
+                    // Create a fallback texture so the snake still appears
+                    let fallbackTexture = SKTexture(imageNamed: "snake")
+                    frameTextures.append(fallbackTexture)
+                }
+            }
+            
+            // Store the animation textures
+            animationTextures = frameTextures
+            print("🐍 Final: Loaded \(animationTextures.count) snake animation frames")
+            
+            let initialTexture = animationTextures.first ?? SKTexture(imageNamed: "snake")
+            let snakeSprite = SKSpriteNode(texture: initialTexture)
             snakeSprite.size = CGSize(width: GameConfig.snakeSize, height: GameConfig.snakeSize)
             self.node = snakeSprite
+            
+            print("🐍 Created snake sprite with size: \(GameConfig.snakeSize)x\(GameConfig.snakeSize)")
+            
+            // Start snake animation after node is set
+            startSnakeAnimation()
         } else if type == .dragonfly {
             let dragonflyTexture = SKTexture(imageNamed: "dragonfly")
             let dragonflySprite = SKSpriteNode(texture: dragonflyTexture)
             dragonflySprite.size = CGSize(width: GameConfig.dragonflySize, height: GameConfig.dragonflySize)
             self.node = dragonflySprite
+        } else if type == .chaser {
+            let chaserTexture = SKTexture(imageNamed: "ghostFrog") // Use frog sprite as base
+            let chaserSprite = SKSpriteNode(texture: chaserTexture)
+            chaserSprite.size = CGSize(width: GameConfig.chaserSize, height: GameConfig.chaserSize)
+            
+            self.node = chaserSprite
+        } else if type == .spikeBush {
+            let spikeBushTexture = SKTexture(imageNamed: "spikeBush")
+            let spikeBushSprite = SKSpriteNode(texture: spikeBushTexture)
+            spikeBushSprite.size = CGSize(width: GameConfig.spikeBushSize, height: GameConfig.spikeBushSize)
+            self.node = spikeBushSprite
+        } else if type == .edgeSpikeBush {
+            let edgeSpikeBushTexture = SKTexture(imageNamed: "spikeBush") // Reuse same texture
+            let edgeSpikeBushSprite = SKSpriteNode(texture: edgeSpikeBushTexture)
+            edgeSpikeBushSprite.size = CGSize(width: GameConfig.edgeSpikeBushSize, height: GameConfig.edgeSpikeBushSize)
+            self.node = edgeSpikeBushSprite
         } else {
             let label = SKLabelNode(text: type.rawValue)
             label.fontSize = 40
             label.verticalAlignmentMode = .center
             label.horizontalAlignmentMode = .center
             self.node = label
+        }
+    }
+    
+    // MARK: - Chaser Movement Logic
+    
+    func updateChaserMovement() {
+        guard type == .chaser, let frog = targetFrog else { return }
+        
+        // Calculate direction from chaser to frog
+        let dx = frog.position.x - position.x
+        let dy = frog.position.y - position.y
+        let distance = sqrt(dx * dx + dy * dy)
+        
+        // Avoid division by zero
+        guard distance > 0.1 else { return }
+        
+        // Normalize direction vector
+        let nx = dx / distance
+        let ny = dy / distance
+        
+        // Move toward frog at chaser speed
+        let moveSpeed = GameConfig.chaserSpeed
+        position.x += nx * moveSpeed
+        position.y += ny * moveSpeed
+        
+        // Update the visual node position
+        node.position = position
+    }
+    
+    // MARK: - Animation Methods
+    
+
+    
+    /// Start the snake animation loop
+    private func startSnakeAnimation() {
+        guard type == .snake, !animationTextures.isEmpty else { return }
+        guard let snakeSprite = node as? SKSpriteNode else { return }
+        
+        // Create repeating animation
+        let animate = SKAction.animate(with: animationTextures, 
+                                     timePerFrame: animationFrameDuration, 
+                                     resize: false, 
+                                     restore: false)
+        let repeatAnimation = SKAction.repeatForever(animate)
+        
+        snakeSprite.run(repeatAnimation, withKey: "snakeAnimation")
+        print("🐍 Snake animation started with \(animationTextures.count) frames")
+    }
+    
+    /// Stop the snake animation (called when enemy is removed)
+    func stopAnimation() {
+        if type == .snake {
+            node.removeAction(forKey: "snakeAnimation")
         }
     }
 }
@@ -96,6 +218,7 @@ enum LilyPadType {
     case normal
     case pulsing
     case moving
+    case grave
 }
 
 class LilyPad {
@@ -121,6 +244,15 @@ class LilyPad {
     
     var unsafeScaleThreshold: CGFloat = 0.4
     
+    // Spawn probabilities
+    static let graveSpawnChance: CGFloat = 0.75 // 75% chance to spawn a grave lily pad
+    static let chaserOnGraveSpawnChance: CGFloat = 0.75 // 75% chance to spawn a chaser on a grave pad
+    
+    /// Returns true with the configured probability to spawn a grave lily pad
+    static func shouldSpawnGravePad() -> Bool {
+        return CGFloat.random(in: 0...1) <= graveSpawnChance
+    }
+    
     var isSafeToLand: Bool {
         guard type == .pulsing, let sprite = padSprite else { return true }
         return sprite.xScale >= unsafeScaleThreshold
@@ -141,6 +273,7 @@ class LilyPad {
     
     // NEW: Track objects on this lily pad
     private var tadpoles: [Tadpole] = []
+    private var bigHoneyPots: [BigHoneyPot] = []
    
     
     // NEW: Track if the frog is on this lily pad (set by FrogController)
@@ -168,11 +301,18 @@ class LilyPad {
         
         let container = SKNode()
         
-        let texture = SKTexture(imageNamed: "lilypad")
-        let sprite = SKSpriteNode(texture: texture)
+        // Choose texture based on lily pad type
+        let textureName: String
+        if type == .grave {
+            textureName = "graveLilypad"
+        } else {
+            textureName = "lilypad"
+        }
+        let texture = SKTexture(imageNamed: textureName)
         
         let textureSize = texture.size()
         let scale = (radius * 2) / max(textureSize.width, textureSize.height)
+        let sprite = SKSpriteNode(texture: texture)
         sprite.size = CGSize(width: textureSize.width * scale, height: textureSize.height * scale)
         sprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
         container.addChild(sprite)
@@ -264,6 +404,13 @@ class LilyPad {
             tadpole.position.y += deltaY
             tadpole.node.position = tadpole.position
         }
+        
+        // Update big honey pot positions when pad moves
+        for bigHoneyPot in bigHoneyPots {
+            bigHoneyPot.position.x += deltaX
+            bigHoneyPot.position.y += deltaY
+            bigHoneyPot.node.position = bigHoneyPot.position
+        }
     }
     
     /// NEW: Add a tadpole to this lily pad
@@ -311,6 +458,54 @@ class LilyPad {
             t.lilyPad = nil
         }
         tadpoles.removeAll()
+    }
+    
+    // MARK: - Big Honey Pot Management
+    
+    /// Add a big honey pot to this lily pad
+    func addBigHoneyPot(_ bigHoneyPot: BigHoneyPot) {
+        // Enforce the one-big-honey-pot-per-lily-pad rule
+        if !bigHoneyPots.isEmpty {
+            print("⚠️ Attempted to add big honey pot to lily pad that already has \(bigHoneyPots.count) big honey pot(s) - blocking")
+            return
+        }
+        
+        if !bigHoneyPots.contains(where: { $0 === bigHoneyPot }) {
+            bigHoneyPots.append(bigHoneyPot)
+            print("🍯 Added big honey pot to lily pad at \(Int(position.x)), \(Int(position.y)) - now has \(bigHoneyPots.count) big honey pot(s)")
+        }
+    }
+    
+    /// Remove a big honey pot from this lily pad
+    func removeBigHoneyPot(_ bigHoneyPot: BigHoneyPot) {
+        let countBefore = bigHoneyPots.count
+        bigHoneyPots.removeAll { $0 === bigHoneyPot }
+        let countAfter = bigHoneyPots.count
+        
+        if countBefore != countAfter {
+            print("🗑️ Removed big honey pot from lily pad at \(Int(position.x)), \(Int(position.y)) - now has \(countAfter) big honey pot(s)")
+        }
+    }
+    
+    /// Check if this lily pad has any big honey pots
+    var hasBigHoneyPots: Bool {
+        return !bigHoneyPots.isEmpty
+    }
+    
+    /// Get the number of big honey pots on this lily pad
+    var bigHoneyPotCount: Int {
+        return bigHoneyPots.count
+    }
+    
+    /// Remove all big honey pots from this lily pad
+    func clearBigHoneyPots() {
+        // Remove big honey pots' nodes from the scene and clear tracking
+        for bhp in bigHoneyPots {
+            bhp.node.removeFromParent()
+            // Break the link without triggering add/remove loops
+            bhp.lilyPad = nil
+        }
+        bigHoneyPots.removeAll()
     }
     
   
@@ -484,25 +679,167 @@ class LilyPad {
         case .bee:
             // If any enemy is already on the pad, disallow another bee.
             return occupyingEnemyTypes.isEmpty
-        case .snake, .dragonfly, .log:
+        case .snake, .dragonfly, .log, .spikeBush, .edgeSpikeBush, .chaser:
             // Do not allow any of these to occupy pads that already have an enemy (including bees).
             return occupyingEnemyTypes.isEmpty
         }
     }
     
     func addEnemyType(_ enemyType: EnemyType) {
-        // Enforce single-occupancy for enemies: if already occupied, do nothing.
-        guard occupyingEnemyTypes.isEmpty else { return }
         occupyingEnemyTypes.insert(enemyType)
     }
     
     func removeEnemyType(_ enemyType: EnemyType) {
-        // Remove the enemy type if present; if empty afterwards, the pad is free again.
         occupyingEnemyTypes.remove(enemyType)
     }
     
-    var hasEnemies: Bool {
-        return !occupyingEnemyTypes.isEmpty
+    func hasEnemyType(_ enemyType: EnemyType) -> Bool {
+        return occupyingEnemyTypes.contains(enemyType)
+    }
+    
+    func clearAllEnemyTypes() {
+        occupyingEnemyTypes.removeAll()
+    }
+    
+    // MARK: - Grave Pad / Chaser Spawning
+
+    /// If this pad is a grave pad, optionally spawn a chaser enemy at its center with the configured probability.
+    /// - Parameters:
+    ///   - frog: The frog controller that the chaser should target.
+    ///   - baseSpeed: Base speed used to initialize the chaser enemy (will be used by existing Enemy logic).
+    /// - Returns: The spawned chaser `Enemy` if one was created, otherwise `nil`.
+    @discardableResult
+    func maybeSpawnChaser(targeting frog: FrogController?, baseSpeed: CGFloat = GameConfig.chaserSpeed) -> Enemy? {
+        guard type == .grave else { return nil }
+        // 75% chance to spawn a chaser on a grave pad
+        let roll = CGFloat.random(in: 0...1)
+        guard roll <= LilyPad.chaserOnGraveSpawnChance else { return nil }
+        // Spawn chaser at the pad's center
+        let chaser = Enemy(type: .chaser, position: position, speed: baseSpeed)
+        chaser.targetFrog = frog
+        SoundController.shared.playSoundEffect(.ghostly)
+        // Position the node visually at the pad center
+        chaser.node.position = position
+        return chaser
+    }
+}
+
+// MARK: - BigHoneyPot Class
+
+class BigHoneyPot {
+    var position: CGPoint
+    let node: SKSpriteNode
+    
+    // Track which lily pad this big honey pot is on
+    weak var lilyPad: LilyPad? {
+        didSet {
+            // When assigned to a lily pad, add this big honey pot to its passengers
+            if let pad = lilyPad {
+                pad.addBigHoneyPot(self)
+            }
+            // Remove from old lily pad if needed
+            if let oldPad = oldValue, oldPad !== lilyPad {
+                oldPad.removeBigHoneyPot(self)
+            }
+        }
+    }
+    
+    init(position: CGPoint) {
+        self.position = position
+        let texture = SKTexture(imageNamed: "honeyBucket")
+        let sprite = SKSpriteNode(texture: texture)
+        sprite.size = CGSize(width: 50, height: 50) // Appropriate size for big honey pot
+        sprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        self.node = sprite
+    }
+    
+    deinit {
+        // Clean up lily pad reference when big honey pot is destroyed
+        lilyPad?.removeBigHoneyPot(self)
+    }
+}
+
+// MARK: - FinishLine Class
+
+class FinishLine {
+    var position: CGPoint
+    let width: CGFloat
+    let node: SKNode
+    var onCrossed: (() -> Void)?
+    
+    init(position: CGPoint, width: CGFloat) {
+        self.position = position
+        self.width = width
+        
+        let container = SKNode()
+        
+        // Try to use finishLine.png asset first
+        let finishLineTexture = SKTexture(imageNamed: "finishLine")
+        if finishLineTexture.size().width > 1 && finishLineTexture.size().height > 1 {
+            let finishLineSprite = SKSpriteNode(texture: finishLineTexture)
+            finishLineSprite.size = CGSize(width: width, height: 80)
+            finishLineSprite.position = CGPoint(x: 0, y: 40)
+            finishLineSprite.zPosition = 20
+            container.addChild(finishLineSprite)
+        } else {
+            // Fallback to original design if finishLine.png is not available
+            let lineShape = SKShapeNode(rect: CGRect(x: -width/2, y: -5, width: width, height: 10))
+            lineShape.fillColor = .systemYellow
+            lineShape.strokeColor = .white
+            lineShape.lineWidth = 2.0
+            lineShape.zPosition = 20
+            
+            // Add flag texture if available
+            let flagTexture = SKTexture(imageNamed: "finishFlag")
+            if flagTexture.size().width > 1 && flagTexture.size().height > 1 {
+                let flagSprite = SKSpriteNode(texture: flagTexture)
+                flagSprite.size = CGSize(width: 60, height: 80)
+                flagSprite.position = CGPoint(x: 0, y: 40)
+                flagSprite.zPosition = 21
+                container.addChild(flagSprite)
+            } else {
+                // Fallback flag using shapes
+                let flagPole = SKShapeNode(rect: CGRect(x: -2, y: 0, width: 4, height: 60))
+                flagPole.fillColor = .brown
+                flagPole.strokeColor = .clear
+                
+                let flag = SKShapeNode(rect: CGRect(x: 2, y: 30, width: 40, height: 25))
+                flag.fillColor = .systemRed
+                flag.strokeColor = .white
+                flag.lineWidth = 1
+                
+                container.addChild(flagPole)
+                container.addChild(flag)
+            }
+            
+            container.addChild(lineShape)
+        }
+        
+        container.position = position
+        
+        self.node = container
+    }
+    
+    /// Check if the frog has crossed the finish line
+    func checkCrossing(frogPosition: CGPoint, frogPreviousY: CGFloat) -> Bool {
+        // Check if frog crossed the finish line (moved from below to above)
+        let currentY = frogPosition.y
+        let finishY = position.y
+        
+        // Frog crossed if it was below the finish line and is now above it
+        let wasBelowFinish = frogPreviousY <= finishY
+        let isAboveFinish = currentY > finishY
+        
+        // Also check horizontal bounds (frog must be within the finish line width)
+        let horizontalDistance = abs(frogPosition.x - position.x)
+        let withinFinishLine = horizontalDistance <= width / 2
+        
+        if wasBelowFinish && isAboveFinish && withinFinishLine {
+            onCrossed?()
+            return true
+        }
+        
+        return false
     }
 }
 

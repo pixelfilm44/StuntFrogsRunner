@@ -35,7 +35,8 @@ class TouchInputController {
     var onFacingUpdate: ((CGPoint) -> Void)?  // Pull direction
     
     // MARK: - Touch Handling
-    func handleTouchBegan(_ touch: UITouch, in view: UIView, sceneSize: CGSize, rocketActive: Bool) -> CGPoint {
+    func handleTouchBegan(_ touch: UITouch, in view: UIView?, sceneSize: CGSize, rocketActive: Bool) -> CGPoint? {
+        guard let view = view else { return nil }
         let location = touch.location(in: view)
         
         if rocketActive {
@@ -55,7 +56,8 @@ class TouchInputController {
         return location
     }
     
-    func handleTouchMoved(_ touch: UITouch, in view: UIView, sceneSize: CGSize, rocketActive: Bool, hudBarHeight: CGFloat) -> CGPoint {
+    func handleTouchMoved(_ touch: UITouch, in view: UIView?, sceneSize: CGSize, rocketActive: Bool, hudBarHeight: CGFloat) -> CGPoint? {
+        guard let view = view else { return nil }
         var location = touch.location(in: view)
         
         // Clamp to HUD if below it
@@ -67,7 +69,8 @@ class TouchInputController {
         return location
     }
     
-    func handleTouchEnded(_ touch: UITouch, in view: UIView, sceneSize: CGSize, rocketActive: Bool, hudBarHeight: CGFloat) -> CGPoint {
+    func handleTouchEnded(_ touch: UITouch, in view: UIView?, sceneSize: CGSize, rocketActive: Bool, hudBarHeight: CGFloat) -> CGPoint? {
+        guard let view = view else { return nil }
         var location = touch.location(in: view)
         
         if rocketActive {

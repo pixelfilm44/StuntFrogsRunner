@@ -32,20 +32,16 @@ struct SoundSettingsView: View {
                 }
                 
                 Section(header: Text("Sound Effects")) {
-                    Toggle("Enable Sound Effects", isOn: $soundController.areSoundEffectsEnabled)
-                    
-                    if soundController.areSoundEffectsEnabled {
-                        VStack {
-                            HStack {
-                                Text("Effects Volume")
-                                Spacer()
-                                Text("\(Int(soundController.soundEffectsVolume * 100))%")
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            Slider(value: $soundController.soundEffectsVolume, in: 0...1, step: 0.1)
-                                .accentColor(.green)
+                    VStack {
+                        HStack {
+                            Text("Effects Volume")
+                            Spacer()
+                            Text("\(Int(soundController.soundEffectsVolume * 100))%")
+                                .foregroundColor(.secondary)
                         }
+                        
+                        Slider(value: $soundController.soundEffectsVolume, in: 0...1, step: 0.1)
+                            .accentColor(.green)
                     }
                 }
                 
@@ -91,7 +87,7 @@ struct SoundSettingsView: View {
         soundController.isMusicEnabled = true
         soundController.areSoundEffectsEnabled = true
         soundController.musicVolume = 0.7
-        soundController.soundEffectsVolume = 0.8
+        soundController.soundEffectsVolume = 0.2
     }
 }
 

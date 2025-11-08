@@ -19,6 +19,11 @@ class SlingshotController {
     
     weak var scene: SKScene?
     
+    // Sound controller reference
+    private var soundController: SoundController {
+        return SoundController.shared
+    }
+    
     /// Normalized pull intensity from the most recent release (0.0 ... 1.0).
     /// Computed at handleTouchEnded time using the appropriate max pull distance.
     var lastPullIntensity: CGFloat = 0.0
@@ -37,6 +42,10 @@ class SlingshotController {
             pullStartPos = location
             pullCurrentPos = location
             pullStartFrogScreenPos = frogScreenPosition  // Lock frog position in screen space
+            
+            // Play slingshot activation sound
+            soundController.playSoundEffect(.slingshotPull, volume: 0.3)
+            
             print("✅ Aiming activated!")
         }
     }
@@ -68,6 +77,10 @@ class SlingshotController {
             clearVisuals()
             return nil
         }
+        
+        // Play slingshot release sound with intensity based on pull distance
+        let normalizedPull = Float(pullDistance / maxPull)
+        soundController.playSlingshotSound(pullDistance: normalizedPull * 100.0)
         
         let distanceMultiplier = superJumpActive ? GameConfig.superJumpDistanceMultiplier : 1.0
         let targetOffsetX = -cos(angle) * pullDistance * 1.5 * distanceMultiplier
@@ -191,8 +204,20 @@ class SlingshotController {
     
     /// Cancels any current aiming interaction and clears all slingshot visuals.
     func cancelCurrentAiming() {
+        if slingshotActive {
+            print("🎯 Slingshot aiming cancelled")
+        }
         slingshotActive = false
         clearVisuals()
+    }
+    
+    /// Checks if the current aiming state is still valid and cancels if not
+    /// This helps prevent stuck slingshot states
+    func validateAimingState() {
+        if slingshotActive {
+            // Additional validation could be added here in the future
+            // For now, this serves as a hook for automatic cleanup
+        }
     }
 }
 
