@@ -21,6 +21,8 @@ class Enemy {
     // Animation properties for frame-based enemies like snakes
     private var animationTextures: [SKTexture] = []
     private var animationFrameDuration: TimeInterval = 0.15
+    private var isAnimationStarted: Bool = false
+    private var hasBeenVisible: Bool = false  // Track if this enemy has ever been visible
     
     init(type: EnemyType, position: CGPoint, speed: CGFloat) {
         self.type = type
@@ -95,8 +97,8 @@ class Enemy {
             
             print("🐍 Created snake sprite with size: \(GameConfig.snakeSize)x\(GameConfig.snakeSize)")
             
-            // Start snake animation after node is set
-            startSnakeAnimation()
+            // Don't start animation immediately - wait until snake is visible
+            print("🐍 Snake created but animation will start when visible")
         } else if type == .dragonfly {
             let dragonflyTexture = SKTexture(imageNamed: "dragonfly")
             let dragonflySprite = SKSpriteNode(texture: dragonflyTexture)
@@ -149,6 +151,17 @@ class Enemy {
         position.x += nx * moveSpeed
         position.y += ny * moveSpeed
         
+        // Flip the chaser image based on vertical movement direction
+        if let chaserSprite = node as? SKSpriteNode {
+            if ny < 0 {
+                // Moving down (negative Y direction) - flip upside down
+                chaserSprite.zRotation = .pi
+            } else {
+                // Moving up or not moving vertically - normal orientation
+                chaserSprite.zRotation = 0
+            }
+        }
+        
         // Update the visual node position
         node.position = position
     }
@@ -157,9 +170,9 @@ class Enemy {
     
 
     
-    /// Start the snake animation loop
+    /// Start the snake animation loop if not already started
     private func startSnakeAnimation() {
-        guard type == .snake, !animationTextures.isEmpty else { return }
+        guard type == .snake, !animationTextures.isEmpty, !isAnimationStarted else { return }
         guard let snakeSprite = node as? SKSpriteNode else { return }
         
         // Create repeating animation
@@ -170,13 +183,44 @@ class Enemy {
         let repeatAnimation = SKAction.repeatForever(animate)
         
         snakeSprite.run(repeatAnimation, withKey: "snakeAnimation")
+        isAnimationStarted = true
         print("🐍 Snake animation started with \(animationTextures.count) frames")
+    }
+    
+    /// Check if the snake is visible in the current frame and start animation if needed
+    func updateVisibilityAnimation(worldOffset: CGFloat, sceneHeight: CGFloat) {
+        guard type == .snake, !isAnimationStarted, !hasBeenVisible else { return }
+        
+        // Calculate visible Y range in world coordinates
+        let visibleMinY = -worldOffset - 100  // Small margin below screen
+        let visibleMaxY = -worldOffset + sceneHeight + 100  // Small margin above screen
+        
+        // Check if snake is within visible range
+        if position.y >= visibleMinY && position.y <= visibleMaxY {
+            hasBeenVisible = true
+            startSnakeAnimation()
+            print("🐍 Snake at (\(Int(position.x)), \(Int(position.y))) came into view - starting animation")
+        }
+    }
+    
+    /// Force start snake animation (for testing or special cases)
+    func forceStartAnimation() {
+        if type == .snake {
+            startSnakeAnimation()
+        }
+    }
+    
+    /// Check if this snake is currently animated
+    var isSnakeAnimated: Bool {
+        return type == .snake && isAnimationStarted
     }
     
     /// Stop the snake animation (called when enemy is removed)
     func stopAnimation() {
         if type == .snake {
             node.removeAction(forKey: "snakeAnimation")
+            isAnimationStarted = false
+            print("🐍 Snake animation stopped")
         }
     }
 }
@@ -704,16 +748,44 @@ class LilyPad {
     // MARK: - Grave Pad / Chaser Spawning
 
     /// If this pad is a grave pad, optionally spawn a chaser enemy at its center with the configured probability.
+    /// Only spawns if the frog is within visible range of this lily pad.
     /// - Parameters:
     ///   - frog: The frog controller that the chaser should target.
     ///   - baseSpeed: Base speed used to initialize the chaser enemy (will be used by existing Enemy logic).
+    ///   - worldOffset: Current world offset for visibility calculations (worldNode.position.y).
+    ///   - sceneSize: Scene size for visibility calculations.
     /// - Returns: The spawned chaser `Enemy` if one was created, otherwise `nil`.
     @discardableResult
-    func maybeSpawnChaser(targeting frog: FrogController?, baseSpeed: CGFloat = GameConfig.chaserSpeed) -> Enemy? {
+    func maybeSpawnChaser(targeting frog: FrogController?, baseSpeed: CGFloat = GameConfig.chaserSpeed, worldOffset: CGFloat? = nil, sceneSize: CGSize? = nil) -> Enemy? {
         guard type == .grave else { return nil }
+        guard let frogController = frog else { return nil }
+        
+        // Check if frog is visible from this grave pad
+        if let offset = worldOffset, let size = sceneSize {
+            let visibleMinY = -offset - 200  // Margin below screen for spawn detection
+            let visibleMaxY = -offset + size.height + 200  // Margin above screen for spawn detection
+            
+            // Only spawn if frog is within the visible range relative to this pad's position
+            let frogInVisibleRange = frogController.position.y >= visibleMinY && frogController.position.y <= visibleMaxY
+            let padInVisibleRange = position.y >= visibleMinY && position.y <= visibleMaxY
+            
+            // Both frog and pad should be in visible range, or close to it
+            guard frogInVisibleRange || padInVisibleRange else {
+                return nil
+            }
+            
+            // Additional check: ensure frog and pad are reasonably close vertically
+            let verticalDistance = abs(frogController.position.y - position.y)
+            let maxSpawnDistance = size.height * 1.5  // Only spawn if within 1.5 screen heights
+            guard verticalDistance <= maxSpawnDistance else {
+                return nil
+            }
+        }
+        
         // 75% chance to spawn a chaser on a grave pad
         let roll = CGFloat.random(in: 0...1)
         guard roll <= LilyPad.chaserOnGraveSpawnChance else { return nil }
+        
         // Spawn chaser at the pad's center
         let chaser = Enemy(type: .chaser, position: position, speed: baseSpeed)
         chaser.targetFrog = frog

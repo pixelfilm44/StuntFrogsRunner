@@ -74,6 +74,10 @@ struct GameConfig {
     static let tadpoleSize: CGFloat = 30
     static let tadpolePickupPadding: CGFloat = 6
     
+    // Snake-specific collision dimensions (tighter vertical hit zone)
+    static let snakeCollisionWidth: CGFloat = 165  // Keep full width
+    static let snakeCollisionHeight: CGFloat = 80  // Reduced height for fairer gameplay
+    
     // Edge spike bush settings
     static let edgeSpikeBushSize: CGFloat = 125
     static let edgeSpikeBushSpacing: CGFloat = 40  // Vertical spacing between edge spike bushes

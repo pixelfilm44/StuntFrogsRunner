@@ -1213,6 +1213,10 @@ class GameScene: SKScene {
     private var frameTimes: [TimeInterval] = []
     private let maxFrameTimesSamples = 60  // Track last 60 frames
     
+    // MARK: - Cached Values for Performance
+    private var cachedLeftWorldX: CGFloat = -100
+    private var cachedRightWorldX: CGFloat = 100
+    
     // MARK: - Update Loop
     override func update(_ currentTime: TimeInterval) {
         guard gameState == .playing else { return }
@@ -1236,11 +1240,20 @@ class GameScene: SKScene {
         
         // PERFORMANCE MONITORING: Log object counts occasionally
         if gameLoopCoordinator.getFrameCount() % 600 == 0 { // Every 10 seconds at 60fps
-            let logCount = enemies.filter { $0.type == .log }.count
-            let beeCount = enemies.filter { $0.type == .bee }.count
-            let snakeCount = enemies.filter { $0.type == .snake }.count
-            let dragonflyCount = enemies.filter { $0.type == .dragonfly }.count
-            let spikeBushCount = enemies.filter { $0.type == .spikeBush }.count
+            // OPTIMIZED: Count types in single pass instead of multiple filters
+            var logCount = 0, beeCount = 0, snakeCount = 0, dragonflyCount = 0, spikeBushCount = 0
+            for enemy in enemies {
+                switch enemy.type {
+                case .log: logCount += 1
+                case .bee: beeCount += 1  
+                case .snake: snakeCount += 1
+                case .dragonfly: dragonflyCount += 1
+                case .spikeBush: spikeBushCount += 1
+                case .edgeSpikeBush: break // Counted separately
+                case .chaser: break
+        
+                }
+            }
             let padCount = lilyPads.count
             let tadpoleCount = tadpoles.count
             let totalNodes = scene?.children.count ?? 0
@@ -1447,26 +1460,30 @@ class GameScene: SKScene {
         if frogController.onIce {
             frogController.updateSliding()
             
-            // Check for lily pad collision while sliding
-            let slideCollisionDistance: CGFloat = 60
-            for pad in lilyPads {
-                let dx = frogController.position.x - pad.position.x
-                let dy = frogController.position.y - pad.position.y
-                let distance = sqrt(dx*dx + dy*dy)
+            // OPTIMIZED: Only check lily pad collision every 3 frames during sliding to reduce overhead
+            if frameCount % 3 == 0 {
+                let slideCollisionDistance: CGFloat = 60
+                let slideCollisionDistanceSq = slideCollisionDistance * slideCollisionDistance // Avoid sqrt
                 
-                if distance < slideCollisionDistance {
-                    // Stop sliding and land on the pad
-                    frogController.forceStopSliding()
-                    frogController.landOnPad(pad)
+                for pad in lilyPads {
+                    let dx = frogController.position.x - pad.position.x
+                    let dy = frogController.position.y - pad.position.y
+                    let distanceSq = dx*dx + dy*dy // Use squared distance to avoid expensive sqrt
                     
-                    // Play landing sound and effect
-                    SoundController.shared.playFrogLand()
-                    effectsManager?.createLandingEffect(at: convert(frogController.position, from: worldManager.worldNode), intensity: 0.5, lilyPad: pad)
-                    HapticFeedbackManager.shared.impact(.light)
-                    
-                    showFloatingText("Landed!", color: .systemGreen)
-                    print("🧊 Frog slid into lily pad and stopped")
-                    break
+                    if distanceSq < slideCollisionDistanceSq {
+                        // Stop sliding and land on the pad
+                        frogController.forceStopSliding()
+                        frogController.landOnPad(pad)
+                        
+                        // Play landing sound and effect
+                        SoundController.shared.playFrogLand()
+                        effectsManager?.createLandingEffect(at: convert(frogController.position, from: worldManager.worldNode), intensity: 0.5, lilyPad: pad)
+                        HapticFeedbackManager.shared.impact(.light)
+                        
+                        showFloatingText("Landed!", color: .systemGreen)
+                        print("🧊 Frog slid into lily pad and stopped")
+                        break
+                    }
                 }
             }
         }
@@ -1500,11 +1517,14 @@ class GameScene: SKScene {
             return
         }
         
-        // PERFORMANCE: Reduce frequency of expensive collision updates
+        // PERFORMANCE: Reduce frequency of expensive collision updates  
         if frameCount % 2 == 0 {  // Run collision updates every other frame
             // Update enemies with collision handling
             updateEnemies(frogScreenPoint: frogScreenPoint)
-            
+        }
+        
+        // PERFORMANCE: Update edge spike bushes less frequently to reduce overhead
+        if frameCount % 4 == 0 {  // Every 4th frame instead of every other frame
             // Update and check collisions with edge spike bushes
             edgeSpikeBushManager.updateAndSpawn(
                 worldOffset: worldManager.worldNode.position.y,
@@ -1524,15 +1544,20 @@ class GameScene: SKScene {
             }
         }
         
-        // Update logs movement
-        let leftWorldX = convert(CGPoint(x: -100, y: 0), to: worldManager.worldNode).x
-        let rightWorldX = convert(CGPoint(x: size.width + 100, y: 0), to: worldManager.worldNode).x
+        // PERFORMANCE: Cache coordinate conversions to avoid expensive matrix math every frame
+        if frameCount % 5 == 0 {  // Update world bounds every 5 frames instead of every frame
+            cachedLeftWorldX = convert(CGPoint(x: -100, y: 0), to: worldManager.worldNode).x
+            cachedRightWorldX = convert(CGPoint(x: size.width + 100, y: 0), to: worldManager.worldNode).x
+        }
+        
         gameLoopCoordinator.updateEnemies(
             enemies: &enemies,
             lilyPads: &lilyPads,
             frogPosition: frogController.position,
-            leftWorldX: leftWorldX,
-            rightWorldX: rightWorldX
+            leftWorldX: cachedLeftWorldX,
+            rightWorldX: cachedRightWorldX,
+            worldOffset: worldManager.worldNode.position.y,
+            sceneHeight: size.height
         )
         
         // THREAD SAFETY: Flush any pending enemies to avoid simultaneous access issues
@@ -1587,19 +1612,18 @@ class GameScene: SKScene {
         if let finishLine = finishLine {
             // CRITICAL: Only check for crossing if we haven't already triggered level completion
             if action(forKey: "levelTransition") == nil {
-                // Debug the crossing detection
-                let currentY = frogController.position.y
-                let finishY = finishLine.position.y
                 let crossed = finishLine.checkCrossing(frogPosition: frogController.position, frogPreviousY: frogPreviousY)
                 
-                // Add debug output every 60 frames when near finish line
-                if gameLoopCoordinator.getFrameCount() % 60 == 0 && abs(currentY - finishY) < 200 {
-                    print("🏁 Finish line debug: frogY=\(Int(currentY)), finishY=\(Int(finishY)), prevY=\(Int(frogPreviousY)), crossed=\(crossed)")
-                }
-                
+                // PERFORMANCE: Only do debug output every 180 frames (3 seconds) when near finish line
                 if crossed {
                     print("🏁 Finish line crossed detected in update loop")
                     handleFinishLineCrossed()
+                } else if gameLoopCoordinator.getFrameCount() % 180 == 0 {
+                    let currentY = frogController.position.y
+                    let finishY = finishLine.position.y
+                    if abs(currentY - finishY) < 200 {
+                        print("🏁 Near finish line: frogY=\(Int(currentY)), finishY=\(Int(finishY)), distance=\(Int(finishY - currentY))")
+                    }
                 }
             }
         }
@@ -2971,7 +2995,7 @@ class GameScene: SKScene {
         }
         
         // Slingshot handling - only if grounded or in water
-        print("ÃƒÂ°Ã…Â¸Ã…Â½Ã‚Â¯ Slingshot touch began at: \(location)")
+        print("🎯 Slingshot touch began at: \(location)")
         let frogScreenPoint = convert(frogController.position, from: worldManager.worldNode)
         slingshotController.handleTouchBegan(at: location, frogScreenPosition: frogScreenPoint)
     }

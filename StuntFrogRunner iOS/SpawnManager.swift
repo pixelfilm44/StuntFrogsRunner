@@ -471,12 +471,23 @@ class SpawnManager {
             enemy = Enemy(type: .spikeBush, position: pad.position, speed: 0.0)
             
         case .chaser:
-            // Chasers only spawn on grave lily pads
+            // Chasers only spawn on grave lily pads and only when frog is visible
             guard pad.type == .grave else { return }
-            // Use a reasonable speed; fallback to bee speed if no specific config exists
-            let chaserSpeed = GameConfig.chaserSpeed
-            enemy = Enemy(type: .chaser, position: pad.position, speed: chaserSpeed)
-            SoundController.shared.playSoundEffect(.ghostly)
+            
+            // Get visibility parameters for chaser spawning
+            guard let gameScene = scene as? GameScene else { return }
+            let worldOffset = gameScene.worldManager.worldNode.position.y
+            let sceneSize = gameScene.size
+            
+            // Use the lily pad's visibility-aware spawning method
+            guard let spawnedChaser = pad.maybeSpawnChaser(
+                targeting: gameScene.frogController,
+                baseSpeed: GameConfig.chaserSpeed,
+                worldOffset: worldOffset,
+                sceneSize: sceneSize
+            ) else { return }
+            
+            enemy = spawnedChaser
 
         default:
             return  // Don't spawn other types on pads
@@ -1063,6 +1074,13 @@ class SpawnManager {
         
         frameCount += 1
         framesSinceLastTadpole += 1
+        
+        // Update snake animations based on visibility
+        if frameCount % 10 == 0 {  // Check every 10 frames for performance
+            for enemy in enemies where enemy.type == .snake {
+                enemy.updateVisibilityAnimation(worldOffset: worldOffset, sceneHeight: sceneSize.height)
+            }
+        }
         
         // CRITICAL SAFETY CHECK: Ensure frog can always progress (reduced frequency to prevent cascading)
         if frameCount % 30 == 0 {  // Check every 30 frames instead of 5 to reduce cascading spawning

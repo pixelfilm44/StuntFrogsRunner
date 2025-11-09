@@ -36,8 +36,17 @@ class GameLoopCoordinator {
         lilyPads: inout [LilyPad],
         frogPosition: CGPoint,
         leftWorldX: CGFloat,
-        rightWorldX: CGFloat
+        rightWorldX: CGFloat,
+        worldOffset: CGFloat? = nil,
+        sceneHeight: CGFloat? = nil
     ) {
+        // Check snake animation visibility if we have the required parameters
+        if let offset = worldOffset, let height = sceneHeight {
+            for enemy in enemies where enemy.type == .snake {
+                enemy.updateVisibilityAnimation(worldOffset: offset, sceneHeight: height)
+            }
+        }
+        
         // Parameters for log behavior
         let logSpeed: CGFloat = 10
         let perFrame: CGFloat = logSpeed / 60.0

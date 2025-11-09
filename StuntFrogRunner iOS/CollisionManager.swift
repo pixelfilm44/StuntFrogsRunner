@@ -512,6 +512,20 @@ class CollisionManager {
             return frogPosition.x >= minX && frogPosition.x <= maxX &&
                    frogPosition.y >= minY && frogPosition.y <= maxY
 
+        case .snake:
+            // Use rectangular collision with reduced vertical hit zone
+            let halfW = GameConfig.snakeCollisionWidth / 2
+            let halfH = GameConfig.snakeCollisionHeight / 2
+            let frogHalf = GameConfig.frogSize / 2
+
+            let minX = enemy.position.x - (halfW + frogHalf)
+            let maxX = enemy.position.x + (halfW + frogHalf)
+            let minY = enemy.position.y - (halfH + frogHalf)
+            let maxY = enemy.position.y + (halfH + frogHalf)
+
+            return frogPosition.x >= minX && frogPosition.x <= maxX &&
+                   frogPosition.y >= minY && frogPosition.y <= maxY
+
         default:
             let dx = frogPosition.x - enemy.position.x
             let dy = frogPosition.y - enemy.position.y
@@ -519,13 +533,13 @@ class CollisionManager {
 
             let enemySize: CGFloat
             switch enemy.type {
-            case .snake: enemySize = GameConfig.snakeSize
             case .bee: enemySize = GameConfig.beeSize
             case .dragonfly: enemySize = GameConfig.dragonflySize
             case .log: enemySize = GameConfig.logCollisionWidth
             case .spikeBush: enemySize = GameConfig.spikeBushSize
             case .edgeSpikeBush: enemySize = GameConfig.edgeSpikeBushSize
             case .chaser: enemySize = GameConfig.chaserSize
+            case .snake: enemySize = GameConfig.snakeSize // This shouldn't be reached due to separate case above
             }
 
             return distance < (GameConfig.frogSize / 2 + enemySize / 2)
