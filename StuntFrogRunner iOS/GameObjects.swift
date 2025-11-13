@@ -318,6 +318,7 @@ class LilyPad {
     // NEW: Track objects on this lily pad
     private var tadpoles: [Tadpole] = []
     private var bigHoneyPots: [BigHoneyPot] = []
+    private var lifeVests: [LifeVest] = []
    
     
     // NEW: Track if the frog is on this lily pad (set by FrogController)
@@ -455,6 +456,13 @@ class LilyPad {
             bigHoneyPot.position.y += deltaY
             bigHoneyPot.node.position = bigHoneyPot.position
         }
+        
+        // Update life vest positions when pad moves
+        for lifeVest in lifeVests {
+            lifeVest.position.x += deltaX
+            lifeVest.position.y += deltaY
+            lifeVest.node.position = lifeVest.position
+        }
     }
     
     /// NEW: Add a tadpole to this lily pad
@@ -502,6 +510,54 @@ class LilyPad {
             t.lilyPad = nil
         }
         tadpoles.removeAll()
+    }
+    
+    // MARK: - Life Vest Management
+    
+    /// Add a life vest to this lily pad
+    func addLifeVest(_ lifeVest: LifeVest) {
+        // Enforce the one-life-vest-per-lily-pad rule
+        if !lifeVests.isEmpty {
+            print("⚠️ Attempted to add life vest to lily pad that already has \(lifeVests.count) life vest(s) - blocking")
+            return
+        }
+        
+        if !lifeVests.contains(where: { $0 === lifeVest }) {
+            lifeVests.append(lifeVest)
+            print("🦺 Added life vest to lily pad at \(Int(position.x)), \(Int(position.y)) - now has \(lifeVests.count) life vest(s)")
+        }
+    }
+    
+    /// Remove a life vest from this lily pad
+    func removeLifeVest(_ lifeVest: LifeVest) {
+        let countBefore = lifeVests.count
+        lifeVests.removeAll { $0 === lifeVest }
+        let countAfter = lifeVests.count
+        
+        if countBefore != countAfter {
+            print("🗑️ Removed life vest from lily pad at \(Int(position.x)), \(Int(position.y)) - now has \(countAfter) life vest(s)")
+        }
+    }
+    
+    /// Check if this lily pad has any life vests
+    var hasLifeVests: Bool {
+        return !lifeVests.isEmpty
+    }
+    
+    /// Get the number of life vests on this lily pad
+    var lifeVestCount: Int {
+        return lifeVests.count
+    }
+    
+    /// Remove all life vests from this lily pad
+    func clearLifeVests() {
+        // Remove life vests' nodes from the scene and clear tracking
+        for lv in lifeVests {
+            lv.node.removeFromParent()
+            // Break the link without triggering add/remove loops
+            lv.lilyPad = nil
+        }
+        lifeVests.removeAll()
     }
     
     // MARK: - Big Honey Pot Management
@@ -817,10 +873,14 @@ class BigHoneyPot {
     }
     
     init(position: CGPoint) {
-        self.position = position
+        // Position the honey pot slightly offset from the lily pad center so it doesn't cover the lily pad
+        let offsetX = CGFloat.random(in: -25...25) // Random horizontal offset
+        let offsetY = CGFloat.random(in: -15...15) // Smaller vertical offset
+        self.position = CGPoint(x: position.x + offsetX, y: position.y + offsetY)
+        
         let texture = SKTexture(imageNamed: "honeyBucket")
         let sprite = SKSpriteNode(texture: texture)
-        sprite.size = CGSize(width: 50, height: 50) // Appropriate size for big honey pot
+        sprite.size = CGSize(width: 35, height: 35) // Smaller size so it doesn't dominate the lily pad
         sprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
         self.node = sprite
     }
@@ -828,6 +888,45 @@ class BigHoneyPot {
     deinit {
         // Clean up lily pad reference when big honey pot is destroyed
         lilyPad?.removeBigHoneyPot(self)
+    }
+}
+
+// MARK: - LifeVest Class
+
+class LifeVest {
+    var position: CGPoint
+    let node: SKSpriteNode
+    
+    // Track which lily pad this life vest is on
+    weak var lilyPad: LilyPad? {
+        didSet {
+            // When assigned to a lily pad, add this life vest to its passengers
+            if let pad = lilyPad {
+                pad.addLifeVest(self)
+            }
+            // Remove from old lily pad if needed
+            if let oldPad = oldValue, oldPad !== lilyPad {
+                oldPad.removeLifeVest(self)
+            }
+        }
+    }
+    
+    init(position: CGPoint) {
+        // Position the life vest slightly offset from the lily pad center so it doesn't cover the lily pad
+        let offsetX = CGFloat.random(in: -25...25) // Random horizontal offset
+        let offsetY = CGFloat.random(in: -15...15) // Smaller vertical offset
+        self.position = CGPoint(x: position.x + offsetX, y: position.y + offsetY)
+        
+        let texture = SKTexture(imageNamed: "lifeVestGroup")
+        let sprite = SKSpriteNode(texture: texture)
+        sprite.size = CGSize(width: 35, height: 35) // Same size as honey pot for consistency
+        sprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        self.node = sprite
+    }
+    
+    deinit {
+        // Clean up lily pad reference when life vest is destroyed
+        lilyPad?.removeLifeVest(self)
     }
 }
 

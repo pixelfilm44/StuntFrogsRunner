@@ -37,6 +37,13 @@ class FacingDirectionController {
     ) {
         guard isPlaying, let frogNode = frogNode else { return }
         
+        // CRITICAL FIX: Don't override rotation when rocket mode has constraints active
+        // The rocket mode sets up rotation constraints to keep the frog facing up
+        if rocketActive && frogNode.constraints?.isEmpty == false {
+            // Rocket mode has rotation constraints - don't override them
+            return
+        }
+        
         // If we have a locked facing (from aiming), keep it while jumping and until next explicit change
         if let locked = lockedFacingAngle {
             // Apply the locked angle and smooth toward it

@@ -4,8 +4,8 @@
 //  Sound and music management system
 //
 
+import Foundation
 import AVFoundation
-import SpriteKit
 internal import Combine
 
 /// Manages all audio for the game including background music, sound effects, and audio settings

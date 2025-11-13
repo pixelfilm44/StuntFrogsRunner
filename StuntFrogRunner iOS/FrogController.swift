@@ -4,6 +4,7 @@
 //
 
 import SpriteKit
+import UIKit
 
 class FrogController {
     // Frog nodes
@@ -17,6 +18,9 @@ class FrogController {
     private var soundController: SoundController {
         return SoundController.shared
     }
+    
+    // DROWNING CALLBACK: Notify game scene when frog drowns
+    var onDrowned: (() -> Void)?
     
     
     var currentLilyPad: LilyPad? {
@@ -67,6 +71,7 @@ class FrogController {
     // Life vest state
     var lifeVestCharges: Int = 0
     var inWater: Bool = false
+    var isDrowning: Bool = false  // NEW: Track explicit drowning state
     // When true, ignore subsequent water-fall checks until the frog jumps again
     var suppressWaterCollisionUntilNextJump: Bool = false
     
@@ -81,18 +86,22 @@ class FrogController {
     var superJumpTrailEmitter: SKEmitterNode?
     
     // Rocket visuals
-    var rocketSprite: SKLabelNode?  // The rocket visual attached to frog
+    var rocketSprite: SKSpriteNode?  // The rocket visual attached to frog
     var rocketTrail: SKShapeNode?
     var rocketFlameEmitter: SKEmitterNode?
+    var rocketSmokeEmitter: SKEmitterNode?
     
     // Textures/animations
     private var idleTexture: SKTexture!
     private var jumpTextures: [SKTexture] = []
+    private var rocketTextures: [SKTexture] = []
     private var floatingTexture: SKTexture!
     private var sinkingTexture: SKTexture!
     private var scaredTexture: SKTexture!  // newly added
     
     private var jumpFrameDuration: TimeInterval = 0.06  // tweak to taste
+    private var rocketFrameDuration: TimeInterval = 0.1  // Duration for each rocket frame
+    private let rocketScale: CGFloat = 5.0  // Scale multiplier for rocket animation (minimum 800px width will be enforced)
     
     weak var scene: SKScene?
     
@@ -126,6 +135,39 @@ class FrogController {
         // Preload jump frames
         let jumpNames = ["frogJump1", "frogJump2", "frogJump3", "frogJump4"]
         jumpTextures = jumpNames.map { SKTexture(imageNamed: $0) }
+        
+        // Preload rocket frames with safety limit
+        var rocketNames: [String] = []
+        let maxFrames = 5 // Safety limit to prevent infinite loop
+        
+        // Try to load rocket frames until we can't find any more (with safety limit)
+        for frameIndex in 1...maxFrames {
+            let frameName = "rocketRide\(frameIndex)"
+            
+            // Use UIImage to check if the asset actually exists first
+            if let _ = UIImage(named: frameName) {
+                let testTexture = SKTexture(imageNamed: frameName)
+                rocketNames.append(frameName)
+                print("🚀 Loaded rocket frame: \(frameName) - size: \(testTexture.size())")
+            } else {
+                print("🚀 No rocket frame found at index \(frameIndex) (asset '\(frameName)' does not exist) - stopping search")
+                break
+            }
+        }
+        
+        rocketTextures = rocketNames.map { SKTexture(imageNamed: $0) }
+        print("🚀 Loaded \(rocketTextures.count) rocket animation frames total")
+        
+        // Additional validation - let's make sure the textures are actually valid
+        for (index, texture) in rocketTextures.enumerated() {
+            let size = texture.size()
+            print("🚀 Rocket frame \(index + 1): \(rocketNames[index]) - size: \(size)")
+        }
+        
+        if rocketTextures.isEmpty {
+            print("❌ CRITICAL: No rocket textures loaded! Rocket animations will not work!")
+            print("❌ Make sure you have rocketRide1.png, rocketRide2.png, etc. in your Assets.xcassets")
+        }
         
         // Create sprite
         frogSprite = SKSpriteNode(texture: idleTexture)
@@ -169,6 +211,174 @@ class FrogController {
         frogSprite.run(animate, withKey: "frogJumpAnim")
     }
     
+    private func playRocketAnimation() {
+        guard !rocketTextures.isEmpty else { 
+            print("⚠️ No rocket animation frames loaded - rocketTextures is empty!")
+            print("⚠️ Expected frames: rocketRide1, rocketRide2, rocketRide3, rocketRide4, rocketRide5")
+            return 
+        }
+        
+        print("🚀 Starting rocket animation with \(rocketTextures.count) frames")
+        
+        // Calculate scale needed to make rocket at least 800 pixels wide
+        let targetWidth: CGFloat = 150.0
+        let currentSize = frogSprite.size.width
+        let neededScale = max(rocketScale, targetWidth / currentSize)
+        
+        print("🚀 Rocket animation - Current size: \(currentSize), Target: \(targetWidth), Scale: \(neededScale)")
+        
+        // Remove any existing animations first
+        frogSprite.removeAction(forKey: "frogRocketAnim")
+        frogSprite.removeAction(forKey: "frogJumpAnim")
+        
+        // Set the scale to ensure minimum 800px width
+        frogSprite.setScale(neededScale)
+        
+        // Start the rocket animation
+        let animate = SKAction.animate(with: rocketTextures, timePerFrame: rocketFrameDuration, resize: false, restore: false)
+        frogSprite.run(SKAction.repeatForever(animate), withKey: "frogRocketAnim")
+        
+        // Add rocket sprite as child node under the frog
+        addRocketSprite()
+        
+        // Create flame and smoke particle effects
+        createRocketParticleEffects()
+        
+        print("🚀 Rocket animation started and running!")
+    }
+    
+    private func stopRocketAnimation() {
+        frogSprite.removeAction(forKey: "frogRocketAnim")
+        frogSprite.setScale(1.0)
+        
+        // Remove rocket sprite and particle effects
+        removeRocketVisuals()
+    }
+    
+    private func addRocketSprite() {
+        // Remove any existing rocket sprite
+        rocketSprite?.removeFromParent()
+        
+        // Create rocket sprite from rocketRide.png
+        let rocketTexture = SKTexture(imageNamed: "rocketRide")
+        rocketSprite = SKSpriteNode(texture: rocketTexture)
+        
+        guard let rocket = rocketSprite else { return }
+        
+        // Size the rocket appropriately relative to the frog
+        let rocketSize = CGSize(width: frogSprite.size.width * 0.8, height: frogSprite.size.height * 1.2)
+        rocket.size = rocketSize
+        
+        // Position rocket underneath the frog
+        rocket.position = CGPoint(x: 0, y: -frogSprite.size.height * 0.3)
+        rocket.zPosition = -1  // Behind the frog
+        
+        // Add rocket as child of frog sprite
+        frogSprite.addChild(rocket)
+        
+        print("🚀 Rocket sprite added as child node")
+    }
+    
+    private func createRocketParticleEffects() {
+        guard let rocket = rocketSprite else { return }
+        
+        // Create flame emitter
+        rocketFlameEmitter = SKEmitterNode()
+        if let flameEmitter = rocketFlameEmitter {
+            // Flame particle configuration
+            flameEmitter.particleTexture = SKTexture(imageNamed: "flame") // Fallback to circle if no flame texture
+            flameEmitter.particleBirthRate = 80
+            flameEmitter.numParticlesToEmit = 0 // Continuous emission
+            flameEmitter.particleLifetime = 0.6
+            flameEmitter.particleLifetimeRange = 0.2
+            
+            // Position at bottom of rocket
+            flameEmitter.position = CGPoint(x: 0, y: -rocket.size.height * 0.5)
+            flameEmitter.particlePositionRange = CGVector(dx: 20, dy: 5)
+            
+            // Movement and physics
+            flameEmitter.emissionAngle = CGFloat.pi * 1.5 // Downward
+            flameEmitter.emissionAngleRange = CGFloat.pi * 0.3
+            flameEmitter.particleSpeed = 120
+            flameEmitter.particleSpeedRange = 40
+            
+            // Appearance
+            flameEmitter.particleScale = 0.3
+            flameEmitter.particleScaleRange = 0.15
+            flameEmitter.particleScaleSpeed = -0.8
+            flameEmitter.particleAlpha = 0.9
+            flameEmitter.particleAlphaSpeed = -1.5
+            
+            // Color progression: bright orange/yellow to red
+            flameEmitter.particleColor = SKColor.orange
+            flameEmitter.particleColorBlendFactor = 1.0
+            
+            // Create color sequence for flame color progression
+            let orangeColor = SKColor(red: 1.0, green: 0.6, blue: 0.1, alpha: 0.9)
+            let redColor = SKColor(red: 1.0, green: 0.2, blue: 0.1, alpha: 0.7)
+            let darkRedColor = SKColor(red: 0.8, green: 0.1, blue: 0.0, alpha: 0.3)
+            
+            let keyframeSequence = SKKeyframeSequence(keyframeValues: [orangeColor, redColor, darkRedColor],
+                                                    times: [0.0, 0.5, 1.0])
+            flameEmitter.particleColorSequence = keyframeSequence
+            
+            flameEmitter.zPosition = -2
+            rocket.addChild(flameEmitter)
+        }
+        
+        // Create smoke emitter
+        rocketSmokeEmitter = SKEmitterNode()
+        if let smokeEmitter = rocketSmokeEmitter {
+            // Smoke particle configuration
+            smokeEmitter.particleTexture = nil // Use default circle
+            smokeEmitter.particleBirthRate = 30
+            smokeEmitter.numParticlesToEmit = 0 // Continuous emission
+            smokeEmitter.particleLifetime = 2.0
+            smokeEmitter.particleLifetimeRange = 0.5
+            
+            // Position slightly behind flame
+            smokeEmitter.position = CGPoint(x: 0, y: -rocket.size.height * 0.6)
+            smokeEmitter.particlePositionRange = CGVector(dx: 15, dy: 8)
+            
+            // Movement and physics
+            smokeEmitter.emissionAngle = CGFloat.pi * 1.5 // Downward
+            smokeEmitter.emissionAngleRange = CGFloat.pi * 0.4
+            smokeEmitter.particleSpeed = 60
+            smokeEmitter.particleSpeedRange = 30
+            
+            // Appearance
+            smokeEmitter.particleScale = 0.2
+            smokeEmitter.particleScaleRange = 0.1
+            smokeEmitter.particleScaleSpeed = 0.8 // Grows over time
+            smokeEmitter.particleAlpha = 0.6
+            smokeEmitter.particleAlphaSpeed = -0.3
+            
+            // Color: dark gray smoke
+            smokeEmitter.particleColor = SKColor.darkGray
+            smokeEmitter.particleColorBlendFactor = 1.0
+            
+            smokeEmitter.zPosition = -3 // Behind flames
+            rocket.addChild(smokeEmitter)
+        }
+        
+        print("🚀 Rocket particle effects created")
+    }
+    
+    private func removeRocketVisuals() {
+        // Remove particle emitters
+        rocketFlameEmitter?.removeFromParent()
+        rocketFlameEmitter = nil
+        
+        rocketSmokeEmitter?.removeFromParent()
+        rocketSmokeEmitter = nil
+        
+        // Remove rocket sprite
+        rocketSprite?.removeFromParent()
+        rocketSprite = nil
+        
+        print("🚀 Rocket visuals removed")
+    }
+    
     /// Shows the scared texture for a short duration, then returns to idle if appropriate
     func showScared(duration: TimeInterval = 1.0) {
         // Don't override rocket visuals
@@ -176,6 +386,7 @@ class FrogController {
         // Set scared texture immediately
         if let scared = scaredTexture, scared.size() != .zero {
             frogSprite.removeAction(forKey: "frogJumpAnim")
+            frogSprite.removeAction(forKey: "frogRocketAnim")
             frogSprite.removeAction(forKey: "frogBounce")
             frogSprite.texture = scared
             // Keep scale reasonable during scare
@@ -189,7 +400,7 @@ class FrogController {
             if self.inWater, let floatTex = self.floatingTexture, floatTex.size() != .zero {
                 self.frogSprite.texture = floatTex
                 // ensure bob remains if applicable (do not restart here to avoid duplicates)
-            } else if !self.isJumping {
+            } else if !self.isJumping && !self.rocketActive {
                 self.playIdle()
             }
         }
@@ -204,6 +415,7 @@ class FrogController {
         jumpProgress = 0
         velocity = .zero
         inWater = false
+        isDrowning = false  // NEW: Reset drowning state
         onIce = false
         slideVelocity = .zero
         suppressWaterCollisionUntilNextJump = false
@@ -214,16 +426,25 @@ class FrogController {
         frogShadow.alpha = 0.3
         playIdle()
         
-        print("ðŸ¸ Frog reset to starting lily pad at \(position)")
+        print("Frog reset to starting lily pad at \(position)")
     }
     
     func startJump(to targetPos: CGPoint) {
         jumpStartPos = position
+        
+        // Note: Jump range multiplier is now applied in SlingshotController for consistent targeting
+        // No need to modify the target position here - it's already been calculated correctly
         jumpTargetPos = targetPos
         jumpProgress = 0
         isJumping = true
         isGrounded = false
         jumpFrameCount = 0  // Reset jump timeout counter
+        
+        // CRITICAL FIX: When starting a jump, clear the water state 
+        // This prevents the frog from being stuck in floating mode
+        inWater = false
+        isDrowning = false
+        
         // Stop water bobbing when leaving water to jump
         frogSprite.removeAction(forKey: "frogBob")
         frogSprite.parent?.removeAction(forKey: waterRippleActionKey)
@@ -234,7 +455,7 @@ class FrogController {
         
         // Ensure rotation is unlocked for new jump (in case rocket constraints are still active)
         unlockFacingAfterRocket()
-        print("🐸 Starting jump - rotation constraints cleared")
+        print("🐸 Starting jump - rotation constraints cleared, water state reset")
         
         let dx = targetPos.x - position.x
         let dy = targetPos.y - position.y
@@ -249,15 +470,24 @@ class FrogController {
         // atan2(dy, dx) gives us the angle to the target
         // Common corrections based on your frog art's default orientation:
         //   0: frog faces right by default
-        //   Ï€/2 (90Â°): frog faces up by default
-        //   -Ï€/2 (-90Â°): frog faces down by default
-        //   Ï€/4 (45Â°): frog faces up-right by default
+        //   π/2 (90°): frog faces up by default
+        //   -π/2 (-90°): frog faces down by default
+        //   π/4 (45°): frog faces up-right by default
         let angle = atan2(dy, dx)
         let correction: CGFloat = .pi / 2 // 90 degrees - top of frog faces up in the art
         frogSprite.removeAction(forKey: "face")
         frogSprite.run(SKAction.rotate(toAngle: angle + correction, duration: 0.08, shortestUnitArc: true), withKey: "face")
-        // Speed per frame stays GameConfig.jumpSpeed; superjump can scale distance elsewhere
+        // SUPER POWERS: Apply Jump Recoil reduction to speed up jump timing
         jumpSpeed = GameConfig.jumpSpeed
+        if let gameScene = scene as? GameScene {
+            let recoilReduction = gameScene.uiManager.getJumpRecoilReduction()
+            if recoilReduction > 0 {
+                // Increase jump speed to reduce hang time (faster jumps)
+                let speedMultiplier = 1.0 + (recoilReduction / 10.0) // Convert seconds to speed multiplier
+                jumpSpeed *= CGFloat(speedMultiplier)
+                print("⚡ Jump Recoil Super Power: Jump speed increased by \(String(format: "%.1f", (speedMultiplier - 1.0) * 100))%")
+            }
+        
         let dirX = dx / distance
         let dirY = dy / distance
         velocity = CGVector(dx: dirX * jumpSpeed, dy: dirY * jumpSpeed)
@@ -267,7 +497,23 @@ class FrogController {
         // Play jump animation
         playJumpOnce()
         
-        print("ðŸ¸ Jump started from \(jumpStartPos) to \(jumpTargetPos)")
+        print("Jump started from \(jumpStartPos) to \(jumpTargetPos)")
+            let speedMultiplier = 1.0 + (recoilReduction / 10.0) // Convert seconds to speed multiplier
+
+                jumpSpeed *= CGFloat(speedMultiplier)
+                print("⚡ Jump Recoil Super Power: Jump speed increased by \(String(format: "%.1f", (speedMultiplier - 1.0) * 100))%")
+            }
+        
+        let dirX = dx / distance
+        let dirY = dy / distance
+        velocity = CGVector(dx: dirX * jumpSpeed, dy: dirY * jumpSpeed)
+        // Cache total distance for visual progress
+        cachedJumpDistance = distance
+        
+        // Play jump animation
+        playJumpOnce()
+        
+        print("Jump started from \(jumpStartPos) to \(jumpTargetPos)")
     }
     
     func updateJump() {
@@ -350,62 +596,76 @@ class FrogController {
     
     
     func splash() {
-            isJumping = false
-            isGrounded = false
-            frogSprite.setScale(1.0)
+        isJumping = false
+        isGrounded = false
+        frogSprite.setScale(1.0)
 
-            // Create a large splash ripple
-            if let gameScene = scene as? GameScene {
-                // Large amplitude and high frequency for dramatic splash
-                gameScene.worldManager.addRipple(at: position, amplitude: 0.045, frequency: 14.0)
-            }
-
-            if lifeVestCharges > 0 {
-                // Do not consume the vest here. Let GameScene decide and manage suppression.
-                inWater = true
-                
-                // Debug floating texture assignment
-                print("🐸 Setting floating texture. Before: \(String(describing: frogSprite.texture)), FloatingTexture: \(String(describing: floatingTexture))")
-                frogSprite.texture = floatingTexture ?? idleTexture  // Fallback to idle if floating texture is nil
-                print("🐸 After setting floating texture: \(String(describing: frogSprite.texture))")
-                
-                frogSprite.alpha = 1.0 // keep visible while floating
-                // Start bobbing while floating in water
-                frogSprite.removeAction(forKey: "frogBob")
-                let bobUp = SKAction.moveBy(x: 0, y: 6, duration: 0.6)
-                bobUp.timingMode = .easeInEaseOut
-                let bobDown = SKAction.moveBy(x: 0, y: -6, duration: 0.6)
-                bobDown.timingMode = .easeInEaseOut
-                let bobSequence = SKAction.sequence([bobUp, bobDown])
-                frogSprite.run(SKAction.repeatForever(bobSequence), withKey: "frogBob")
-                
-                // Start gentle repeating water ripples while floating
-                frogSprite.parent?.removeAction(forKey: waterRippleActionKey)
-                if let gameScene = scene as? GameScene {
-                    let rippleOnce = SKAction.run { [weak gameScene, weak self] in
-                        guard let self = self, let gameScene = gameScene else { return }
-                        gameScene.worldManager.addRipple(at: self.position, amplitude: 0.012, frequency: 12.0)
-                    }
-                    let wait = SKAction.wait(forDuration: 0.8)
-                    let seq = SKAction.sequence([rippleOnce, wait])
-                    frogSprite.parent?.run(SKAction.repeatForever(seq), withKey: waterRippleActionKey)
-                }
-                
-                print("Life vest available. Entering water; GameScene will handle rescue.")
-            } else {
-                // No vest: normal splash behavior (hide frog)
-                inWater = false
-                frogSprite.setScale(1.5)
-                frogSprite.texture = sinkingTexture
-                frogSprite.alpha = 0
-                frogSprite.removeAction(forKey: "frogBob")
-                frogSprite.parent?.removeAction(forKey: waterRippleActionKey)
-                print("SPLASH! Fell in water")
-                
-                // Play splash sound
-                soundController.playWaterSplash(severity: 1.0)
-            }
+        // Create a large splash ripple
+        if let gameScene = scene as? GameScene {
+            // Large amplitude and high frequency for dramatic splash
+            gameScene.worldManager.addRipple(at: position, amplitude: 0.045, frequency: 14.0)
         }
+
+        // Check if frog has life vests available for this splash
+        if lifeVestCharges > 0 {
+            // Do not consume the vest here. Let GameScene decide and manage suppression.
+            inWater = true
+            isDrowning = false  // Not drowning if we have life vests
+            
+            // Debug floating texture assignment
+            print("🐸 Setting floating texture. Before: \(String(describing: frogSprite.texture)), FloatingTexture: \(String(describing: floatingTexture))")
+            frogSprite.texture = floatingTexture ?? idleTexture  // Fallback to idle if floating texture is nil
+            print("🐸 After setting floating texture: \(String(describing: frogSprite.texture))")
+            
+            frogSprite.alpha = 1.0 // keep visible while floating
+            // Start bobbing while floating in water
+            frogSprite.removeAction(forKey: "frogBob")
+            let bobUp = SKAction.moveBy(x: 0, y: 6, duration: 0.6)
+            bobUp.timingMode = .easeInEaseOut
+            let bobDown = SKAction.moveBy(x: 0, y: -6, duration: 0.6)
+            bobDown.timingMode = .easeInEaseOut
+            let bobSequence = SKAction.sequence([bobUp, bobDown])
+            frogSprite.run(SKAction.repeatForever(bobSequence), withKey: "frogBob")
+            
+            // Start gentle repeating water ripples while floating
+            frogSprite.parent?.removeAction(forKey: waterRippleActionKey)
+            if let gameScene = scene as? GameScene {
+                let rippleOnce = SKAction.run { [weak gameScene, weak self] in
+                    guard let self = self, let gameScene = gameScene else { return }
+                    gameScene.worldManager.addRipple(at: self.position, amplitude: 0.012, frequency: 12.0)
+                }
+                let wait = SKAction.wait(forDuration: 0.8)
+                let seq = SKAction.sequence([rippleOnce, wait])
+                frogSprite.parent?.run(SKAction.repeatForever(seq), withKey: waterRippleActionKey)
+            }
+            
+            print("Life vest available. Entering water; GameScene will handle rescue.")
+        } else {
+            // No vest: frog drowns
+            // CRITICAL FIX: Even if the frog was previously floating, it should drown without life vests
+            inWater = true  // Set to true to indicate drowning state
+            isDrowning = true  // NEW: Explicit drowning flag
+            isGrounded = false
+            frogSprite.setScale(0.9)
+            frogSprite.texture = sinkingTexture
+            frogSprite.alpha = 0
+            frogSprite.removeAction(forKey: "frogBob")
+            frogSprite.parent?.removeAction(forKey: waterRippleActionKey)
+            
+            // Enhanced logging to debug the issue
+            print("SPLASH! Fell in water - DROWNING (no life vest available)")
+            print("  🐸 lifeVestCharges: \(lifeVestCharges)")
+            print("  🐸 Previous inWater state: \(inWater)")
+            print("  🐸 Setting isDrowning: true")
+            
+            // Play splash sound
+            soundController.playWaterSplash(severity: 1.0)
+            
+            // Trigger drowning callback to notify game scene
+            print("  🐸 Calling onDrowned callback...")
+            onDrowned?()
+        }
+    }
     
     func landOnPad(_ pad: LilyPad) {
                isGrounded = true
@@ -444,7 +704,8 @@ class FrogController {
                    let frequency: CGFloat = 40.0
                    gameScene.worldManager.addRipple(at: ripplePos, amplitude: amplitude, frequency: frequency)
                    
-                   
+                   // Trigger Impact Jumps super power effect
+                   gameScene.handleImpactJumpLanding(at: position)
                }
             
         // Preserve actual landing position on the pad instead of snapping to center
@@ -475,6 +736,7 @@ class FrogController {
         }
             
             inWater = false
+            isDrowning = false  // CRITICAL: Reset drowning state when landing on pad
             frogSprite.removeAction(forKey: "frogBob")
             frogSprite.parent?.removeAction(forKey: waterRippleActionKey)
             frogSprite.texture = idleTexture
@@ -586,11 +848,23 @@ class FrogController {
         
         // For super jump activation
         HapticFeedbackManager.shared.notification(.success)
-        superJumpFramesRemaining = GameConfig.superJumpDurationFrames
+        
+        // SUPER POWERS: Apply Super Jump Focus extension
+        var superJumpDuration = GameConfig.superJumpDurationFrames
+        if let gameScene = scene as? GameScene {
+            let extensionSeconds = gameScene.uiManager.getSuperJumpExtension()
+            if extensionSeconds > 0 {
+                let extensionFrames = Int(extensionSeconds * 60.0) // Convert seconds to frames (60 FPS)
+                superJumpDuration += extensionFrames
+                print("🎯 Super Jump Focus Super Power: Extended by \(String(format: "%.1f", extensionSeconds)) seconds (\(extensionFrames) frames)")
+            }
+        }
+        
+        superJumpFramesRemaining = superJumpDuration
 
         // Become invincible during super jump
         invincible = true
-        invincibleFramesRemaining = max(invincibleFramesRemaining, GameConfig.superJumpDurationFrames)
+        invincibleFramesRemaining = max(invincibleFramesRemaining, superJumpDuration)
         frogSprite.alpha = 1.0
 
         // Yellow glow around the frog disabled per request
@@ -600,67 +874,13 @@ class FrogController {
         if rocketActive {
             rocketFramesRemaining -= 1
             
-            // Create rocket sprite attached to frog
+            // Check if rocket animation is already started
             if rocketSprite == nil {
-                let rocket = SKLabelNode(text: "Woo hoo!")
-                rocket.fontSize = 32
-                rocket.position = CGPoint(x: 0, y: -40)  // Below the frog
-                rocket.zPosition = -1
-                frogSprite.addChild(rocket)
-                rocketSprite = rocket
-                
-                // Add a pulsing animation to the rocket
-                let pulse = SKAction.sequence([
-                    SKAction.scale(to: 1.2, duration: 0.3),
-                    SKAction.scale(to: 1.0, duration: 0.3)
-                ])
-                rocket.run(SKAction.repeatForever(pulse))
-            }
-            
-            // Create exhaust trail behind the rocket
-            if rocketTrail == nil, let scene = scene {
-                let trail = SKShapeNode()
-                let trailPath = CGMutablePath()
-                trailPath.addEllipse(in: CGRect(x: -8, y: -20, width: 16, height: 30))
-                trail.path = trailPath
-                trail.fillColor = .orange
-                trail.strokeColor = .red
-                trail.lineWidth = 1
-                trail.alpha = 0.8
-                trail.zPosition = frogSprite.zPosition - 1
-                scene.addChild(trail)
-                rocketTrail = trail
-            }
-            
-            // Update trail position to follow rocket
-            if let rocket = rocketSprite, let scene = scene {
-                let rocketWorldPos = scene.convert(rocket.position, from: frogSprite)
-                rocketTrail?.position = CGPoint(x: rocketWorldPos.x, y: rocketWorldPos.y - 15)
-            }
-            
-            // Emit flame particles occasionally
-            if Int.random(in: 0...2) == 0, let scene = scene, let rocket = rocketSprite {
-                let rocketWorldPos = scene.convert(rocket.position, from: frogSprite)
-                let flameTexture = SKTexture(imageNamed: "flame")
-                let flame = SKSpriteNode(texture: flameTexture)
-                flame.size = CGSize(width: 14, height: 14) // approximate previous visual scale
-                flame.position = CGPoint(
-                    x: rocketWorldPos.x + CGFloat.random(in: -5...5),
-                    y: rocketWorldPos.y - 20
-                )
-                // Place behind the rocket sprite but above the background
-                flame.zPosition = (rocket.zPosition - 1)
-                scene.addChild(flame)
-                
-                let action = SKAction.sequence([
-                    SKAction.group([
-                        SKAction.moveBy(x: 0, y: -30, duration: 0.4),
-                        SKAction.fadeOut(withDuration: 0.4),
-                        SKAction.scale(to: 0.2, duration: 0.4)
-                    ]),
-                    SKAction.removeFromParent()
-                ])
-                flame.run(action)
+                // This shouldn't happen as rocket sprite is created in playRocketAnimation
+                // but we'll handle it gracefully
+                print("⚠️ Rocket sprite missing during active rocket - attempting to recreate")
+                addRocketSprite()
+                createRocketParticleEffects()
             }
             
             // Update indicator with countdown
@@ -674,12 +894,12 @@ class FrogController {
                 // Remove indicator and its animations
                 indicator?.removeAllActions()
                 indicator?.removeFromParent()
-                // Remove rocket sprite
-                rocketSprite?.removeFromParent()
-                rocketSprite = nil
-                // Remove trail visual
-                rocketTrail?.removeFromParent()
-                rocketTrail = nil
+                // Stop rocket animation and return to idle
+                stopRocketAnimation()
+                if !isJumping {
+                    playIdle()
+                }
+                frogSprite.setScale(1.0)
                 
                 // Clear special track state and return to normal gameplay music
                 SoundController.shared.handleSpecialAbilityEnded()
@@ -699,20 +919,59 @@ class FrogController {
         rocketActive = false
         rocketFramesRemaining = 0
         
-        // Remove rocket sprite and its animations
-        rocketSprite?.removeAllActions()
-        rocketSprite?.removeFromParent()
-        rocketSprite = nil
-        
-        // Remove trail visual
-        rocketTrail?.removeFromParent()
-        rocketTrail = nil
+        // Stop rocket animation and return to idle
+        stopRocketAnimation()
+        if !isJumping {
+            playIdle()
+        }
+        frogSprite.setScale(1.0)
         
         // Clear special track state and return to normal gameplay music
         SoundController.shared.handleSpecialAbilityEnded()
         
         // Restore normal rotation behavior
         unlockFacingAfterRocket()
+    }
+    
+    /// Force the rocket to land and place frog on starting lily pad for next level
+    func forceRocketLandingOnNextLevelStart(startPad: LilyPad, sceneSize: CGSize) {
+        guard rocketActive else { return }
+        
+        print("🚀➡️🏁 Rocket crossed finish line - transitioning to next level start pad")
+        
+        // End rocket mode
+        rocketActive = false
+        rocketFramesRemaining = 0
+        
+        // Stop rocket animation and visuals
+        stopRocketAnimation()
+        frogSprite.setScale(1.0)
+        
+        // Clear special track state and return to normal gameplay music
+        SoundController.shared.handleSpecialAbilityEnded()
+        
+        // Restore normal rotation behavior
+        unlockFacingAfterRocket()
+        
+        // Place frog on the starting lily pad of the next level
+        position = startPad.position
+        currentLilyPad = startPad
+        isGrounded = true
+        isJumping = false
+        jumpProgress = 0
+        velocity = .zero
+        inWater = false
+        isDrowning = false
+        onIce = false
+        slideVelocity = .zero
+        suppressWaterCollisionUntilNextJump = false
+        
+        // Reset to idle appearance
+        playIdle()
+        frogSprite.alpha = 1.0
+        frogShadow.alpha = 0.3
+        
+        print("🐸 Frog successfully placed on next level start pad at \(position)")
     }
     
     // Locks the frog to face upwards (top of screen) during rocket
@@ -736,6 +995,8 @@ class FrogController {
         } else {
             frogSprite.constraints = [lock]
         }
+        
+        print("🚀 Rocket facing locked - zRotation set to 0, constraints applied: \(frogSprite.constraints?.count ?? 0)")
     }
 
     // Unlocks rotation after rocket ends
@@ -745,12 +1006,14 @@ class FrogController {
         
         // Clear all rotation constraints to ensure frog can rotate freely
         // This is more reliable than trying to filter specific constraint types
+        let constraintCount = frogSprite.constraints?.count ?? 0
         frogSprite.constraints = nil
         
-        print("🐸 Rotation unlocked after rocket - frog can now turn freely")
+        print("🐸 Rotation unlocked after rocket - frog can now turn freely (cleared \(constraintCount) constraints)")
     }
     
     func activateRocket() {
+        print("🚀 ACTIVATING ROCKET MODE!")
         rocketActive = true
         
         // For rocket activation
@@ -766,9 +1029,17 @@ class FrogController {
         isGrounded = false
         velocity = CGVector.zero
         
+        // Start rocket animation
+        print("🚀 About to start rocket animation...")
+        playRocketAnimation()
+        print("🚀 Rocket animation call completed")
+
+        
         // The frog will be moved to center screen by GameScene
         frogSprite.alpha = 1.0  // Keep full visibility during rocket flight
         lockFacingUpForRocket()
+        
+        print("🚀 Rocket activation complete!")
     }
     
     // MARK: - Ice Sliding Methods

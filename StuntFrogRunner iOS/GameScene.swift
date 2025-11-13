@@ -70,6 +70,7 @@ class GameScene: SKScene {
     var enemies: [Enemy] = []
     var tadpoles: [Tadpole] = []
     var bigHoneyPots: [BigHoneyPot] = []
+    var lifeVests: [LifeVest] = []
     var lilyPads: [LilyPad] = []
     
     var maxHealth: Int {
@@ -112,6 +113,9 @@ class GameScene: SKScene {
         hudController?.onScoreGained = nil
         
         finishLine?.onCrossed = nil
+        
+        // Clear UIManager references - this could prevent retain cycles
+        uiManager = nil
         
         // Force cleanup of all game objects
         forceCompleteCleanup()
@@ -363,6 +367,7 @@ class GameScene: SKScene {
                 enemies: &self.enemies,
                 tadpoles: &self.tadpoles,
                 bigHoneyPots: &self.bigHoneyPots,
+                lifeVests: &self.lifeVests,
                 worldOffset: self.worldManager.worldNode.position.y,
                 frogPosition: self.frogController.position,
                 superJumpActive: self.frogController.superJumpActive
@@ -864,7 +869,7 @@ class GameScene: SKScene {
         spawnManager.resumeSpawningAfterAbilitySelection()
         
         // Ensure spawn state and pad tadpole flags are reset when returning to menu
-        spawnManager.reset(for: &lilyPads, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots)
+        spawnManager.reset(for: &lilyPads, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests)
         
         gameState = .menu
         uiManager.showMainMenu(sceneSize: size)
@@ -873,8 +878,29 @@ class GameScene: SKScene {
     // MARK: - Game Start
     func startNewGame() {
         print("🎮 Starting completely new game - resetting all progress")
+        // Save any pending tadpole coins before starting new game
+        uiManager.savePendingTadpoleCoins()
+        
         // Force reset all progress for a brand new game
-        scoreManager.resetScore()
+        scoreManager.startFreshGame()
+        
+        // TEST: Verify level configuration system is working
+        testLevelConfigSystem()
+        
+        startGame()
+    }
+    
+    func startGameFromLastLevel() {
+        print("🎮 Continuing from last completed level")
+        // Save any pending tadpole coins before continuing
+        uiManager.savePendingTadpoleCoins()
+        
+        // Continue from the last completed level
+        scoreManager.continueFromLastLevel()
+        
+        // TEST: Verify level configuration system is working
+        testLevelConfigSystem()
+        
         startGame()
     }
     
@@ -894,7 +920,21 @@ class GameScene: SKScene {
             print("🎮 Continuing from state \(gameState) - no level reset")
         }
         
-        healthManager.reset(startingHealth: GameConfig.startingHealth)
+        // CRITICAL FIX: Apply super power bonuses to starting health
+        let baseHealth = GameConfig.startingHealth
+        let bonusHealth = uiManager.getBonusMaxHealth()
+        let startingHealthWithBonuses = baseHealth + bonusHealth
+        
+        print("❤️ Starting health calculation:")
+        print("  - Base health: \(baseHealth)")
+        print("  - Super power bonus: \(bonusHealth)")
+        print("  - Total starting health: \(startingHealthWithBonuses)")
+        
+        healthManager.reset(startingHealth: startingHealthWithBonuses)
+        
+        // Apply all other super power effects at game start
+        applySuperPowerEffects()
+        
         visualEffectsController.stopLowHealthFlash()
         uiManager.updateStarProgress(current: 0, threshold: GameConfig.tadpolesForAbility)
         
@@ -915,7 +955,7 @@ class GameScene: SKScene {
         touchInputController.reset()
         
         // Reset spawn-related state and clear any lingering pad-tadpole links
-        spawnManager.reset(for: &lilyPads, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots)
+        spawnManager.reset(for: &lilyPads, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests)
         
         // Reset edge spike bushes
         edgeSpikeBushManager.reset()
@@ -944,6 +984,147 @@ class GameScene: SKScene {
         gameState = .initialUpgradeSelection
         uiManager.showInitialUpgradeSelection(sceneSize: size)
     }
+    
+    // MARK: - Super Power Effects Application
+    /// Apply all super power effects at game start
+    private func applySuperPowerEffects() {
+        print("🚀 Applying super power effects...")
+        
+        // Reset impact jumps for the current level
+        uiManager.resetImpactJumpsForNewLevel(currentLevel)
+        
+        // Reset ghost escapes for the current level
+        uiManager.resetGhostEscapesForNewLevel(currentLevel)
+        
+        // Log all current super power levels for debugging
+        for powerType in SuperPowerType.allCases {
+            let level = uiManager.getSuperPowerLevel(powerType)
+            if level > 0 {
+                print("  - \(powerType.name): Level \(level)")
+                switch powerType {
+                case .jumpRange:
+                    print("    Effect: \(uiManager.getJumpRangeMultiplier())x jump range")
+                case .jumpRecoil:
+                    print("    Effect: -\(uiManager.getJumpRecoilReduction())s jump cooldown")
+                case .maxHealth:
+                    print("    Effect: +\(uiManager.getBonusMaxHealth()) max health")
+                case .superJumpFocus:
+                    print("    Effect: +\(uiManager.getSuperJumpExtension())s super jump duration")
+                case .ghostMagic:
+                    print("    Effect: \(uiManager.getGhostEscapesRemaining()) ghost escapes available")
+                case .impactJumps:
+                    print("    Effect: \(uiManager.getImpactJumpDestroysRemaining()) impact destroys remaining")
+                }
+            }
+        }
+        
+        print("🚀 Super power effects applied successfully")
+    }
+    
+    // MARK: - Super Power Gameplay Effects
+    /// Handle Impact Jumps super power effect when frog lands
+    func handleImpactJumpLanding(at landingPosition: CGPoint) {
+        // Check if frog has impact jumps remaining
+        let remainingImpacts = uiManager.getImpactJumpDestroysRemaining()
+        guard remainingImpacts > 0 else { return }
+        
+        print("💥 Impact Jump triggered! Remaining: \(remainingImpacts)")
+        
+        // Define impact radius - larger for higher levels
+        let impactRadius: CGFloat = 150.0
+        
+        // Destroy enemies within impact radius
+        var destroyedCount = 0
+        for i in (0..<enemies.count).reversed() {
+            let enemy = enemies[i]
+            let dx = enemy.position.x - landingPosition.x
+            let dy = enemy.position.y - landingPosition.y
+            let distance = sqrt(dx * dx + dy * dy)
+            
+            if distance <= impactRadius {
+                // Add score for destroyed enemy
+                switch enemy.type {
+                case .snake:
+                    scoreManager.addScore(200)
+                case .bee:
+                    scoreManager.addScore(100)
+                case .dragonfly:
+                    scoreManager.addScore(150)
+                case .log:
+                    scoreManager.addScore(50)
+                case .spikeBush, .edgeSpikeBush:
+                    scoreManager.addScore(100)
+                case .chaser:
+                    scoreManager.addScore(300)
+                }
+                
+                // Play destruction effect at screen position
+                let screenPos = convert(enemy.position, from: worldManager.worldNode)
+                effectsManager?.createExplosionEffect(at: screenPos)
+                
+                // Remove from lily pad tracking if applicable
+                if let targetPad = enemy.targetLilyPad {
+                    targetPad.removeEnemyType(enemy.type)
+                }
+                
+                // Remove enemy
+                enemy.stopAnimation()
+                enemy.node.removeFromParent()
+                enemies.remove(at: i)
+                destroyedCount += 1
+                
+                print("💥 Impact destroyed \(enemy.type.rawValue)")
+            }
+        }
+        
+        if destroyedCount > 0 {
+            // Consume one impact jump charge
+            uiManager.useImpactJumpDestroy()
+            
+            // Play impact effect and sound
+            SoundController.shared.playSoundEffect(.frogLand, volume: 1.0)
+            HapticFeedbackManager.shared.impact(.heavy)
+            
+            // Show floating text
+            showFloatingText("💥 Impact Jump! \(destroyedCount) destroyed", color: .systemRed)
+            showFloatingScore("+\(destroyedCount * 100) IMPACT BONUS", color: .systemRed)
+            
+            print("💥 Impact Jump destroyed \(destroyedCount) enemies! Remaining impacts: \(uiManager.getImpactJumpDestroysRemaining())")
+        }
+    }
+    
+    /// Handle Ghost Magic super power effect to escape from enemies
+    func tryGhostEscape() -> Bool {
+        let remainingEscapes = uiManager.getGhostEscapesRemaining()
+        guard remainingEscapes > 0 else { return false }
+        print("👻 Ghost Escape triggered! Remaining: \(remainingEscapes)")
+        
+        // Use one ghost escape charge
+        healthManager.useGhostEscape()
+        
+        // Make frog temporarily invincible and visually ghost-like
+        frogController.activateInvincibility(seconds: 2.0)
+        // Create a ghost-like visual effect (make frog semi-transparent briefly)
+        let ghostEffect = SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.3, duration: 0.1),
+            SKAction.wait(forDuration: 1.8),
+            SKAction.fadeAlpha(to: 1.0, duration: 0.1)
+        ])
+        frogController.frog.run(ghostEffect)
+        
+        // Play ghost sound and effects
+        SoundController.shared.playSoundEffect(.frogLand, volume: 0.5) // TODO: Add ghost sound
+        HapticFeedbackManager.shared.impact(.medium)
+        
+        // Show floating text with remaining count
+        let newRemainingEscapes = uiManager.getGhostEscapesRemaining()
+        showFloatingText("👻 Ghost Escape! (\(newRemainingEscapes) left)", color: .systemPurple)
+        
+        print("👻 Ghost Escape used! Remaining escapes: \(newRemainingEscapes)")
+        return true
+    }
+        
+    
     
     // This method is called after the player selects their initial upgrade
     func proceedToGameplay() {
@@ -1014,12 +1195,20 @@ class GameScene: SKScene {
         for tadpole in tadpoles {
             tadpole.node.removeFromParent()
         }
+        for bigHoneyPot in bigHoneyPots {
+            bigHoneyPot.node.removeFromParent()
+        }
+        for lifeVest in lifeVests {
+            lifeVest.node.removeFromParent()
+        }
         for lilyPad in lilyPads {
             lilyPad.node.removeFromParent()
         }
         
         enemies.removeAll()
         tadpoles.removeAll()
+        bigHoneyPots.removeAll()
+        lifeVests.removeAll()
         lilyPads.removeAll()
         
         // CRITICAL FIX: Clear spatial grid after clearing lily pads array
@@ -1069,6 +1258,7 @@ class GameScene: SKScene {
             enemies: &enemies,
             tadpoles: &tadpoles,
             bigHoneyPots: &bigHoneyPots,
+            lifeVests: &lifeVests,
             worldOffset: worldManager.worldNode.position.y
         )
         
@@ -1287,6 +1477,7 @@ class GameScene: SKScene {
                     enemies: &enemies,
                     tadpoles: &tadpoles,
                     bigHoneyPots: &bigHoneyPots,
+                    lifeVests: &lifeVests,
                     worldOffset: worldManager.worldNode.position.y
                 )
             }
@@ -1500,7 +1691,7 @@ class GameScene: SKScene {
 //        let scrollScore = worldManager.updateScrolling(isJumping: frogController.isJumping)
 //        scoreManager.addScore(scrollScore)
         
-        if !frogController.isJumping && !frogController.isGrounded {
+        if !frogController.isJumping && !frogController.isGrounded && !frogController.inWater {
             let landingResult = landingController.checkLanding(
                 frogPosition: frogController.position,
                 lilyPads: lilyPads,
@@ -1588,6 +1779,33 @@ class GameScene: SKScene {
                 self?.handleBigHoneyPotCollect()
             }
         )
+        
+        // Update life vests
+        collisionManager.updateLifeVests(
+            lifeVests: &lifeVests,
+            frogPosition: frogController.position,
+            frogScreenPosition: frogScreenPoint,
+            worldOffset: worldManager.worldNode.position.y,
+            screenHeight: size.height,
+            rocketActive: frogController.rocketActive,
+            onCollect: { [weak self] in
+                self?.handleLifeVestCollect()
+            }
+        )
+        
+        // SAFETY: Validate BigHoneyPot placements periodically to prevent water spawning
+        if frameCount % 30 == 0 {  // Validate every 30 frames (0.5 seconds at 60fps)
+            collisionManager.validateBigHoneyPotPlacements(bigHoneyPots: &bigHoneyPots, lilyPads: lilyPads)
+            collisionManager.validateLifeVestPlacements(lifeVests: &lifeVests, lilyPads: lilyPads)
+            
+            // Optional debug logging (can be enabled/disabled as needed)
+            #if DEBUG
+            if frameCount % 300 == 0 {  // Debug report every 5 seconds
+                collisionManager.debugBigHoneyPotPlacements(bigHoneyPots: bigHoneyPots)
+                collisionManager.debugLifeVestPlacements(lifeVests: lifeVests)
+            }
+            #endif
+        }
         
         // PERFORMANCE: Update lily pads every other frame to reduce overhead
         if frameCount % 2 == 1 {  // Alternate with enemy updates
@@ -1709,6 +1927,13 @@ class GameScene: SKScene {
             showFloatingText("Swat!", color: .systemOrange)
         }
         
+        // Try ghost escape if no other protection was used
+        if !consumedProtection && enemy.type == EnemyType.chaser && tryGhostEscape() {
+            consumedProtection = true
+            // Ghost escape destroys chasers
+            return .destroyed(cause: nil)
+        }
+        
         // Logs: if we have an axe, chop and pass through; otherwise, bonk/bounce without losing a heart
         if enemy.type == EnemyType.log {
             if consumedProtection, destroyCause == .axe {
@@ -1780,6 +2005,11 @@ class GameScene: SKScene {
     }
     
     private func handleEdgeSpikeBushCollision() {
+        // Try ghost escape first
+        if tryGhostEscape() {
+            return // Ghost escape successful, no damage taken
+        }
+        
         // Damage the frog's health
         healthManager.damageHealth()
         
@@ -1808,10 +2038,54 @@ class GameScene: SKScene {
         soundController.playCollectSound()
         soundController.playScoreSound(scoreValue: 100)
         
+        // Award tadpole coins for Super Powers system
+        uiManager.pendingTadpoleCoins += 1
+        
         showFloatingScore("+100", color: .systemYellow)
         
         if abilityTriggered {
-            // Ability selection will be shown on next landing
+            print("🎯 Ability triggered! pendingAbilitySelection: \(healthManager.pendingAbilitySelection)")
+            print("🎯 Current frog state - isGrounded: \(frogController.isGrounded), isJumping: \(frogController.isJumping)")
+            print("🎯 Game state: \(gameState)")
+            
+            // If frog is already grounded (not jumping), trigger ability selection immediately
+            if frogController.isGrounded && !frogController.isJumping && gameState == .playing {
+                print("🎯 Frog is grounded - triggering ability selection immediately")
+                
+                // Lock input during the animation window
+                stateManager.lockInput(for: 1.0)
+                let vfx = visualEffectsController!
+                vfx.playUpgradeCue()
+
+                // Pause spawning and clear enemies immediately for a calm scene
+                if let currentPad = frogController.currentLilyPad {
+                    spawnManager.pauseSpawningAndClearEnemies(around: currentPad, enemies: &enemies, sceneSize: size)
+                }
+
+                // Delay showing the ability selection to let the animation be seen
+                let delay = SKAction.wait(forDuration: 0.9)
+                let abilitySelectionAction = SKAction.run { [weak self] in
+                    guard let self = self else { 
+                        return 
+                    }
+                    
+                    // Clear the pending flag and show UI
+                    self.healthManager.pendingAbilitySelection = false
+                    
+                    if self.gameState == .playing {
+                        self.gameState = .abilitySelection
+                        self.uiManager.showAbilitySelection(sceneSize: self.size)
+                        print("🎯 Ability selection shown immediately after tadpole collection")
+                    } else {
+                        print("🚨 Ability selection cancelled due to game state change: \(self.gameState)")
+                    }
+                }
+                
+                let sequence = SKAction.sequence([delay, abilitySelectionAction])
+                run(sequence, withKey: "abilitySelectionDelay")
+            } else {
+                print("🎯 Frog not grounded - ability selection will be shown on next landing")
+            }
         }
     }
     
@@ -1831,6 +2105,30 @@ class GameScene: SKScene {
         
         // Visual feedback
         showFloatingText("Honey Pot Maxed!", color: .systemOrange)
+        
+        // Light haptic feedback for positive collection
+        HapticFeedbackManager.shared.impact(.medium)
+    }
+    
+    // MARK: - Life Vest Collection
+    private func handleLifeVestCollect() {
+        if frogController.rocketActive { return }
+        
+        // Refill all 4 lifevest slots as specified
+        frogController.lifeVestCharges = 4
+        
+        // Give significant score bonus for collecting life vest
+        scoreManager.addScore(400)
+        soundController.playCollectSound()
+        soundController.playScoreSound(scoreValue: 400)
+        
+        showFloatingScore("+400 - Life Vests Refilled!", color: .systemBlue)
+        
+        // Visual feedback
+        showFloatingText("Life Vests Refilled!", color: .systemBlue)
+        
+        // Update HUD to show refilled life vest charges
+        updateHUD()
         
         // Light haptic feedback for positive collection
         HapticFeedbackManager.shared.impact(.medium)
@@ -1883,6 +2181,7 @@ class GameScene: SKScene {
                 enemies: &enemies,
                 tadpoles: &tadpoles,
                 bigHoneyPots: &bigHoneyPots,
+                lifeVests: &lifeVests,
                 worldOffset: worldManager.worldNode.position.y,
                 frogPosition: frogController.position,
                 superJumpActive: frogController.superJumpActive
@@ -1936,6 +2235,7 @@ class GameScene: SKScene {
                 enemies: &enemies,
                 tadpoles: &tadpoles,
                 bigHoneyPots: &bigHoneyPots,
+                lifeVests: &lifeVests,
                 worldOffset: worldManager.worldNode.position.y,
                 frogPosition: frogController.position,
                 superJumpActive: frogController.superJumpActive
@@ -1981,37 +2281,23 @@ class GameScene: SKScene {
         HapticFeedbackManager.shared.notification(.error)
         effectsManager?.createSplashEffect(at: frogContainer.position)
         
-        // Check for life vest charges (same logic as handleMissedLanding)
+        // Check for life vest charges (same logic as handleWaterSplash)
         if frogController.lifeVestCharges > 0 {
             frogController.lifeVestCharges -= 1
             updateHUD()
             stateManager.cancelPendingGameOver()
             healthManager.pendingAbilitySelection = false
-            frogController.suppressWaterCollisionUntilNextJump = true
+            // CRITICAL FIX: Don't suppress water collision when the frog should be floating
+            // This allows the frog to continue floating with proper physics
+            frogController.suppressWaterCollisionUntilNextJump = false
             stateManager.splashTriggered = false
             showFloatingText("Life Vest -1", color: .systemYellow)
             
-            // CRITICAL FIX: After life vest rescue, place frog on nearest safe lily pad
-            // Find nearest safe lily pad to land on
-            var nearestPad: LilyPad?
-            var nearestDist: CGFloat = .infinity
-            for pad in lilyPads where pad.type != .pulsing || pad.isSafeToLand {
-                let dx = frogController.position.x - pad.position.x
-                let dy = frogController.position.y - pad.position.y
-                let dist = sqrt(dx*dx + dy*dy)
-                if dist < nearestDist {
-                    nearestDist = dist
-                    nearestPad = pad
-                }
-            }
-            
-            // Replaced block as per instructions:
-            // Life vest rescue: keep frog floating at current position; do not snap to a pad
+            // Ensure frog is properly floating with correct state
             frogController.inWater = true
             frogController.isGrounded = false
             frogController.isJumping = false
-            // Position remains unchanged; player can slingshot to safety
-            print("🦎 Life vest rescue: Keeping frog at splash position (no teleport)")
+            print("🦎 Life vest rescue: Frog continues floating (can jump from water)")
         } else {
             healthManager.pendingAbilitySelection = false
             self.playScaredSpinDropAndGameOver(reason: .splash)
@@ -2053,22 +2339,27 @@ class GameScene: SKScene {
                 updateHUD()
                 stateManager.cancelPendingGameOver()
                 healthManager.pendingAbilitySelection = false
-                frogController.suppressWaterCollisionUntilNextJump = true
+                // CRITICAL FIX: Don't suppress water collision when the frog should be floating
+                // This allows the frog to continue floating with proper physics
+                frogController.suppressWaterCollisionUntilNextJump = false
                 stateManager.splashTriggered = false
                 showFloatingText("Life Vest -1", color: .systemYellow)
                 
-                // CRITICAL FIX: After life vest rescue, try to find a nearby lily pad
-                // Removed the search and landing code, replaced with stays in water:
-                // Life vest water rescue: keep frog floating; do not move position or land on a pad
+                // Ensure frog is properly floating with correct state
                 frogController.inWater = true
                 frogController.isGrounded = false
                 frogController.isJumping = false
-                print("🦎 Life vest water rescue: Keeping frog at splash position (no teleport)")
+                print("🦎 Life vest water rescue: Frog continues floating (can jump from water)")
             } else {
+                // No life vest - frog should sink and cause game over
+                frogController.inWater = false
+                frogController.isGrounded = false
+                frogController.isJumping = false
                 healthManager.pendingAbilitySelection = false
                 self.playScaredSpinDropAndGameOver(reason: .splash)
             }
         } else {
+            // Frog not in water state - this means no life vest was available
             healthManager.pendingAbilitySelection = false
             self.playScaredSpinDropAndGameOver(reason: .splash)
         }
@@ -2314,6 +2605,10 @@ class GameScene: SKScene {
         print("🎯 Advanced from Level \(oldLevel) to Level \(currentLevel)")
         print("📈 Enemy spawn rate multiplier: \(String(format: "%.1f", baseSpawnRateMultiplier))x (base + \(String(format: "%.0f", (baseSpawnRateMultiplier - 1.0) * 100))%)")
         
+        // Print detailed level configuration information
+        print("🎮 New Level Configuration:")
+        print(LevelEnemyConfigManager.getDebugInfo(for: currentLevel))
+        
         // Remove finish line
         finishLine?.node.removeFromParent()
         finishLine = nil
@@ -2388,6 +2683,12 @@ class GameScene: SKScene {
         for tadpole in tadpoles {
             tadpole.node.removeFromParent()
         }
+        for bigHoneyPot in bigHoneyPots {
+            bigHoneyPot.node.removeFromParent()
+        }
+        for lifeVest in lifeVests {
+            lifeVest.node.removeFromParent()
+        }
         for lilyPad in lilyPads {
             lilyPad.node.removeFromParent()
         }
@@ -2396,6 +2697,8 @@ class GameScene: SKScene {
         print("🧹 Clearing object arrays...")
         enemies.removeAll()
         tadpoles.removeAll()
+        bigHoneyPots.removeAll()
+        lifeVests.removeAll()
         lilyPads.removeAll()
         
         // STEP 3: Clear spatial grid after clearing lily pads array
@@ -2414,7 +2717,7 @@ class GameScene: SKScene {
         
         // STEP 6: Reset spawn manager state for new level
         print("🧹 Resetting spawn manager state...")
-        spawnManager.reset(for: &lilyPads, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots)
+        spawnManager.reset(for: &lilyPads, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests)
         
         // STEP 7: Reset frog state for new level
         print("🐸 Resetting frog state for new level...")
@@ -2459,6 +2762,7 @@ class GameScene: SKScene {
             enemies: &enemies,
             tadpoles: &tadpoles,
             bigHoneyPots: &bigHoneyPots,
+            lifeVests: &lifeVests,
             worldOffset: worldManager.worldNode.position.y
         )
         
@@ -2706,6 +3010,14 @@ class GameScene: SKScene {
             print("  ❌ Tadpoles array not empty: \(tadpoles.count) remaining")
             allClear = false
         }
+        if !bigHoneyPots.isEmpty {
+            print("  ❌ BigHoneyPots array not empty: \(bigHoneyPots.count) remaining")
+            allClear = false
+        }
+        if !lifeVests.isEmpty {
+            print("  ❌ LifeVests array not empty: \(lifeVests.count) remaining")
+            allClear = false
+        }
         if !lilyPads.isEmpty {
             print("  ❌ LilyPads array not empty: \(lilyPads.count) remaining")
             allClear = false
@@ -2760,6 +3072,7 @@ class GameScene: SKScene {
                name.contains("enemy") || name.contains("log") || name.contains("bee") || 
                name.contains("snake") || name.contains("dragonfly") || name.contains("bush") ||
                name.contains("tadpole") || name.contains("lilypad") || name.contains("pad") ||
+               name.contains("honey") || name.contains("vest") ||
                name.contains("finish") {
                 child.removeFromParent()
                 print("  🗑️ Removed orphaned node: \(name)")
@@ -2769,6 +3082,8 @@ class GameScene: SKScene {
         // Clear all arrays
         enemies.removeAll()
         tadpoles.removeAll()
+        bigHoneyPots.removeAll()
+        lifeVests.removeAll()
         lilyPads.removeAll()
         
         // Clear spatial grid
@@ -2818,13 +3133,126 @@ class GameScene: SKScene {
         }
     }
     
-    /// Test method to get current level info
+    /// Debug ghost escapes state
+    func debugGhostEscapesState() {
+        print("👻 GHOST ESCAPES DEBUG:")
+        let totalEscapes = uiManager.getGhostEscapes()
+        let usedEscapes = healthManager.ghostEscapesUsed
+        let remainingEscapes = uiManager.getGhostEscapesRemaining()
+        
+        print("   - Super power level: \(uiManager.getSuperPowerLevel(.ghostMagic))")
+        print("   - Total escapes available: \(totalEscapes)")
+        print("   - Used this level: \(usedEscapes)")
+        print("   - Remaining: \(remainingEscapes)")
+        print("   - Current level: \(currentLevel)")
+        
+        // Test the functionality
+        if remainingEscapes > 0 {
+            print("   ✅ Ghost escape should work")
+        } else {
+            print("   ❌ No ghost escapes available")
+        }
+    }
+    
+    /// Test method to get current level info with new configuration system
     func debugLevelInfo() {
         print("🎯 LEVEL INFO:")
         print("  - Current Level: \(currentLevel)")
         print("  - Base Spawn Rate Multiplier: \(String(format: "%.2f", baseSpawnRateMultiplier))x")
         print("  - Increase from Level 1: +\(String(format: "%.0f", (baseSpawnRateMultiplier - 1.0) * 100))%")
         print("  - SpawnManager Multiplier: \(String(format: "%.2f", spawnManager.levelSpawnRateMultiplier))x")
+        print("")
+        print("🎮 Level Configuration Details:")
+        print(LevelEnemyConfigManager.getDebugInfo(for: currentLevel))
+    }
+    
+    /// Test method to preview configurations for upcoming levels
+    func debugPreviewLevels(range: ClosedRange<Int>) {
+        print("🔮 LEVEL PREVIEW:")
+        LevelEnemyConfigManager.printDebugInfo(for: range)
+    }
+    
+    /// Test method to manually set the current level (for testing configurations)
+    func debugSetLevel(_ level: Int) {
+        print("🧪 TESTING: Manually setting level to \(level)")
+        currentLevel = level
+        
+        // Update spawn manager
+        baseSpawnRateMultiplier = 1.0 + (CGFloat(level - 1) * 0.1)
+        spawnManager.updateSpawnRateMultiplier(baseSpawnRateMultiplier)
+        
+        // Show level indicator
+        showLevelIndicator()
+        
+        // Print new configuration
+        debugLevelInfo()
+    }
+    
+    /// Force test the level configuration system in real-time
+    func testLevelConfigSystem() {
+        print("🧪 TESTING LEVEL CONFIG SYSTEM:")
+        
+        // Test level calculation
+        let testScore = score
+        let calculatedLevel = max(1, (testScore / 25000) + 1)
+        print("  - Current score: \(testScore)")
+        print("  - Calculated level: \(calculatedLevel)")
+        print("  - GameScene currentLevel: \(currentLevel)")
+        
+        // Test configuration retrieval
+        let config = LevelEnemyConfigManager.getConfig(for: calculatedLevel)
+        print("  - Global spawn multiplier: \(config.globalSpawnRateMultiplier)")
+        print("  - Max enemies on screen: \(config.maxEnemiesPerScreen)")
+        print("  - Enemy types configured: \(config.enemyConfigs.count)")
+        
+        for enemyConfig in config.enemyConfigs {
+            let finalRate = enemyConfig.spawnRate * config.globalSpawnRateMultiplier
+            print("    - \(enemyConfig.enemyType): rate=\(String(format: "%.3f", enemyConfig.spawnRate)) -> final=\(String(format: "%.3f", finalRate)), max=\(enemyConfig.maxCount), water=\(enemyConfig.canSpawnInWater), pads=\(enemyConfig.canSpawnOnPads)")
+        }
+        
+        // Force spawn manager to use this level
+        if let gameScene = spawnManager.scene as? GameScene {
+            print("  - SpawnManager has access to GameScene: YES")
+            print("  - SpawnManager can read score: \(gameScene.score)")
+        } else {
+            print("  - SpawnManager has access to GameScene: NO")
+        }
+        
+        // Test specific Level 1 expectations
+        if calculatedLevel == 1 {
+            let beeConfig = config.enemyConfigs.first { $0.enemyType == .bee }
+            if let bee = beeConfig {
+                print("✅ Level 1 BEE config found: rate=\(bee.spawnRate), max=\(bee.maxCount)")
+            } else {
+                print("❌ Level 1 BEE config NOT FOUND!")
+            }
+            
+            let otherTypes = config.enemyConfigs.filter { $0.enemyType != .bee }
+            if otherTypes.isEmpty {
+                print("✅ Level 1 correctly has ONLY bees")
+            } else {
+                print("❌ Level 1 has other enemy types: \(otherTypes.map { $0.enemyType })")
+            }
+        }
+    }
+    
+    /// Test method to show all enemy spawn rates for current level
+    func debugCurrentLevelEnemyRates() {
+        print("🐛 ENEMY SPAWN RATES FOR LEVEL \(currentLevel):")
+        let allowedTypes = LevelEnemyConfigManager.getAllowedEnemyTypes(for: currentLevel)
+        
+        for enemyType in allowedTypes {
+            let spawnRate = LevelEnemyConfigManager.getSpawnRate(for: enemyType, at: currentLevel)
+            let maxCount = LevelEnemyConfigManager.getMaxCount(for: enemyType, at: currentLevel)
+            let canSpawnOnPads = LevelEnemyConfigManager.canSpawnOnPads(enemyType: enemyType, at: currentLevel)
+            let canSpawnInWater = LevelEnemyConfigManager.canSpawnInWater(enemyType: enemyType, at: currentLevel)
+            
+            print("  \(enemyType):")
+            print("    - Spawn Rate: \(String(format: "%.3f", spawnRate))")
+            print("    - Max Count: \(maxCount)")
+            print("    - On Pads: \(canSpawnOnPads)")
+            print("    - In Water: \(canSpawnInWater)")
+        }
     }
     
     // TEMPORARY: Override input validation to allow ice sliding
@@ -2852,9 +3280,12 @@ class GameScene: SKScene {
         if let tapped = nodesAtPoint.first(where: { node in
             guard let name = node.name else { return false }
             return name == "playGameButton" ||
+                   name == "continueGameButton" ||
+                   name == "newGameButton" ||
                    name == "leaderboardButton" ||
                    name == "tutorialButton" ||
                    name == "closeTutorialButton" ||
+                   name == "superPowersButton" ||
                    name == "pauseButton" ||
                    name == "continueButton" ||
                    name == "resumeButton" ||
@@ -2881,6 +3312,20 @@ class GameScene: SKScene {
                     startNewGame()
                     return
                 }
+                
+                // Continue from last completed level
+                if nodeName == "continueGameButton" {
+                    soundController.playSoundEffect(.buttonTap)
+                    startGameFromLastLevel()
+                    return
+                }
+                
+                // Start completely new game (Level 1)
+                if nodeName == "newGameButton" {
+                    soundController.playSoundEffect(.buttonTap)
+                    startNewGame()
+                    return
+                }
                 if nodeName == "leaderboardButton" {
                     soundController.playSoundEffect(.buttonTap)
                     // Present Game Center leaderboard via UIManager
@@ -2891,6 +3336,12 @@ class GameScene: SKScene {
                     soundController.playSoundEffect(.buttonTap)
                     // Show tutorial modal via UIManager
                     uiManager.showTutorialModal(sceneSize: size)
+                    return
+                }
+                if nodeName == "superPowersButton" {
+                    soundController.playSoundEffect(.buttonTap)
+                    // Show super powers modal via UIManager
+                    uiManager.handleNamedButtonTap("superPowersButton")
                     return
                 }
                 if nodeName == "closeTutorialButton" {
@@ -3044,7 +3495,8 @@ class GameScene: SKScene {
                   lilyPads: lilyPads,
                   worldNode: worldManager.worldNode,
                   scene: self,
-                  worldOffset: worldManager.worldNode.position.y
+                  worldOffset: worldManager.worldNode.position.y,
+                  jumpRangeMultiplier: uiManager.getJumpRangeMultiplier()
               )
         updateFacingFromAiming(location: location)
     }
@@ -3092,7 +3544,8 @@ class GameScene: SKScene {
                 frogScreenPosition: frogScreenPoint,
                 frogWorldPosition: frogController.position,
                 worldOffset: worldManager.worldNode.position.y,
-                superJumpActive: frogController.superJumpActive
+                superJumpActive: frogController.superJumpActive,
+                jumpRangeMultiplier: uiManager.getJumpRangeMultiplier()
             ) {
                 print("ÃƒÂ°Ã…Â¸Ã‚ÂÃ‚Â¸ Jumping to: \(targetWorldPos)")
                 frogController.startJump(to: targetWorldPos)
@@ -3168,6 +3621,38 @@ class GameScene: SKScene {
             self.frogController.frogShadow.alpha = 0.0
             self.gameOver(reason)
         }
+    }
+    
+    // MARK: - Level Continuation Debug Methods
+    
+    /// Debug method to show current level continuation state
+    func debugLevelContinuation() {
+        print("🎮 LEVEL CONTINUATION DEBUG:")
+        scoreManager.debugShowState()
+        print("  - GameScene currentLevel: \(currentLevel)")
+        print("  - GameScene baseSpawnRateMultiplier: \(String(format: "%.2f", baseSpawnRateMultiplier))x")
+    }
+    
+    /// Test method to simulate completing levels for testing continuation
+    func debugSimulateProgress() {
+        print("🧪 TESTING: Simulating progress through levels")
+        scoreManager.debugSimulateProgressToLevel(5)
+        
+        print("🧪 After simulation - checking main menu state:")
+        debugLevelContinuation()
+        
+        // Force refresh the main menu to see the changes
+        showMainMenu()
+    }
+    
+    /// Test method to reset all progress for testing
+    func debugResetAllProgress() {
+        print("🧪 TESTING: Resetting ALL progress")
+        scoreManager.resetAllProgress()
+        debugLevelContinuation()
+        
+        // Force refresh the main menu to see the changes
+        showMainMenu()
     }
 }
 

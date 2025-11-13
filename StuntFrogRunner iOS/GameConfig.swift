@@ -6,6 +6,7 @@
 //
 
 import CoreGraphics
+import Foundation
 
 struct GameConfig {
     // Physics for top-down jumping
@@ -44,7 +45,7 @@ struct GameConfig {
     static let lilyPadSpawnRate: CGFloat = 0.006  // Increased slightly to ensure enough lily pads for tadpoles
     static let enemySpawnRate: CGFloat = 0.4   // Increased from 0.008 to see more enemies
     static let tadpoleSpawnRate: CGFloat = 0.03   // Reduced to match lower lily pad availability
-    static let logSpawnRate: CGFloat = 0.25      // Increased for better visibility
+    static let logSpawnRate: CGFloat = 0.45      // Increased for better visibility
     
     // Enemy settings - all move on water surface
     static let snakeSpeed: CGFloat = 2.0
@@ -64,6 +65,7 @@ struct GameConfig {
     // Ability selection safety
     static let abilitySelectionTimeoutSeconds: Double = 30.0  // Auto-clear stuck ability selection after 30s
     static let maxAbilitySelectionRetries: Int = 3  // Max retries before forcing clear
+    
     
     // Object sizes
     static let snakeSize: CGFloat = 165
@@ -113,6 +115,133 @@ struct GameConfig {
     static let maxActiveEnemies: Int = 20          // Maximum enemies to keep active
     static let objectCleanupDistance: CGFloat = 1000  // Distance below frog to remove objects
     static let performanceCheckInterval: Int = 300  // Frames between performance checks (5 seconds at 60fps)
+    
+    // Persistent tadpole tracking
+    static var tadpoleCount: Int {
+        get {
+            return UserDefaults.standard.integer(forKey: "TadpoleCount")
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "TadpoleCount")
+            UserDefaults.standard.synchronize()
+        }
+    }
+    
+    // Persistent upgrade variables
+    static var bonusHearts: Int {
+        get {
+            let value = UserDefaults.standard.object(forKey: "BonusHearts") as? Int
+            return value ?? 0  // Default to 0
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "BonusHearts")
+            UserDefaults.standard.synchronize()
+        }
+    }
+    
+    static var jumpBoost: Int {
+        get {
+            let value = UserDefaults.standard.object(forKey: "JumpBoost") as? Int
+            return value ?? 1  // Default to 1
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "JumpBoost")
+            UserDefaults.standard.synchronize()
+        }
+    }
+    
+    static var jumpRecoil: Int {
+        get {
+            let value = UserDefaults.standard.object(forKey: "JumpRecoil") as? Int
+            return value ?? 1  // Default to 1
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "JumpRecoil")
+            UserDefaults.standard.synchronize()
+        }
+    }
+    
+    static var superJumpBoost: Int {
+        get {
+            let value = UserDefaults.standard.object(forKey: "SuperJumpBoost") as? Int
+            return value ?? 0  // Default to 0
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "SuperJumpBoost")
+            UserDefaults.standard.synchronize()
+        }
+    }
+    
+    static var powerJump: Int {
+        get {
+            let value = UserDefaults.standard.object(forKey: "PowerJump") as? Int
+            return value ?? 0  // Default to 0
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "PowerJump")
+            UserDefaults.standard.synchronize()
+        }
+    }
+    
+    static var ghostBust: Int {
+        get {
+            let value = UserDefaults.standard.object(forKey: "GhostBust") as? Int
+            return value ?? 0  // Default to 0
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "GhostBust")
+            UserDefaults.standard.synchronize()
+        }
+    }
+    
+    // Helper methods for tadpole management
+    static func addTadpole() {
+        tadpoleCount += 1
+        if enableDebugLogging {
+            print("🐸 Tadpole collected! Total count: \(tadpoleCount)")
+        }
+    }
+    
+    static func addTadpoles(_ count: Int) {
+        tadpoleCount += count
+        if enableDebugLogging {
+            print("🐸 \(count) tadpoles collected! Total count: \(tadpoleCount)")
+        }
+    }
+    
+    static func resetTadpoleCount() {
+        tadpoleCount = 0
+        if enableDebugLogging {
+            print("🐸 Tadpole count reset to 0")
+        }
+    }
+    
+    // Helper methods for upgrade management
+    static func resetAllUpgrades() {
+        bonusHearts = 0
+        jumpBoost = 1
+        jumpRecoil = 1
+        superJumpBoost = 0
+        powerJump = 0
+        ghostBust = 0
+        tadpoleCount = 0
+        if enableDebugLogging {
+            print("🔄 All upgrades and tadpole count reset to defaults")
+        }
+    }
+    
+    static func printUpgradeStatus() {
+        if enableDebugLogging {
+            print("🎮 Current Upgrades:")
+            print("   Tadpoles: \(tadpoleCount)")
+            print("   Bonus Hearts: \(bonusHearts)")
+            print("   Jump Boost: \(jumpBoost)")
+            print("   Jump Recoil: \(jumpRecoil)")
+            print("   Super Jump Boost: \(superJumpBoost)")
+            print("   Power Jump: \(powerJump)")
+            print("   Ghost Bust: \(ghostBust)")
+        }
+    }
     
     // Debug settings
     static let enableDebugLogging: Bool = false    // Set to false to reduce performance impact of logging

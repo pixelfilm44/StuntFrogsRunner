@@ -19,8 +19,8 @@ class SpawnManager {
     // Pending enemies to add in the next update cycle to avoid simultaneous access
     private var pendingEnemies: [Enemy] = []
     
-    // Level-based difficulty scaling
-    var levelSpawnRateMultiplier: CGFloat = 2.0
+    // Level-based difficulty scaling - now uses LevelEnemyConfigManager
+    var levelSpawnRateMultiplier: CGFloat = 1.0  // Legacy compatibility - will be replaced by level configs
     
     // Pads that have already spawned a tadpole; prevents repeat spawns on the same pad
     private var padsThatSpawnedTadpoles = Set<ObjectIdentifier>()
@@ -36,26 +36,26 @@ class SpawnManager {
     private let maxLogsPerScreen: Int = 12  // Increased from 8 to 12
     private let maxTotalLogs: Int = 18      // Increased from 12 to 18
     private var lastLogCount = 0
-
+    
     // Edge spike bush wall management
     private var lastWallSpawnY: CGFloat = -CGFloat.greatestFiniteMagnitude
     private let wallHorizontalOffset: CGFloat = 800
-
+    
     // Tadpole pacing
     private var framesSinceLastTadpole: Int = 0
     private let tadpoleForceSpawnFrameThreshold: Int = 120 // ~2 seconds at 60fps
     private var lastTadpoleWorldY: CGFloat = -CGFloat.greatestFiniteMagnitude
     private let minTadpoleSpacingY: CGFloat = 180
-
+    
     // Finish line management
     private var finishLinePosition: CGFloat = 25000.0  // Start at 25,000 points for first level
     private let levelPointIncrement: CGFloat = 25000.0 // Add 25,000 points per level
-
+    
     // Probability to attach a tadpole to a newly spawned lily pad
     private var tadpolePerPadProbability: CGFloat {
         return GameConfig.tadpolePerPadProbability
     }
-
+    
     /// Checks if a lily pad is safe for tadpole spawning.
     /// Returns false for pulsing lily pads since they are unsafe for tadpoles.
     /// Returns true for normal and moving lily pad types only.
@@ -70,7 +70,7 @@ class SpawnManager {
     }
     
     /// Resets all spawn-related state so a new run starts fresh
-    func reset(for lilyPads: inout [LilyPad], tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot]) {
+    func reset(for lilyPads: inout [LilyPad], tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], lifeVests: inout [LifeVest]) {
         // Clear global tracking
         padsThatSpawnedTadpoles.removeAll()
         framesSinceLastTadpole = 0
@@ -105,6 +105,13 @@ class SpawnManager {
             bhp.node.removeFromParent()
         }
         bigHoneyPots.removeAll()
+        
+        // Clear existing life vests from scene and detach from pads
+        for lv in lifeVests {
+            lv.lilyPad?.clearLifeVests()
+            lv.node.removeFromParent()
+        }
+        lifeVests.removeAll()
         
         // Reset tadpole-related state on existing lily pads
         for pad in lilyPads {
@@ -171,7 +178,7 @@ class SpawnManager {
         spatialGrid.insert(pad)
         print("🗂️ Added lily pad at \(Int(pad.position.x)), \(Int(pad.position.y)) to spatial grid")
     }
-
+    
     /// Counts logs within the current visible screen window in world coordinates.
     private func countLogsInVisibleWindow(enemies: [Enemy], worldOffset: CGFloat, sceneSize: CGSize) -> Int {
         let minVisibleY = -worldOffset - 100  // Slightly larger margin for better accuracy
@@ -233,9 +240,9 @@ class SpawnManager {
     var isSpawningPaused: Bool {
         return spawningPaused
     }
-
+    
     // MARK: - Lily Pad Factory with Integrated Spawn System
-    private func makeLilyPad(position: CGPoint, radius: CGFloat, frogPosition: CGPoint, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], enemies: inout [Enemy], worldNode: SKNode, existingLilyPads: [LilyPad]) -> LilyPad {
+    private func makeLilyPad(position: CGPoint, radius: CGFloat, frogPosition: CGPoint, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], lifeVests: inout [LifeVest], enemies: inout [Enemy], worldNode: SKNode, existingLilyPads: [LilyPad]) -> LilyPad {
         let currentScore: Int = (scene as? GameScene)?.score ?? 0
         print("🎯 Creating lily pad with current score: \(currentScore)")
         
@@ -292,23 +299,23 @@ class SpawnManager {
         let pad = LilyPad(position: position, radius: radius, type: type)
         
         if type == .moving {
-            pad.screenWidthProvider = { [weak self] in 
-                return (self?.scene as? GameScene)?.size.width ?? 1024 
+            pad.screenWidthProvider = { [weak self] in
+                return (self?.scene as? GameScene)?.size.width ?? 1024
             }
             pad.movementSpeed = 120.0
             pad.startMovingIfNeeded()
-        } 
+        }
         
         // PERFORMANCE OPTIMIZATION: Spawn items/enemies at lily pad creation time
         // This eliminates the need for multiple search passes and ensures proper placement
-        spawnItemsOnNewLilyPad(pad: pad, frogPosition: frogPosition, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies, worldNode: worldNode, currentScore: currentScore)
+        spawnItemsOnNewLilyPad(pad: pad, frogPosition: frogPosition, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies, worldNode: worldNode, currentScore: currentScore)
         
         return pad
     }
     
     /// Efficiently spawn items and enemies on a newly created lily pad
     /// This consolidates all spawn logic into a single pass for better performance
-    private func spawnItemsOnNewLilyPad(pad: LilyPad, frogPosition: CGPoint, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], enemies: inout [Enemy], worldNode: SKNode, currentScore: Int) {
+    private func spawnItemsOnNewLilyPad(pad: LilyPad, frogPosition: CGPoint, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], lifeVests: inout [LifeVest], enemies: inout [Enemy], worldNode: SKNode, currentScore: Int) {
         
         // SAFETY: Never spawn anything on unsafe lily pad types
         let isSafeForSpawning = isSafeForTadpoleSpawn(pad)
@@ -326,6 +333,7 @@ class SpawnManager {
         // Calculate spawn probabilities based on game state
         let tadpoleChance = (!isGravePad && isSafeForSpawning) ? tadpolePerPadProbability : 0.0
         let bigHoneyPotChance: CGFloat = (!isGravePad && isSafeForSpawning) ? 0.15 : 0.0  // 15% chance for big honey pots
+        let lifeVestChance: CGFloat = (!isGravePad && isSafeForSpawning) ? 0.08 : 0.0  // 8% chance for life vests (rarer than honey pots)
         
         // Enemy spawn chances based on current score and grace period
         let inGrace = CACurrentMediaTime() < graceEndTime
@@ -369,14 +377,37 @@ class SpawnManager {
         // 2. Try to spawn big honey pot (if no tadpole spawned)
         if !itemSpawned && CGFloat.random(in: 0.0...1.0) < bigHoneyPotChance {
             let bigHoneyPot = BigHoneyPot(position: pad.position)
+            
+            // CRITICAL FIX: Ensure proper lily pad linking
             bigHoneyPot.lilyPad = pad
+            pad.addBigHoneyPot(bigHoneyPot)  // Explicitly add to lily pad's collection
+            
             bigHoneyPot.node.position = pad.position
+            bigHoneyPot.node.position.y += 5  // Small visual offset above lily pad center
             bigHoneyPot.node.zPosition = 50
             worldNode.addChild(bigHoneyPot.node)
             bigHoneyPots.append(bigHoneyPot)
             itemSpawned = true
             
             print("🍯 Spawned big honey pot on new pad (type: \(pad.type)) at \(Int(pad.position.x)), \(Int(pad.position.y))")
+        }
+        
+        // 2.5. Try to spawn life vest (if no other item spawned)
+        if !itemSpawned && CGFloat.random(in: 0.0...1.0) < lifeVestChance {
+            let lifeVest = LifeVest(position: pad.position)
+            
+            // CRITICAL FIX: Ensure proper lily pad linking
+            lifeVest.lilyPad = pad
+            pad.addLifeVest(lifeVest)  // Explicitly add to lily pad's collection
+            
+            lifeVest.node.position = pad.position
+            lifeVest.node.position.y += 5  // Small visual offset above lily pad center
+            lifeVest.node.zPosition = 50
+            worldNode.addChild(lifeVest.node)
+            lifeVests.append(lifeVest)
+            itemSpawned = true
+            
+            print("🦺 Spawned life vest on new pad (type: \(pad.type)) at \(Int(pad.position.x)), \(Int(pad.position.y))")
         }
         
         // 3. Try to spawn enemy (if no items spawned and pad can accommodate)
@@ -392,8 +423,12 @@ class SpawnManager {
             }
             
             if let enemyType = allowedTypes.randomElement() {
-                spawnEnemyOnPad(type: enemyType, pad: pad, enemies: &enemies, worldNode: worldNode, currentScore: currentScore)
-                print("🐛 Spawned \(enemyType) on new pad at \(Int(pad.position.x)), \(Int(pad.position.y))")
+                // Use weighted selection if available for this level, otherwise fall back to random
+                let level = (currentScore / 25000) + 1
+                let weightedType = LevelEnemyConfigManager.getWeightedRandomEnemyType(for: level)
+                let finalType = (weightedType != nil && allowedTypes.contains(weightedType!)) ? weightedType! : enemyType
+                spawnEnemyOnPad(type: finalType, pad: pad, enemies: &enemies, worldNode: worldNode, currentScore: currentScore)
+                print("🐛 Spawned \(finalType) on new pad at \(Int(pad.position.x)), \(Int(pad.position.y))")
             } else {
                 print("⚠️ No enemy types available for spawning on pad at \(Int(pad.position.x)), \(Int(pad.position.y))")
             }
@@ -403,10 +438,8 @@ class SpawnManager {
         }
     }
     
-    /// Get allowed enemy types for a specific score and lily pad
+    /// Get allowed enemy types for a specific score and lily pad using the new configuration system
     private func getAllowedEnemyTypes(forScore score: Int, pad: LilyPad) -> [EnemyType] {
-        var allowedTypes: [EnemyType] = []
-        
         // Only allow enemies that can be accommodated by this pad type
         guard pad.canAccommodateEnemyType(.bee) else { return [] }  // Basic check
         
@@ -415,21 +448,19 @@ class SpawnManager {
             return [.chaser]
         }
         
-        if score < 4000 {
-            allowedTypes = [.bee]
-        } else if score < 10000 {
-            allowedTypes = [.bee, .dragonfly]
-            // Snakes need to move across, so they're spawned separately
-        } else if score < 15000 {
-            allowedTypes = [.bee, .dragonfly]
-            if pad.canAccommodateEnemyType(.spikeBush) {
-                allowedTypes.append(.spikeBush)
-            }
-        } else {
-            allowedTypes = [.bee, .dragonfly]
-            if pad.canAccommodateEnemyType(.spikeBush) {
-                allowedTypes.append(.spikeBush)
-            }
+        // Get level-based configuration
+        let level = max(1, (score / 25000) + 1) // Ensure level is at least 1
+        let levelConfig = LevelEnemyConfigManager.getConfig(for: level)
+        
+        // Filter enemy types that can spawn on pads
+        let allowedTypes = levelConfig.enemyConfigs.compactMap { enemyConfig -> EnemyType? in
+            // Check if this enemy type can spawn on lily pads
+            guard enemyConfig.canSpawnOnPads else { return nil }
+            
+            // Check if the lily pad can accommodate this enemy type
+            guard pad.canAccommodateEnemyType(enemyConfig.enemyType) else { return nil }
+            
+            return enemyConfig.enemyType
         }
         
         return allowedTypes
@@ -488,7 +519,7 @@ class SpawnManager {
             ) else { return }
             
             enemy = spawnedChaser
-
+            
         default:
             return  // Don't spawn other types on pads
         }
@@ -514,12 +545,12 @@ class SpawnManager {
         
         // Only if pad does not already have tadpoles and has never spawned one
         let id = ObjectIdentifier(pad)
-     //   guard !pad.hasTadpoles && !padsThatSpawnedTadpoles.contains(id) else { return }
+        //   guard !pad.hasTadpoles && !padsThatSpawnedTadpoles.contains(id) else { return }
         
         // Probability gate
         if CGFloat.random(in: 0.0...1.0) > tadpolePerPadProbability { return }
         
-      
+        
         let tadpole = Tadpole(position: pad.position)
         tadpole.lilyPad = pad
         padsThatSpawnedTadpoles.insert(id)
@@ -536,7 +567,7 @@ class SpawnManager {
     }
     
     /// Checks all lily pads to see if any need special handling
-    private func checkSpecialPadBehavior(lilyPads: [LilyPad], worldNode: SKNode) {
+    private func checkSpecialPadBehavior(lilyPads: [LilyPad], enemiesSnapshot: [Enemy], worldNode: SKNode) {
         guard let gameScene = scene as? GameScene else { return }
         
         let worldOffset = gameScene.worldManager.worldNode.position.y
@@ -545,13 +576,12 @@ class SpawnManager {
         
         // Find pads that are now in view and might need special handling
         let padsInView = lilyPads.filter { pad in
-            pad.position.y >= visibleMinY && 
+            pad.position.y >= visibleMinY &&
             pad.position.y <= visibleMaxY
         }
         
-        // Future: Add special behavior for different pad types here
+        // Handle special behavior for different pad types
         for pad in padsInView {
-            // Handle any special pad behaviors
             switch pad.type {
             case .normal:
                 break // No special behavior
@@ -562,11 +592,74 @@ class SpawnManager {
                 // Moving behavior is handled by the pad itself
                 break
             case .grave:
-                //ghosts
+                // Check if this grave pad needs a chaser spawned
+                checkAndSpawnChaserOnGravePad(pad, gameScene: gameScene, enemiesSnapshot: enemiesSnapshot, worldNode: worldNode)
                 break
             }
         }
-            
+        
+        // Debug: Occasionally log grave pad visibility
+        if frameCount % 60 == 0 { // Every second
+            let gravePadsInView = padsInView.filter { $0.type == .grave }
+            if !gravePadsInView.isEmpty {
+                print("🏴‍☠️ DEBUG: \(gravePadsInView.count) grave pad(s) currently in view")
+            }
+        }
+    }
+    
+    /// Check if a grave lily pad needs a chaser spawned and spawn one if appropriate
+    private func checkAndSpawnChaserOnGravePad(_ pad: LilyPad, gameScene: GameScene, enemiesSnapshot: [Enemy], worldNode: SKNode) {
+        // Only process grave pads
+        guard pad.type == .grave else { return }
+        
+        // SAFETY: Use read-only snapshot to avoid exclusivity violations with inout enemies
+        let hasExistingChaser = enemiesSnapshot.contains { enemy in
+            enemy.type == .chaser && enemy.targetLilyPad === pad
+        }
+        if hasExistingChaser { return }
+        
+        // Check if this pad already has a chaser in pending enemies
+        // Note: We only check pending enemies to avoid simultaneous access issues
+        // The main game loop will handle checking existing enemies before calling this method
+        let hasPendingChaser = pendingEnemies.contains { enemy in
+            enemy.type == .chaser && enemy.targetLilyPad === pad
+        }
+        
+        if hasPendingChaser {
+            return // Already has a pending chaser, don't spawn another
+        }
+        
+        // Check if we're in a grace period
+        let inGrace = CACurrentMediaTime() < graceEndTime
+        if inGrace {
+            return // Don't spawn during grace period
+        }
+        
+        // Get visibility parameters for chaser spawning
+        let worldOffset = gameScene.worldManager.worldNode.position.y
+        let sceneSize = gameScene.size
+        
+        // Use the lily pad's visibility-aware spawning method
+        guard let spawnedChaser = pad.maybeSpawnChaser(
+            targeting: gameScene.frogController,
+            baseSpeed: GameConfig.chaserSpeed,
+            worldOffset: worldOffset,
+            sceneSize: sceneSize
+        ) else {
+            return // Chaser spawn failed (could be due to probability or visibility)
+        }
+        
+        // Set up the chaser
+        spawnedChaser.targetLilyPad = pad
+        pad.addEnemyType(.chaser)
+        spawnedChaser.node.position = spawnedChaser.position
+        spawnedChaser.node.zPosition = 50
+        worldNode.addChild(spawnedChaser.node)
+        
+        // Add to the pending enemies to avoid simultaneous access issues
+        pendingEnemies.append(spawnedChaser)
+        
+        print("🏴‍☠️ Spawned visibility-based chaser on grave pad at \(Int(pad.position.x)), \(Int(pad.position.y))")
     }
     
     /// Potentially spawns special effects or enemies based on lily pad type
@@ -724,21 +817,21 @@ class SpawnManager {
             let radiusBasedSeparation = pad.radius + candidateRadius + extraPadding
             let requiredSeparation = max(minimumSpacing, radiusBasedSeparation)
             
-            if distance < requiredSeparation { 
-                return true 
+            if distance < requiredSeparation {
+                return true
             }
         }
         return false
     }
     
     /// FIXED: Thread-safe lily pad creation with proper spatial grid management
-    private func createLilyPadSafely(position: CGPoint, radius: CGFloat, lilyPads: inout [LilyPad], worldNode: SKNode, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], enemies: inout [Enemy], allowForceCreate: Bool = false) -> Bool {
+    private func createLilyPadSafely(position: CGPoint, radius: CGFloat, lilyPads: inout [LilyPad], worldNode: SKNode, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], lifeVests: inout [LifeVest], enemies: inout [Enemy], allowForceCreate: Bool = false) -> Bool {
         // Always check for overlap before creating, even when force creating
         let standardPadding: CGFloat = 20.0
         
         // Final validation: Never create overlapping pads
         if isOverlappingExisting(position: position, candidateRadius: radius, lilyPads: lilyPads, extraPadding: standardPadding) {
-           
+            
             return false
         }
         
@@ -749,6 +842,7 @@ class SpawnManager {
                 frogPosition: gs.frogController.position,
                 tadpoles: &tadpoles,
                 bigHoneyPots: &bigHoneyPots,
+                lifeVests: &lifeVests,
                 enemies: &enemies,
                 worldNode: wn,
                 existingLilyPads: lilyPads
@@ -766,7 +860,7 @@ class SpawnManager {
         return false
     }
     
-    private func createReachablePad(from position: CGPoint, targetY: CGFloat, sceneSize: CGSize, lilyPads: inout [LilyPad], worldNode: SKNode, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], enemies: inout [Enemy], forceCreate: Bool = false) {
+    private func createReachablePad(from position: CGPoint, targetY: CGFloat, sceneSize: CGSize, lilyPads: inout [LilyPad], worldNode: SKNode, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], lifeVests: inout [LifeVest], enemies: inout [Enemy], forceCreate: Bool = false) {
         let maxDist = GameConfig.maxRegularJumpDistance * 0.85  // Ensure it's definitely reachable
         let minDist: CGFloat = 80  // Reduced minimum distance for easier placement
         
@@ -797,7 +891,7 @@ class SpawnManager {
             if distance > minDist && distance < maxDist && dy > 0 {
                 // FIXED: Use consistent padding and safer creation
                 if !isOverlappingExisting(position: candidate, candidateRadius: candidateRadius, lilyPads: lilyPads) {
-                    if createLilyPadSafely(position: candidate, radius: candidateRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies) {
+                    if createLilyPadSafely(position: candidate, radius: candidateRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies) {
                         print("✅ Created reachable pad at distance \(Int(distance)) from \(Int(position.y)) to \(Int(candidate.y))")
                         return
                     }
@@ -826,11 +920,11 @@ class SpawnManager {
             
             // Only create if we successfully found a non-overlapping position
             if !isOverlappingExisting(position: finalPosition, candidateRadius: finalRadius, lilyPads: lilyPads) {
-                if createLilyPadSafely(position: finalPosition, radius: finalRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies, allowForceCreate: true) {
+                if createLilyPadSafely(position: finalPosition, radius: finalRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies, allowForceCreate: true) {
                     let actualDistance = sqrt(pow(finalPosition.x - position.x, 2) + pow(finalPosition.y - position.y, 2))
                     print("⚠️ Force created pad at distance \(Int(actualDistance)) after \(adjustAttempts) position adjustments")
                 }
-            } 
+            }
         }
     }
     
@@ -840,15 +934,15 @@ class SpawnManager {
         // PERFORMANCE FIX: More conservative spacing to prevent excessive spawning
         let minWallVerticalSpacing: CGFloat = 200  // Increased from 100 to 200
         if worldY - lastWallSpawnY < minWallVerticalSpacing { return }
-
+        
         // Compute target X positions around the screen center ± offset, clamped within margins
         let centerX = sceneSize.width / 2
         let leftX = max(GameConfig.edgeSpikeBushMargin, centerX - wallHorizontalOffset)
         let rightX = min(sceneSize.width - GameConfig.edgeSpikeBushMargin, centerX + wallHorizontalOffset)
-
+        
         // If the left and right would collapse into margins (very narrow screens), skip
         if rightX - leftX < 2 * GameConfig.edgeSpikeBushMargin { return }
-
+        
         // PERFORMANCE FIX: More strict duplicate checking with wider range
         let existingNearY = enemies.contains { enemy in
             guard enemy.type == .edgeSpikeBush else { return false }
@@ -861,7 +955,7 @@ class SpawnManager {
         if currentEdgeBushCount >= 30 {  // Hard limit to prevent excessive accumulation
             return
         }
-
+        
         // Create left bush
         let leftBush = Enemy(
             type: .edgeSpikeBush,
@@ -872,7 +966,7 @@ class SpawnManager {
         leftBush.node.zPosition = 50
         worldNode.addChild(leftBush.node)
         enemies.append(leftBush)
-
+        
         // Create right bush
         let rightBush = Enemy(
             type: .edgeSpikeBush,
@@ -883,14 +977,14 @@ class SpawnManager {
         rightBush.node.zPosition = 50
         worldNode.addChild(rightBush.node)
         enemies.append(rightBush)
-
+        
         lastWallSpawnY = worldY
         print("🌿 Spawned edge walls at y=\(Int(worldY)) leftX=\(Int(leftX)) rightX=\(Int(rightX)) (total: \(currentEdgeBushCount + 2))")
     }
-
+    
     // MARK: - Initial Spawn
     
-    func spawnInitialObjects(sceneSize: CGSize, lilyPads: inout [LilyPad], enemies: inout [Enemy], tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], worldOffset: CGFloat) {
+    func spawnInitialObjects(sceneSize: CGSize, lilyPads: inout [LilyPad], enemies: inout [Enemy], tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], lifeVests: inout [LifeVest], worldOffset: CGFloat) {
         guard let worldNode = worldNode else { return }
         
         print("🌸 spawnInitialObjects CALLED - starting lily pads count: \(lilyPads.count)")
@@ -942,7 +1036,7 @@ class SpawnManager {
             }
             
             if let finalPosition = foundCandidate {
-                if createLilyPadSafely(position: finalPosition, radius: candidateRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies) {
+                if createLilyPadSafely(position: finalPosition, radius: candidateRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies) {
                     lastPosition = finalPosition
                     successfulSpawns += 1
                     if i <= 5 || successfulSpawns % 10 == 0 {
@@ -960,7 +1054,7 @@ class SpawnManager {
                     let fallbackRadius = GameConfig.minLilyPadRadius
                     
                     if !isOverlappingExisting(position: fallbackPos, candidateRadius: fallbackRadius, lilyPads: lilyPads) {
-                        if createLilyPadSafely(position: fallbackPos, radius: fallbackRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies) {
+                        if createLilyPadSafely(position: fallbackPos, radius: fallbackRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies) {
                             lastPosition = fallbackPos
                             successfulSpawns += 1
                             print("🌸 🆘 Created fallback pad #\(successfulSpawns) at \(Int(fallbackPos.x)), \(Int(fallbackPos.y))")
@@ -974,7 +1068,7 @@ class SpawnManager {
         
         // Seed initial edge walls near the top of the initial band
         let initialWallY = lastPosition.y + 200  // Place walls ahead of the spawned pads
-        spawnEdgeWalls(at: initialWallY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode)
+        //spawnEdgeWalls(at: initialWallY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode)
     }
     
     // MARK: - Continuous Spawn
@@ -984,7 +1078,7 @@ class SpawnManager {
     private var lastBeeCount = 0
     
     /// CRITICAL SAFETY: Ensures frog always has reachable lily pads ahead
-    private func ensureFrogCanProgress(frogPosition: CGPoint, lilyPads: inout [LilyPad], sceneSize: CGSize, worldNode: SKNode, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], enemies: inout [Enemy]) {
+    private func ensureFrogCanProgress(frogPosition: CGPoint, lilyPads: inout [LilyPad], sceneSize: CGSize, worldNode: SKNode, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], lifeVests: inout [LifeVest], enemies: inout [Enemy]) {
         let maxJump = GameConfig.maxRegularJumpDistance
         
         // Check if frog is sliding on ice - if so, use a more conservative horizontal check
@@ -1026,7 +1120,7 @@ class SpawnManager {
             // Ensure no overlap before creating emergency pad
             let candidateRadius = CGFloat.random(in: GameConfig.minLilyPadRadius...GameConfig.maxLilyPadRadius)
             if !isOverlappingExisting(position: emergencyPosition, candidateRadius: candidateRadius, lilyPads: lilyPads) {
-                if createLilyPadSafely(position: emergencyPosition, radius: candidateRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies, allowForceCreate: true) {
+                if createLilyPadSafely(position: emergencyPosition, radius: candidateRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies, allowForceCreate: true) {
                     print("🆘 Created emergency lily pad at \(Int(emergencyPosition.x)), \(Int(emergencyPosition.y))")
                     
                     // Create a few more to ensure a path forward, but with strict spacing
@@ -1040,7 +1134,7 @@ class SpawnManager {
                             
                             // Only create if no overlap
                             if !isOverlappingExisting(position: nextPosition, candidateRadius: nextRadius, lilyPads: lilyPads) {
-                                if createLilyPadSafely(position: nextPosition, radius: nextRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies) {
+                                if createLilyPadSafely(position: nextPosition, radius: nextRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies) {
                                     anchor = nextPosition
                                     print("🆘 Created follow-up emergency pad #\(i+1)")
                                 }
@@ -1059,7 +1153,7 @@ class SpawnManager {
                         y: effectiveFrogPosition.y + CGFloat.random(in: minSpacing...(minSpacing + 60))
                     )
                     if !isOverlappingExisting(position: altPosition, candidateRadius: candidateRadius, lilyPads: lilyPads) {
-                        if createLilyPadSafely(position: altPosition, radius: candidateRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies, allowForceCreate: true) {
+                        if createLilyPadSafely(position: altPosition, radius: candidateRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies, allowForceCreate: true) {
                             print("🆘 Created alternative emergency lily pad after \(alternativeAttempt+1) attempts")
                             break
                         }
@@ -1069,7 +1163,7 @@ class SpawnManager {
         }
     }
     
-    func spawnObjects(sceneSize: CGSize, lilyPads: inout [LilyPad], enemies: inout [Enemy], tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], worldOffset: CGFloat, frogPosition: CGPoint, superJumpActive: Bool) {
+    func spawnObjects(sceneSize: CGSize, lilyPads: inout [LilyPad], enemies: inout [Enemy], tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], lifeVests: inout [LifeVest], worldOffset: CGFloat, frogPosition: CGPoint, superJumpActive: Bool) {
         guard let worldNode = worldNode else { return }
         
         frameCount += 1
@@ -1084,7 +1178,7 @@ class SpawnManager {
         
         // CRITICAL SAFETY CHECK: Ensure frog can always progress (reduced frequency to prevent cascading)
         if frameCount % 30 == 0 {  // Check every 30 frames instead of 5 to reduce cascading spawning
-            ensureFrogCanProgress(frogPosition: frogPosition, lilyPads: &lilyPads, sceneSize: sceneSize, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies)
+            ensureFrogCanProgress(frogPosition: frogPosition, lilyPads: &lilyPads, sceneSize: sceneSize, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies)
         }
         
         // Check if frog is sliding on ice - if so, reduce spawning to avoid over-spawning
@@ -1126,12 +1220,10 @@ class SpawnManager {
         // Continuously maintain edge spike bush walls along the path
         let inGraceForWalls = CACurrentMediaTime() < graceEndTime
         if !inGraceForWalls {
-            spawnEdgeWalls(at: spawnWorldY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode)
+            //spawnEdgeWalls(at: spawnWorldY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode)
         }
         
-        // Calculate dynamic scroll speed for adaptive spawning
-        let currentScore: Int = (scene as? GameScene)?.score ?? 0
-        let dynamicScrollSpeed = calculateCurrentScrollSpeed(score: currentScore, superJumpActive: superJumpActive)
+        let dynamicScrollSpeed = 1.0
         
         let maxRegular = GameConfig.maxRegularJumpDistance * 0.85
         
@@ -1158,12 +1250,12 @@ class SpawnManager {
             // CRITICAL: When on ice, spawn fewer emergency pads
             let emergencyPads = isOnIce ? max(2, criticalPadThreshold - padsAheadList.count) : max(6, desiredPadsAhead - padsAheadList.count)
             print("🚨 EMERGENCY: Spawning \(emergencyPads) pads - only \(padsAheadList.count) ahead, coverage: \(Int(currentCoverage))")
-            spawnPadChain(count: emergencyPads, startingFrom: furthestAhead?.position ?? frogPosition, sceneSize: sceneSize, lilyPads: &lilyPads, worldNode: worldNode, maxRegular: maxRegular, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies)
+            spawnPadChain(count: emergencyPads, startingFrom: furthestAhead?.position ?? frogPosition, sceneSize: sceneSize, lilyPads: &lilyPads, worldNode: worldNode, maxRegular: maxRegular, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies)
         }
         
         // CRITICAL FIX: Check for gaps more frequently to prevent holes
         if frameCount % 5 == 0 {  // Back to every 5 frames for safety
-            ensurePadsAtSpawnPoint(spawnWorldY: spawnWorldY, sceneSize: sceneSize, lilyPads: &lilyPads, worldNode: worldNode, maxRegular: maxRegular, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies)
+            ensurePadsAtSpawnPoint(spawnWorldY: spawnWorldY, sceneSize: sceneSize, lilyPads: &lilyPads, worldNode: worldNode, maxRegular: maxRegular, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies)
         }
         
         var anchor = furthestAhead?.position ?? frogPosition
@@ -1211,7 +1303,7 @@ class SpawnManager {
                 targetAnchor.x = anchor.x + CGFloat.random(in: -40...40)
             }
             
-            createReachablePad(from: targetAnchor, targetY: targetY, sceneSize: sceneSize, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies)
+            createReachablePad(from: targetAnchor, targetY: targetY, sceneSize: sceneSize, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies)
             if let newPad = lilyPads.last {
                 anchor = newPad.position
             }
@@ -1221,7 +1313,7 @@ class SpawnManager {
         framesSinceLastPathCheck += 1
         if framesSinceLastPathCheck >= 10 {  // More frequent gap checking
             framesSinceLastPathCheck = 0
-            fillLargeGaps(frogPosition: frogPosition, maxRegular: maxRegular, sceneSize: sceneSize, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies)
+            fillLargeGaps(frogPosition: frogPosition, maxRegular: maxRegular, sceneSize: sceneSize, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies)
         }
         
         // PERFORMANCE FIX: More frequent edge spike bush cleanup to prevent accumulation
@@ -1237,312 +1329,542 @@ class SpawnManager {
         // Spawn enemies, tadpoles, and logs
         let inGrace = CACurrentMediaTime() < graceEndTime
         
-        // Check for special pad behavior and update accordingly
-        if !inGrace && frameCount % 20 == 0 {  // Check every 20 frames for performance
-            checkSpecialPadBehavior(lilyPads: lilyPads, worldNode: worldNode)
+        // Pass a value copy to avoid simultaneous access to enemies while mutating
+        if frameCount % 10 == 0 {  // Check every 10 frames for better responsiveness (grace period check is inside)
+            checkSpecialPadBehavior(lilyPads: lilyPads, enemiesSnapshot: enemies, worldNode: worldNode)
         }
         
-        // ENHANCED: Apply level-based spawn rate multiplier on top of base spawn rate
-        let baseEnemySpawnChance = GameConfig.enemySpawnRate * 1.2  // Reduced from 1.5 to 1.2
-        let enemySpawnChance = baseEnemySpawnChance * levelSpawnRateMultiplier
-        
-        // DEBUG: Log spawn attempt occasionally
-        if frameCount % 180 == 0 {  // Every 3 seconds
-            print("🐛 DEBUG: baseEnemySpawnChance = \(baseEnemySpawnChance), levelMultiplier = \(levelSpawnRateMultiplier), finalChance = \(enemySpawnChance), inGrace = \(inGrace), spawningPaused = \(spawningPaused)")
-        }
-        
-        if !inGrace && CGFloat.random(in: 0.0...1.0) < enemySpawnChance {
-            // PERFORMANCE FIX: Only count bees and logs every 8 frames for better performance
-            var canSpawnBee = true
-            var canSpawnLog = true
-            if frameCount % 8 == 0 {  // More frequent updates for better log distribution
-                lastBeeCount = countBeesInVisibleWindow(enemies: enemies, worldOffset: worldOffset, sceneSize: sceneSize)
-                lastLogCount = countLogsInVisibleWindow(enemies: enemies, worldOffset: worldOffset, sceneSize: sceneSize)
-            }
-            canSpawnBee = lastBeeCount < maxBeesPerScreen
-            canSpawnLog = lastLogCount < maxLogsPerScreen
-
-            // Simplified enemy type selection with log cap enforcement
-            let currentScore: Int = (scene as? GameScene)?.score ?? 0
-            var allowedTypes: [EnemyType] = []
-            if currentScore < 4000 {
-                allowedTypes = canSpawnBee ? [.bee] : []
-            } else if currentScore < 10000 {
-                allowedTypes = canSpawnBee ? [.bee, .dragonfly, .snake] : [.dragonfly, .snake]
-            } else if currentScore < 15000 {
-                allowedTypes = canSpawnBee ? [.bee, .dragonfly, .snake, .spikeBush] : [.dragonfly, .snake, .spikeBush]
-            } else {
-                // PERFORMANCE FIX: Include logs in regular enemy spawning for better distribution
-                if canSpawnLog && canSpawnBee {
-                    allowedTypes = [.bee, .dragonfly, .snake, .spikeBush, .edgeSpikeBush, .log]  // Added log back
-                } else if canSpawnBee {
-                    allowedTypes = [.bee, .dragonfly, .snake, .spikeBush, .edgeSpikeBush]
-                } else if canSpawnLog {
-                    allowedTypes = [.dragonfly, .snake, .spikeBush, .edgeSpikeBush, .log]  // Added log back
-                } else {
-                    allowedTypes = [.dragonfly, .snake, .spikeBush, .edgeSpikeBush]
-                }
-            }
-            
-            if let selectedType = allowedTypes.randomElement() {
-                print("🐛 DEBUG: Attempting to spawn \(selectedType) enemy")
-                spawnEnemy(at: spawnWorldY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode, lilyPads: lilyPads)
-                if selectedType == .bee {
-                    lastBeeCount += 1  // Update cached count
-                }
-            } else {
-                print("🐛 DEBUG: No allowed enemy types to spawn")
-            }
-        }
-        
-        // CRITICAL FIX: Force spawn tadpoles if too many frames pass without one
-        // This ensures continuous tadpole availability even if probability rolls fail
-        if !inGrace && framesSinceLastTadpole > tadpoleForceSpawnFrameThreshold {
-            // Attempt forced spawn
-            if spawnTadpole(at: spawnWorldY, sceneSize: sceneSize, lilyPads: lilyPads, tadpoles: &tadpoles, worldNode: worldNode, frogPosition: frogPosition) {
-                framesSinceLastTadpole = 0
-                lastTadpoleWorldY = spawnWorldY
-            }
-        }
-        
-        // Spawn BigHoneyPots occasionally - rare special collectibles
-        if !inGrace && frameCount % 60 == 0 { // Spawn attempt every 5 seconds (300 frames at 60fps)
-            let bigHoneyPotSpawnChance: CGFloat = 0.15 // 15% chance when the interval triggers
-            if CGFloat.random(in: 0...1) < bigHoneyPotSpawnChance {
-                spawnBigHoneyPot(at: spawnWorldY, sceneSize: sceneSize, lilyPads: lilyPads, bigHoneyPots: &bigHoneyPots, worldNode: worldNode, frogPosition: frogPosition)
-            }
-        }
-        
-        // PERFORMANCE OPTIMIZED: More frequent log spawning with smart management
-        // Only spawn logs when score is above 5000, with enhanced spawn rate
-        if !inGrace && currentScore > 5000 {
-            let totalLogCount = enemies.filter({ $0.type == .log }).count
-            
-            // More frequent culling for better performance with higher log counts
-            if frameCount % 20 == 0 {  // Every 20 frames instead of 30
-                cullDistantLogs(enemies: &enemies, worldOffset: worldOffset, sceneSize: sceneSize)
-            }
-            
-            // Allow more total logs but maintain visible screen limit
-            if lastLogCount < maxLogsPerScreen && totalLogCount < maxTotalLogs {
-                // ENHANCED: Apply level-based spawn rate multiplier to logs as well
-                let baseLogSpawnChance = GameConfig.logSpawnRate * 0.8  // Increased from 60% to 80%
-                let logSpawnChance = baseLogSpawnChance * levelSpawnRateMultiplier
-                if CGFloat.random(in: 0.0...1.0) < logSpawnChance {
-                    spawnLog(at: spawnWorldY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode)
-                    lastLogCount += 1  // Update cached count immediately
-                }
-            }
-        }
-        
-        #if DEBUG
-        // DEBUG: Validate no overlapping pads every 5 seconds in debug builds
-        if frameCount % 300 == 0 {
-            validateNoOverlappingPads(lilyPads: lilyPads)
-        }
-        #endif
-    }
-    
-    // MARK: - Individual Spawners
-    
-    /// Calculate spawn rate multiplier based on current score to increase enemy population over time
-    private func getSpawnRateMultiplier(currentScore: Int) -> CGFloat {
-        if currentScore < 4000 {
-            // Early game: Baseline spawn rate (only bees)
-            return 1.0
-        } else if currentScore < 10000 {
-            // Mid-early: Moderate increase (bees + dragonflies)
-            return 1.4
-        } else if currentScore < 15000 {
-            // Mid-late: Significant increase (bees + dragonflies + snakes)
-            return 1.8
-        } else {
-            // Late game: Maximum population density (all enemies + logs)
-            return 2.2
-        }
-    }
-    
-    private func findSuitableLilyPad(for enemyType: EnemyType, near worldY: CGFloat, sceneSize: CGSize, lilyPads: [LilyPad]) -> LilyPad? {
-        // Consider pads near the target Y and within horizontal bounds
-        // IMPROVED: Wider search range (400 pixels instead of 200) to find more pads
-        let nearbyPads = lilyPads.filter { pad in
-            let yDist = abs(pad.position.y - worldY)
-            let xOk = pad.position.x > 80 && pad.position.x < sceneSize.width - 80
-            return yDist < 400 && xOk  // Increased from 200 to 400
-        }
-        
-        // Updated: For all enemy types including bees, filter only pads that can accommodate that enemy type.
-        let suitablePads = nearbyPads.filter { pad in
-            return pad.canAccommodateEnemyType(enemyType)
-        }
-        
-        if suitablePads.isEmpty {
-            return nil
-        }
-        
-        return suitablePads.randomElement()
-    }
-    
-    private func spawnEnemy(at worldY: CGFloat, sceneSize: CGSize, enemies: inout [Enemy], worldNode: SKNode, lilyPads: [LilyPad]) {
-        // Get current score from the game scene
+        // Use new level-based enemy configuration system
         let currentScore: Int = (scene as? GameScene)?.score ?? 0
+        let level = max(1, (currentScore / 25000) + 1) // Ensure level is at least 1
+        let levelConfig = LevelEnemyConfigManager.getConfig(for: level)
         
-        // Enforce per-screen bee cap when trying to spawn a bee
-        // We cannot know the selected type yet here, so we'll check after selection as well.
-        
-        // Determine which enemy types are allowed based on score
-        // CRITICAL: Bees appear at ALL levels for continuous gameplay
-        var allowedTypes: [EnemyType] = []
-        
-        if currentScore < 4000 {
-            // Score < 4000: Only bees
-            allowedTypes = [.bee, .snake, .snake]  // Weight towards bees
-        } else if currentScore < 10000 {
-            // Score 4000-10000: Bees (60%) and dragonflies (40%)
-            allowedTypes = [.bee, .bee, .bee, .dragonfly, .dragonfly]
-        } else if currentScore < 15000 {
-            // Score 10000-15000: Balanced mix
-            allowedTypes = [.bee, .bee, .dragonfly, .dragonfly, .snake, .spikeBush]
-        } else {
-            // Score > 15000: All enemy types
-            allowedTypes = [.bee, .bee, .dragonfly, .dragonfly, .snake, .snake, .spikeBush, .edgeSpikeBush]
-        }
-        
-        // Randomly select an enemy type from the allowed types
-        guard let selectedType = allowedTypes.randomElement() else { return }
-        
-        // If the selected type is a bee, ensure we are under the visible cap
-        if selectedType == .bee {
-            // We need scene size and worldOffset to compute the visible window; attempt to read from scene
-            if let gs = scene as? GameScene {
-                let visibleBeeCount = countBeesInVisibleWindow(enemies: enemies, worldOffset: gs.worldManager.worldNode.position.y, sceneSize: gs.size)
-                if visibleBeeCount >= maxBeesPerScreen {
-                    // Cap reached; skip this spawn entirely
-                    return
-                }
+        // DEBUG: Log spawn attempt occasionally with new level-based info
+        if frameCount % 180 == 0 {  // Every 3 seconds
+            print("🐛 DEBUG Level \(level): Score=\(currentScore), inGrace=\(inGrace), spawningPaused=\(spawningPaused)")
+            print("🐛 Level config enemy count: \(levelConfig.enemyConfigs.count)")
+            for enemyConfig in levelConfig.enemyConfigs {
+                let finalRate = enemyConfig.spawnRate * levelConfig.globalSpawnRateMultiplier
+                print("🐛   \(enemyConfig.enemyType): rate=\(String(format: "%.3f", finalRate)), max=\(enemyConfig.maxCount), canSpawnInWater=\(enemyConfig.canSpawnInWater)")
             }
         }
         
-        let enemy: Enemy
+        if !inGrace && !spawningPaused {
+            // Use new level-based configuration for individual enemy spawn attempts
+            for enemyConfig in levelConfig.enemyConfigs {
+                // Skip if this enemy can't spawn in water
+                guard enemyConfig.canSpawnInWater else { continue }
+                
+                // Calculate final spawn rate for this enemy type
+                let finalSpawnRate = enemyConfig.spawnRate * levelConfig.globalSpawnRateMultiplier
+                
+                // Check if we should attempt to spawn this enemy type this frame
+                if CGFloat.random(in: 0.0...1.0) < finalSpawnRate {
+                    // Check individual type constraints
+                    var canSpawn = true
+                    switch enemyConfig.enemyType {
+                    case .bee:
+                        if frameCount % 8 == 0 {
+                            lastBeeCount = countBeesInVisibleWindow(enemies: enemies, worldOffset: worldOffset, sceneSize: sceneSize)
+                        }
+                        canSpawn = lastBeeCount < min(enemyConfig.maxCount, maxBeesPerScreen)
+                    case .log:
+                        if frameCount % 8 == 0 {
+                            lastLogCount = countLogsInVisibleWindow(enemies: enemies, worldOffset: worldOffset, sceneSize: sceneSize)
+                        }
+                        canSpawn = lastLogCount < min(enemyConfig.maxCount, maxLogsPerScreen)
+                    default:
+                        // For other enemy types, just check the level-specific max count
+                        let currentCount = enemies.filter { $0.type == enemyConfig.enemyType }.count
+                        canSpawn = currentCount < enemyConfig.maxCount
+                    }
+                    
+                    if canSpawn {
+                        print("🐛 DEBUG Level \(level): Spawning \(enemyConfig.enemyType) in water (rate: \(String(format: "%.3f", finalSpawnRate)))")
+                        spawnEnemy(at: spawnWorldY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode, lilyPads: lilyPads)
+                        
+                        // Update cached counts
+                        if enemyConfig.enemyType == .bee {
+                            lastBeeCount += 1
+                        } else if enemyConfig.enemyType == .log {
+                            lastLogCount += 1
+                        }
+                        
+                        // Only spawn one enemy per frame to avoid overwhelming
+                        break
+                    }
+                }
+            }
+            
+            // CRITICAL FIX: Force spawn tadpoles if too many frames pass without one
+            // This ensures continuous tadpole availability even if probability rolls fail
+            if !inGrace && framesSinceLastTadpole > tadpoleForceSpawnFrameThreshold {
+                // Attempt forced spawn
+                if spawnTadpole(at: spawnWorldY, sceneSize: sceneSize, lilyPads: lilyPads, tadpoles: &tadpoles, worldNode: worldNode, frogPosition: frogPosition) {
+                    framesSinceLastTadpole = 0
+                    lastTadpoleWorldY = spawnWorldY
+                }
+            }
+            
+            // Spawn BigHoneyPots occasionally - rare special collectibles
+            if !inGrace && frameCount % 60 == 0 { // Spawn attempt every 5 seconds (300 frames at 60fps)
+                let bigHoneyPotSpawnChance: CGFloat = 0.15 // 15% chance when the interval triggers
+                if CGFloat.random(in: 0...1) < bigHoneyPotSpawnChance {
+                    spawnBigHoneyPot(at: spawnWorldY, sceneSize: sceneSize, lilyPads: lilyPads, bigHoneyPots: &bigHoneyPots, worldNode: worldNode, frogPosition: frogPosition)
+                }
+            }
+            
+            // Spawn LifeVests occasionally - very rare special collectibles
+            if !inGrace && frameCount % 90 == 0 { // Spawn attempt every 1.5 seconds (90 frames at 60fps)
+                let lifeVestSpawnChance: CGFloat = 0.08 // 8% chance when the interval triggers (rarer than honey pots)
+                if CGFloat.random(in: 0...1) < lifeVestSpawnChance {
+                    spawnLifeVest(at: spawnWorldY, sceneSize: sceneSize, lilyPads: lilyPads, lifeVests: &lifeVests, worldNode: worldNode, frogPosition: frogPosition)
+                }
+            }
+            
+            // PERFORMANCE OPTIMIZED: More frequent log spawning with smart management
+            // Only spawn logs when score is above 5000, with enhanced spawn rate
+            if !inGrace && currentScore > 5000 {
+                let totalLogCount = enemies.filter({ $0.type == .log }).count
+                
+                // More frequent culling for better performance with higher log counts
+                if frameCount % 20 == 0 {  // Every 20 frames instead of 30
+                    cullDistantLogs(enemies: &enemies, worldOffset: worldOffset, sceneSize: sceneSize)
+                }
+                
+                // Allow more total logs but maintain visible screen limit
+                if lastLogCount < maxLogsPerScreen && totalLogCount < maxTotalLogs {
+                    // ENHANCED: Apply level-based spawn rate multiplier to logs as well
+                    let baseLogSpawnChance = GameConfig.logSpawnRate * 0.8  // Increased from 60% to 80%
+                    let logSpawnChance = baseLogSpawnChance * levelSpawnRateMultiplier
+                    if CGFloat.random(in: 0.0...1.0) < logSpawnChance {
+                        spawnLog(at: spawnWorldY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode)
+                        lastLogCount += 1  // Update cached count immediately
+                    }
+                }
+            }
+            
+#if DEBUG
+            // DEBUG: Validate no overlapping pads every 5 seconds in debug builds
+            if frameCount % 300 == 0 {
+                validateNoOverlappingPads(lilyPads: lilyPads)
+            }
+#endif
+        }
+    }
+        // MARK: - Individual Spawners
         
-        // Spawn the selected enemy type with appropriate behavior
-        switch selectedType {
-        case .snake:
-            if let targetPad = findSuitableLilyPad(for: selectedType, near: worldY, sceneSize: sceneSize, lilyPads: lilyPads) {
-                // Spawn 250 pixels to the left of the target lily pad
-                enemy = Enemy(
-                    type: selectedType,
-                    position: CGPoint(
-                        x: targetPad.position.x - 350,  // 250 pixels left of lily pad
-                        y: targetPad.position.y
-                    ),
-                    speed: GameConfig.snakeSpeed  // Always positive (left to right)
-                )
-                enemy.targetLilyPad = targetPad
-                targetPad.addEnemyType(selectedType)
+        /// Calculate spawn rate multiplier based on current score to increase enemy population over time
+        private func getSpawnRateMultiplier(currentScore: Int) -> CGFloat {
+            if currentScore < 4000 {
+                // Early game: Baseline spawn rate (only bees)
+                return 1.0
+            } else if currentScore < 10000 {
+                // Mid-early: Moderate increase (bees + dragonflies)
+                return 1.4
+            } else if currentScore < 15000 {
+                // Mid-late: Significant increase (bees + dragonflies + snakes)
+                return 1.8
             } else {
-                // Fallback: spawn from the left side if no lily pad found
-                enemy = Enemy(
-                    type: selectedType,
-                    position: CGPoint(
-                        x: -30,  // Fallback to left side
-                        y: worldY
-                    ),
-                    speed: GameConfig.snakeSpeed  // Always positive (left to right)
-                )
+                // Late game: Maximum population density (all enemies + logs)
+                return 2.2
+            }
+        }
+        
+        private func findSuitableLilyPad(for enemyType: EnemyType, near worldY: CGFloat, sceneSize: CGSize, lilyPads: [LilyPad]) -> LilyPad? {
+            // Consider pads near the target Y and within horizontal bounds
+            // IMPROVED: Wider search range (400 pixels instead of 200) to find more pads
+            let nearbyPads = lilyPads.filter { pad in
+                let yDist = abs(pad.position.y - worldY)
+                let xOk = pad.position.x > 80 && pad.position.x < sceneSize.width - 80
+                return yDist < 400 && xOk  // Increased from 200 to 400
             }
             
-        case .bee:
-            // IMPROVED: More flexible bee spawning - try harder to find a pad
-            if let targetPad = findSuitableLilyPad(for: selectedType, near: worldY, sceneSize: sceneSize, lilyPads: lilyPads), targetPad.canAccommodateEnemyType(.bee) {
-                // Randomize bee speed per spawn; broader variance at higher scores
-                let base = GameConfig.beeSpeed
-                // Variance grows with score tiers (up to +/- 60%)
-                let tier = min(3, (currentScore / 5000))
-                let variance: CGFloat
-                switch tier {
-                case 0: variance = 0.20   // +/-20% early game
-                case 1: variance = 0.35   // +/-35%
-                case 2: variance = 0.50   // +/-50%
-                default: variance = 0.60  // +/-60% late game
-                }
-                let factor = 1.0 + CGFloat.random(in: -variance...variance)
-                let beeSpeed = max(40, base * factor)
-                
-                enemy = Enemy(
-                    type: selectedType,
-                    position: targetPad.position,
-                    speed: beeSpeed
-                )
-                enemy.targetLilyPad = targetPad
-                targetPad.addEnemyType(.bee)
-            } else {
-                // If no suitable pad found, spawn bee anyway at a reasonable position
-                // This ensures bees always appear even if pads are temporarily limited
-                // Randomize bee speed per spawn; broader variance at higher scores
-                let base = GameConfig.beeSpeed
-                // Variance grows with score tiers (up to +/- 60%)
-                let tier = min(3, (currentScore / 5000))
-                let variance: CGFloat
-                switch tier {
-                case 0: variance = 0.20   // +/-20% early game
-                case 1: variance = 0.35   // +/-35%
-                case 2: variance = 0.50   // +/-50%
-                default: variance = 0.60  // +/-60% late game
-                }
-                let factor = 1.0 + CGFloat.random(in: -variance...variance)
-                let beeSpeed = max(40, base * factor)
-                
-                enemy = Enemy(
-                    type: selectedType,
-                    position: CGPoint(
-                        x: CGFloat.random(in: 100...sceneSize.width - 100),
-                        y: worldY
-                    ),
-                    speed: beeSpeed
-                )
-                print("Ã¢Å¡Â Ã¯Â¸Â Spawned bee without lily pad at worldY: \(Int(worldY))")
+            // Updated: For all enemy types including bees, filter only pads that can accommodate that enemy type.
+            let suitablePads = nearbyPads.filter { pad in
+                return pad.canAccommodateEnemyType(enemyType)
             }
             
-        case .dragonfly:
-            enemy = Enemy(
-                type: selectedType,
-                position: CGPoint(
-                    x: CGFloat.random(in: 60...sceneSize.width - 60),
-                    y: worldY
-                ),
-                speed: GameConfig.dragonflySpeed
-            )
+            if suitablePads.isEmpty {
+                return nil
+            }
             
-        case .spikeBush:
-            // Spike bushes are static and should be placed on lily pads
-            if let targetPad = findSuitableLilyPad(for: selectedType, near: worldY, sceneSize: sceneSize, lilyPads: lilyPads) {
-                enemy = Enemy(
-                    type: selectedType,
-                    position: targetPad.position,
-                    speed: 0.0  // Static, no movement
-                )
-                enemy.targetLilyPad = targetPad
-                targetPad.addEnemyType(selectedType)
-            } else {
-                // If no suitable lily pad, don't spawn the spike bush
+            return suitablePads.randomElement()
+        }
+        
+        private func spawnEnemy(at worldY: CGFloat, sceneSize: CGSize, enemies: inout [Enemy], worldNode: SKNode, lilyPads: [LilyPad]) {
+            // Get current score from the game scene
+            let currentScore: Int = (scene as? GameScene)?.score ?? 0
+            let level = max(1, (currentScore / 25000) + 1) // Ensure level is at least 1
+            let levelConfig = LevelEnemyConfigManager.getConfig(for: level)
+            
+            // Use weighted selection from level configuration
+            guard let selectedType = LevelEnemyConfigManager.getWeightedRandomEnemyType(for: level) else {
+                print("🐛 No enemy types configured for level \(level)")
                 return
             }
             
-        case .edgeSpikeBush:
-            // Edge spike bushes are static and should be placed at screen edges
-            let isLeft = Bool.random()
-            let xPosition = isLeft ? GameConfig.edgeSpikeBushMargin : sceneSize.width - GameConfig.edgeSpikeBushMargin
-            enemy = Enemy(
-                type: selectedType,
-                position: CGPoint(x: xPosition, y: worldY),
-                speed: 0.0  // Static, no movement
-            )
+            // Check if we can spawn this enemy type (respect max counts)
+            let maxCount = LevelEnemyConfigManager.getMaxCount(for: selectedType, at: level)
+            let currentCount = enemies.filter { $0.type == selectedType }.count
             
-        case .log:
-            // Logs move horizontally across the screen
+            if currentCount >= maxCount {
+                print("🐛 Cannot spawn \(selectedType): at max count (\(currentCount)/\(maxCount))")
+                return
+            }
+            
+            // Additional specific checks for certain enemy types
+            if selectedType == .bee {
+                // We need scene size and worldOffset to compute the visible window; attempt to read from scene
+                if let gs = scene as? GameScene {
+                    let visibleBeeCount = countBeesInVisibleWindow(enemies: enemies, worldOffset: gs.worldManager.worldNode.position.y, sceneSize: gs.size)
+                    if visibleBeeCount >= maxBeesPerScreen {
+                        // Cap reached; skip this spawn entirely
+                        return
+                    }
+                }
+            }
+            
+            let enemy: Enemy
+            
+            // Spawn the selected enemy type with appropriate behavior
+            switch selectedType {
+            case .snake:
+                if let targetPad = findSuitableLilyPad(for: selectedType, near: worldY, sceneSize: sceneSize, lilyPads: lilyPads) {
+                    // Spawn 250 pixels to the left of the target lily pad
+                    enemy = Enemy(
+                        type: selectedType,
+                        position: CGPoint(
+                            x: targetPad.position.x - 350,  // 250 pixels left of lily pad
+                            y: targetPad.position.y
+                        ),
+                        speed: GameConfig.snakeSpeed  // Always positive (left to right)
+                    )
+                    enemy.targetLilyPad = targetPad
+                    targetPad.addEnemyType(selectedType)
+                } else {
+                    // Fallback: spawn from the left side if no lily pad found
+                    enemy = Enemy(
+                        type: selectedType,
+                        position: CGPoint(
+                            x: -30,  // Fallback to left side
+                            y: worldY
+                        ),
+                        speed: GameConfig.snakeSpeed  // Always positive (left to right)
+                    )
+                }
+                
+            case .bee:
+                // IMPROVED: More flexible bee spawning - try harder to find a pad
+                if let targetPad = findSuitableLilyPad(for: selectedType, near: worldY, sceneSize: sceneSize, lilyPads: lilyPads), targetPad.canAccommodateEnemyType(.bee) {
+                    // Randomize bee speed per spawn; broader variance at higher scores
+                    let base = GameConfig.beeSpeed
+                    // Variance grows with score tiers (up to +/- 60%)
+                    let tier = min(3, (currentScore / 5000))
+                    let variance: CGFloat
+                    switch tier {
+                    case 0: variance = 0.20   // +/-20% early game
+                    case 1: variance = 0.35   // +/-35%
+                    case 2: variance = 0.50   // +/-50%
+                    default: variance = 0.60  // +/-60% late game
+                    }
+                    let factor = 1.0 + CGFloat.random(in: -variance...variance)
+                    let beeSpeed = max(40, base * factor)
+                    
+                    enemy = Enemy(
+                        type: selectedType,
+                        position: targetPad.position,
+                        speed: beeSpeed
+                    )
+                    enemy.targetLilyPad = targetPad
+                    targetPad.addEnemyType(.bee)
+                } else {
+                    // If no suitable pad found, spawn bee anyway at a reasonable position
+                    // This ensures bees always appear even if pads are temporarily limited
+                    // Randomize bee speed per spawn; broader variance at higher scores
+                    let base = GameConfig.beeSpeed
+                    // Variance grows with score tiers (up to +/- 60%)
+                    let tier = min(3, (currentScore / 5000))
+                    let variance: CGFloat
+                    switch tier {
+                    case 0: variance = 0.20   // +/-20% early game
+                    case 1: variance = 0.35   // +/-35%
+                    case 2: variance = 0.50   // +/-50%
+                    default: variance = 0.60  // +/-60% late game
+                    }
+                    let factor = 1.0 + CGFloat.random(in: -variance...variance)
+                    let beeSpeed = max(40, base * factor)
+                    
+                    enemy = Enemy(
+                        type: selectedType,
+                        position: CGPoint(
+                            x: CGFloat.random(in: 100...sceneSize.width - 100),
+                            y: worldY
+                        ),
+                        speed: beeSpeed
+                    )
+                    print("Ã¢Å¡Â Ã¯Â¸Â Spawned bee without lily pad at worldY: \(Int(worldY))")
+                }
+                
+            case .dragonfly:
+                enemy = Enemy(
+                    type: selectedType,
+                    position: CGPoint(
+                        x: CGFloat.random(in: 60...sceneSize.width - 60),
+                        y: worldY
+                    ),
+                    speed: GameConfig.dragonflySpeed
+                )
+                
+            case .spikeBush:
+                // Spike bushes are static and should be placed on lily pads
+                if let targetPad = findSuitableLilyPad(for: selectedType, near: worldY, sceneSize: sceneSize, lilyPads: lilyPads) {
+                    enemy = Enemy(
+                        type: selectedType,
+                        position: targetPad.position,
+                        speed: 0.0  // Static, no movement
+                    )
+                    enemy.targetLilyPad = targetPad
+                    targetPad.addEnemyType(selectedType)
+                } else {
+                    // If no suitable lily pad, don't spawn the spike bush
+                    return
+                }
+                
+            case .edgeSpikeBush:
+                // Edge spike bushes are static and should be placed at screen edges
+                let isLeft = Bool.random()
+                let xPosition = isLeft ? GameConfig.edgeSpikeBushMargin : sceneSize.width - GameConfig.edgeSpikeBushMargin
+                enemy = Enemy(
+                    type: selectedType,
+                    position: CGPoint(x: xPosition, y: worldY),
+                    speed: 0.0  // Static, no movement
+                )
+                
+            case .log:
+                // Logs move horizontally across the screen
+                let fromLeft = Bool.random()
+                enemy = Enemy(
+                    type: .log,
+                    position: CGPoint(
+                        x: fromLeft ? -GameConfig.logWidth : sceneSize.width + GameConfig.logWidth,
+                        y: worldY
+                    ),
+                    speed: fromLeft ? GameConfig.logSpeed : -GameConfig.logSpeed
+                )
+                
+            case .chaser:
+                // Chasers are spawned through special game mechanics
+                return
+            }
+            
+            enemy.node.position = enemy.position
+            enemy.node.zPosition = 50
+            worldNode.addChild(enemy.node)
+            enemies.append(enemy)
+        }
+        
+        @discardableResult
+        private func spawnTadpole(at worldY: CGFloat, sceneSize: CGSize, lilyPads: [LilyPad], tadpoles: inout [Tadpole], worldNode: SKNode, frogPosition: CGPoint) -> Bool {
+            // Find all suitable pads in a reasonable range
+            let suitablePads = lilyPads.filter { pad in
+                let yDist = abs(pad.position.y - worldY)
+                let xOk = pad.position.x > 80 && pad.position.x < sceneSize.width - 80
+                // Accept pads within a wider range for better distribution
+                return yDist < 400 && xOk
+            }
+            
+            // Avoid spawning on or near the frog's current position
+            let safeDistanceFromFrog: CGFloat = 120
+            let padsAwayFromFrog = suitablePads.filter { pad in
+                let dx = pad.position.x - frogPosition.x
+                let dy = pad.position.y - frogPosition.y
+                let dist = sqrt(dx*dx + dy*dy)
+                return dist >= safeDistanceFromFrog
+            }
+            
+            // Exclude pads that have already had a tadpole spawned before (ever)
+            let neverUsedPads = padsAwayFromFrog.filter { pad in
+                let id = ObjectIdentifier(pad)
+                return !padsThatSpawnedTadpoles.contains(id)
+            }
+            
+            // CRITICAL FIX: Use the proper lily pad tadpole tracking system and never reuse pads that already spawned
+            let availablePads = neverUsedPads.filter { pad in
+                // Only include pads that don't currently have tadpoles AND are safe for tadpole spawning
+                return !pad.hasTadpoles && isSafeForTadpoleSpawn(pad)
+            }
+            
+            // FIXED: Only use pads that have never spawned a tadpole AND don't currently have one
+            // Do NOT fall back to pads that might have tadpoles
+            var candidates = availablePads
+            
+            // Removed reservation logic; select candidate directly without reservation
+            var selectedPadCandidate: LilyPad? = candidates.randomElement()
+            
+            // Fallback: try a limited set of recent pads ahead that have NEVER spawned a tadpole and are currently empty AND safe
+            if selectedPadCandidate == nil {
+                let recentAhead = lilyPads.filter { $0.position.y > frogPosition.y }.suffix(20)
+                if let pad = recentAhead.first(where: { pad in
+                    let id = ObjectIdentifier(pad)
+                    return !padsThatSpawnedTadpoles.contains(id) && !pad.hasTadpoles && isSafeForTadpoleSpawn(pad)
+                }) {
+                    selectedPadCandidate = pad
+                }
+            }
+            
+            guard let selectedPad = selectedPadCandidate else {
+                return false
+            }
+            
+            // FINAL SAFETY CHECK: Ensure the selected pad is still safe for tadpole spawning
+            guard isSafeForTadpoleSpawn(selectedPad) else {
+                print("🚫 Aborting tadpole spawn - selected lily pad became unsafe for tadpole spawning at \(Int(selectedPad.position.x)), \(Int(selectedPad.position.y))")
+                return false
+            }
+            
+            // Spawn the tadpole on the reserved pad
+            let tadpole = Tadpole(position: selectedPad.position)
+            // Link to pad (this will add via didSet), but also finalize reservation explicitly
+            tadpole.lilyPad = selectedPad
+            // Mark this pad as permanently used for tadpole spawns
+            padsThatSpawnedTadpoles.insert(ObjectIdentifier(selectedPad))
+            
+            tadpole.node.position = selectedPad.position
+            tadpole.node.zPosition = 50
+            worldNode.addChild(tadpole.node)
+            tadpoles.append(tadpole)
+            print("ðŸ¸ Spawned tadpole on safe lily pad (type: \(selectedPad.type)) at \(Int(selectedPad.position.x)), \(Int(selectedPad.position.y))")
+            return true
+        }
+        
+        @discardableResult
+        private func spawnBigHoneyPot(at worldY: CGFloat, sceneSize: CGSize, lilyPads: [LilyPad], bigHoneyPots: inout [BigHoneyPot], worldNode: SKNode, frogPosition: CGPoint) -> Bool {
+            // Find suitable lily pads for big honey pot spawning
+            // Requirements: lily pad must be empty (no tadpole, no enemy, no existing big honey pot)
+            let suitablePads = lilyPads.filter { pad in
+                let yDist = abs(pad.position.y - worldY)
+                let xOk = pad.position.x > 80 && pad.position.x < sceneSize.width - 80
+                return yDist < 400 && xOk
+            }
+            
+            // Avoid spawning near the frog
+            let safeDistanceFromFrog: CGFloat = 150
+            let padsAwayFromFrog = suitablePads.filter { pad in
+                let dx = pad.position.x - frogPosition.x
+                let dy = pad.position.y - frogPosition.y
+                let dist = sqrt(dx*dx + dy*dy)
+                return dist >= safeDistanceFromFrog
+            }
+            
+            // Only use lily pads that are completely empty: no tadpoles, no enemies, no big honey pots
+            let availablePads = padsAwayFromFrog.filter { pad in
+                return !pad.hasTadpoles &&
+                !pad.hasBigHoneyPots &&
+                pad.occupyingEnemyTypes.isEmpty &&
+                isSafeForTadpoleSpawn(pad) // Use same safety rules as tadpoles
+            }
+            
+            guard let selectedPad = availablePads.randomElement() else {
+                return false
+            }
+            
+            // Final safety check
+            guard isSafeForTadpoleSpawn(selectedPad) else {
+                print("🚫 Aborting big honey pot spawn - selected lily pad became unsafe")
+                return false
+            }
+            
+            // Spawn the big honey pot on the selected pad
+            let bigHoneyPot = BigHoneyPot(position: selectedPad.position)
+            
+            // CRITICAL FIX: Ensure proper lily pad linking
+            bigHoneyPot.lilyPad = selectedPad
+            selectedPad.addBigHoneyPot(bigHoneyPot)  // Explicitly add to lily pad's collection
+            
+            bigHoneyPot.node.position = selectedPad.position
+            bigHoneyPot.node.position.y += 5  // Small visual offset above lily pad center
+            bigHoneyPot.node.zPosition = 50
+            worldNode.addChild(bigHoneyPot.node)
+            bigHoneyPots.append(bigHoneyPot)
+            print("🍯 Spawned big honey pot on lily pad (type: \(selectedPad.type)) at \(Int(selectedPad.position.x)), \(Int(selectedPad.position.y))")
+            return true
+        }
+        
+        @discardableResult
+        private func spawnLifeVest(at worldY: CGFloat, sceneSize: CGSize, lilyPads: [LilyPad], lifeVests: inout [LifeVest], worldNode: SKNode, frogPosition: CGPoint) -> Bool {
+            // Find suitable lily pads for life vest spawning
+            // Requirements: lily pad must be empty (no tadpole, no enemy, no existing life vest, no big honey pot)
+            let suitablePads = lilyPads.filter { pad in
+                let yDist = abs(pad.position.y - worldY)
+                let xOk = pad.position.x > 80 && pad.position.x < sceneSize.width - 80
+                return yDist < 400 && xOk
+            }
+            
+            // Avoid spawning near the frog
+            let safeDistanceFromFrog: CGFloat = 150
+            let padsAwayFromFrog = suitablePads.filter { pad in
+                let dx = pad.position.x - frogPosition.x
+                let dy = pad.position.y - frogPosition.y
+                let dist = sqrt(dx*dx + dy*dy)
+                return dist >= safeDistanceFromFrog
+            }
+            
+            // Only use lily pads that are completely empty: no tadpoles, no enemies, no big honey pots, no life vests
+            let availablePads = padsAwayFromFrog.filter { pad in
+                return !pad.hasTadpoles &&
+                !pad.hasBigHoneyPots &&
+                !pad.hasLifeVests &&
+                pad.occupyingEnemyTypes.isEmpty &&
+                isSafeForTadpoleSpawn(pad) // Use same safety rules as tadpoles
+            }
+            
+            guard let selectedPad = availablePads.randomElement() else {
+                return false
+            }
+            
+            // Final safety check
+            guard isSafeForTadpoleSpawn(selectedPad) else {
+                print("🚫 Selected lily pad at \(Int(selectedPad.position.x)), \(Int(selectedPad.position.y)) became unsafe during life vest spawn")
+                return false
+            }
+            
+            // Spawn the life vest on the selected pad
+            let lifeVest = LifeVest(position: selectedPad.position)
+            
+            // CRITICAL FIX: Ensure proper lily pad linking
+            lifeVest.lilyPad = selectedPad
+            selectedPad.addLifeVest(lifeVest)  // Explicitly add to lily pad's collection
+            
+            lifeVest.node.position = selectedPad.position
+            lifeVest.node.position.y += 5  // Small visual offset above lily pad center
+            lifeVest.node.zPosition = 50
+            worldNode.addChild(lifeVest.node)
+            lifeVests.append(lifeVest)
+            print("🦺 Spawned life vest on lily pad (type: \(selectedPad.type)) at \(Int(selectedPad.position.x)), \(Int(selectedPad.position.y))")
+            return true
+        }
+        
+        private func spawnLog(at worldY: CGFloat, sceneSize: CGSize, enemies: inout [Enemy], worldNode: SKNode) {
+            // PERFORMANCE OPTIMIZED: Enhanced log count tracking with spatial awareness
+            let currentLogCount = enemies.filter({ $0.type == .log }).count
+            
+            if currentLogCount >= maxTotalLogs {
+                return  // Don't spawn if we're at total cap
+            }
+            
+            // PERFORMANCE: Check if there are already logs too close vertically (avoid clustering)
+            let minVerticalSpacing: CGFloat = 150
+            let hasNearbyLog = enemies.contains { enemy in
+                enemy.type == .log && abs(enemy.position.y - worldY) < minVerticalSpacing
+            }
+            
+            if hasNearbyLog {
+                return  // Skip spawning to prevent vertical clustering
+            }
+            
             let fromLeft = Bool.random()
-            enemy = Enemy(
+            let log = Enemy(
                 type: .log,
                 position: CGPoint(
                     x: fromLeft ? -GameConfig.logWidth : sceneSize.width + GameConfig.logWidth,
@@ -1550,548 +1872,392 @@ class SpawnManager {
                 ),
                 speed: fromLeft ? GameConfig.logSpeed : -GameConfig.logSpeed
             )
+            log.node.position = log.position
+            log.node.zPosition = 50
+            worldNode.addChild(log.node)
+            enemies.append(log)
             
-        case .chaser:
-            // Chasers are spawned through special game mechanics
-            return
+            print("🪵 Spawned log (count: \(currentLogCount + 1)/\(maxTotalLogs) total) from \(fromLeft ? "left" : "right")")
         }
         
-        enemy.node.position = enemy.position
-        enemy.node.zPosition = 50
-        worldNode.addChild(enemy.node)
-        enemies.append(enemy)
-    }
-    
-    @discardableResult
-    private func spawnTadpole(at worldY: CGFloat, sceneSize: CGSize, lilyPads: [LilyPad], tadpoles: inout [Tadpole], worldNode: SKNode, frogPosition: CGPoint) -> Bool {
-        // Find all suitable pads in a reasonable range
-        let suitablePads = lilyPads.filter { pad in
-            let yDist = abs(pad.position.y - worldY)
-            let xOk = pad.position.x > 80 && pad.position.x < sceneSize.width - 80
-            // Accept pads within a wider range for better distribution
-            return yDist < 400 && xOk
-        }
+        // MARK: - Helper Methods for Improved Spawning
         
-        // Avoid spawning on or near the frog's current position
-        let safeDistanceFromFrog: CGFloat = 120
-        let padsAwayFromFrog = suitablePads.filter { pad in
-            let dx = pad.position.x - frogPosition.x
-            let dy = pad.position.y - frogPosition.y
-            let dist = sqrt(dx*dx + dy*dy)
-            return dist >= safeDistanceFromFrog
-        }
-        
-        // Exclude pads that have already had a tadpole spawned before (ever)
-        let neverUsedPads = padsAwayFromFrog.filter { pad in
-            let id = ObjectIdentifier(pad)
-            return !padsThatSpawnedTadpoles.contains(id)
-        }
-        
-        // CRITICAL FIX: Use the proper lily pad tadpole tracking system and never reuse pads that already spawned
-        let availablePads = neverUsedPads.filter { pad in
-            // Only include pads that don't currently have tadpoles AND are safe for tadpole spawning
-            return !pad.hasTadpoles && isSafeForTadpoleSpawn(pad)
-        }
-        
-        // FIXED: Only use pads that have never spawned a tadpole AND don't currently have one
-        // Do NOT fall back to pads that might have tadpoles
-        var candidates = availablePads
-        
-        // Removed reservation logic; select candidate directly without reservation
-        var selectedPadCandidate: LilyPad? = candidates.randomElement()
-        
-        // Fallback: try a limited set of recent pads ahead that have NEVER spawned a tadpole and are currently empty AND safe
-        if selectedPadCandidate == nil {
-            let recentAhead = lilyPads.filter { $0.position.y > frogPosition.y }.suffix(20)
-            if let pad = recentAhead.first(where: { pad in
-                let id = ObjectIdentifier(pad)
-                return !padsThatSpawnedTadpoles.contains(id) && !pad.hasTadpoles && isSafeForTadpoleSpawn(pad)
-            }) {
-                selectedPadCandidate = pad
+        /// PERFORMANCE FIX: Ensure there are always lily pads at the spawn point where enemies/tadpoles appear
+        private func ensurePadsAtSpawnPoint(spawnWorldY: CGFloat, sceneSize: CGSize, lilyPads: inout [LilyPad], worldNode: SKNode, maxRegular: CGFloat, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], lifeVests: inout [LifeVest], enemies: inout [Enemy]) {
+            // Check how many pads exist near the spawn point
+            let padsNearSpawnPoint = lilyPads.filter { pad in
+                let yDist = abs(pad.position.y - spawnWorldY)
+                return yDist < 200  // Reduced from 300 to 200
+            }
+            
+            // PERFORMANCE FIX: Reduce minimum pads from 5 to 3
+            let minPadsAtSpawn = 3
+            
+            if padsNearSpawnPoint.count < minPadsAtSpawn {
+                let padsToCreate = minPadsAtSpawn - padsNearSpawnPoint.count
+                
+                // Create pads directly at spawn height with horizontal variation
+                for i in 0..<padsToCreate {
+                    var xPosition: CGFloat
+                    if i % 3 == 0 {
+                        xPosition = CGFloat.random(in: 100...sceneSize.width/3)  // Left third
+                    } else if i % 3 == 1 {
+                        xPosition = CGFloat.random(in: sceneSize.width/3...2*sceneSize.width/3)  // Middle third
+                    } else {
+                        xPosition = CGFloat.random(in: 2*sceneSize.width/3...sceneSize.width-100)  // Right third
+                    }
+                    
+                    let yOffset = CGFloat.random(in: -80...80)  // Reduced variation from -100...100
+                    let candidatePosition = CGPoint(x: xPosition, y: spawnWorldY + yOffset)
+                    let candidateRadius = CGFloat.random(in: GameConfig.minLilyPadRadius...GameConfig.maxLilyPadRadius)
+                    
+                    var finalPosition = candidatePosition
+                    var tries = 0
+                    while isOverlappingExisting(position: finalPosition, candidateRadius: candidateRadius, lilyPads: lilyPads) && tries < 10 {
+                        finalPosition.x = max(90, min(sceneSize.width - 90, finalPosition.x + CGFloat.random(in: -40...40)))
+                        tries += 1
+                    }
+                    
+                    if !isOverlappingExisting(position: finalPosition, candidateRadius: candidateRadius, lilyPads: lilyPads) {
+                        if createLilyPadSafely(position: finalPosition, radius: candidateRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies) {
+                        }
+                    }
+                }
             }
         }
         
-        guard let selectedPad = selectedPadCandidate else {
-            return false
-        }
-        
-        // FINAL SAFETY CHECK: Ensure the selected pad is still safe for tadpole spawning
-        guard isSafeForTadpoleSpawn(selectedPad) else {
-            print("🚫 Aborting tadpole spawn - selected lily pad became unsafe for tadpole spawning at \(Int(selectedPad.position.x)), \(Int(selectedPad.position.y))")
-            return false
-        }
-
-        // Spawn the tadpole on the reserved pad
-        let tadpole = Tadpole(position: selectedPad.position)
-        // Link to pad (this will add via didSet), but also finalize reservation explicitly
-        tadpole.lilyPad = selectedPad
-        // Mark this pad as permanently used for tadpole spawns
-        padsThatSpawnedTadpoles.insert(ObjectIdentifier(selectedPad))
-        
-        tadpole.node.position = selectedPad.position
-        tadpole.node.zPosition = 50
-        worldNode.addChild(tadpole.node)
-        tadpoles.append(tadpole)
-        print("ðŸ¸ Spawned tadpole on safe lily pad (type: \(selectedPad.type)) at \(Int(selectedPad.position.x)), \(Int(selectedPad.position.y))")
-        return true
-    }
-    
-    @discardableResult
-    private func spawnBigHoneyPot(at worldY: CGFloat, sceneSize: CGSize, lilyPads: [LilyPad], bigHoneyPots: inout [BigHoneyPot], worldNode: SKNode, frogPosition: CGPoint) -> Bool {
-        // Find suitable lily pads for big honey pot spawning
-        // Requirements: lily pad must be empty (no tadpole, no enemy, no existing big honey pot)
-        let suitablePads = lilyPads.filter { pad in
-            let yDist = abs(pad.position.y - worldY)
-            let xOk = pad.position.x > 80 && pad.position.x < sceneSize.width - 80
-            return yDist < 400 && xOk
-        }
-        
-        // Avoid spawning near the frog
-        let safeDistanceFromFrog: CGFloat = 150
-        let padsAwayFromFrog = suitablePads.filter { pad in
-            let dx = pad.position.x - frogPosition.x
-            let dy = pad.position.y - frogPosition.y
-            let dist = sqrt(dx*dx + dy*dy)
-            return dist >= safeDistanceFromFrog
-        }
-        
-        // Only use lily pads that are completely empty: no tadpoles, no enemies, no big honey pots
-        let availablePads = padsAwayFromFrog.filter { pad in
-            return !pad.hasTadpoles && 
-                   !pad.hasBigHoneyPots && 
-                   pad.occupyingEnemyTypes.isEmpty &&
-                   isSafeForTadpoleSpawn(pad) // Use same safety rules as tadpoles
-        }
-        
-        guard let selectedPad = availablePads.randomElement() else {
-            return false
-        }
-        
-        // Final safety check
-        guard isSafeForTadpoleSpawn(selectedPad) else {
-            print("🚫 Aborting big honey pot spawn - selected lily pad became unsafe")
-            return false
-        }
-        
-        // Spawn the big honey pot on the selected pad
-        let bigHoneyPot = BigHoneyPot(position: selectedPad.position)
-        bigHoneyPot.lilyPad = selectedPad
-        
-        bigHoneyPot.node.position = selectedPad.position
-        bigHoneyPot.node.zPosition = 50
-        worldNode.addChild(bigHoneyPot.node)
-        bigHoneyPots.append(bigHoneyPot)
-        print("🍯 Spawned big honey pot on lily pad (type: \(selectedPad.type)) at \(Int(selectedPad.position.x)), \(Int(selectedPad.position.y))")
-        return true
-    }
-    
-    private func spawnLog(at worldY: CGFloat, sceneSize: CGSize, enemies: inout [Enemy], worldNode: SKNode) {
-        // PERFORMANCE OPTIMIZED: Enhanced log count tracking with spatial awareness
-        let currentLogCount = enemies.filter({ $0.type == .log }).count
-        
-        if currentLogCount >= maxTotalLogs {
-            return  // Don't spawn if we're at total cap
-        }
-        
-        // PERFORMANCE: Check if there are already logs too close vertically (avoid clustering)
-        let minVerticalSpacing: CGFloat = 150
-        let hasNearbyLog = enemies.contains { enemy in
-            enemy.type == .log && abs(enemy.position.y - worldY) < minVerticalSpacing
-        }
-        
-        if hasNearbyLog {
-            return  // Skip spawning to prevent vertical clustering
-        }
-        
-        let fromLeft = Bool.random()
-        let log = Enemy(
-            type: .log,
-            position: CGPoint(
-                x: fromLeft ? -GameConfig.logWidth : sceneSize.width + GameConfig.logWidth,
-                y: worldY
-            ),
-            speed: fromLeft ? GameConfig.logSpeed : -GameConfig.logSpeed
-        )
-        log.node.position = log.position
-        log.node.zPosition = 50
-        worldNode.addChild(log.node)
-        enemies.append(log)
-        
-        print("🪵 Spawned log (count: \(currentLogCount + 1)/\(maxTotalLogs) total) from \(fromLeft ? "left" : "right")")
-    }
-    
-    // MARK: - Helper Methods for Improved Spawning
-    
-    /// PERFORMANCE FIX: Ensure there are always lily pads at the spawn point where enemies/tadpoles appear
-    private func ensurePadsAtSpawnPoint(spawnWorldY: CGFloat, sceneSize: CGSize, lilyPads: inout [LilyPad], worldNode: SKNode, maxRegular: CGFloat, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], enemies: inout [Enemy]) {
-        // Check how many pads exist near the spawn point
-        let padsNearSpawnPoint = lilyPads.filter { pad in
-            let yDist = abs(pad.position.y - spawnWorldY)
-            return yDist < 200  // Reduced from 300 to 200
-        }
-        
-        // PERFORMANCE FIX: Reduce minimum pads from 5 to 3
-        let minPadsAtSpawn = 3
-        
-        if padsNearSpawnPoint.count < minPadsAtSpawn {
-            let padsToCreate = minPadsAtSpawn - padsNearSpawnPoint.count
+        /// Calculate current scroll speed based on score and active abilities
+        private func calculateCurrentScrollSpeed(score: Int, superJumpActive: Bool) -> CGFloat {
+            // Base scroll speed increases with score
+            let scoreMultiplier = CGFloat(score / GameConfig.scoreIntervalForSpeedIncrease)
+            let baseSpeed = min(GameConfig.scrollSpeed + (scoreMultiplier * GameConfig.scrollSpeedIncrement), GameConfig.maxScrollSpeed)
             
-            // Create pads directly at spawn height with horizontal variation
-            for i in 0..<padsToCreate {
-                var xPosition: CGFloat
+            // Check if rocket is active by examining the scene
+            if let gameScene = scene as? GameScene {
+                if gameScene.frogController.rocketActive {
+                    return GameConfig.rocketScrollSpeed
+                }
+            }
+            
+            // During super jump, scroll is faster
+            return superJumpActive ? GameConfig.scrollSpeedWhileJumping : baseSpeed
+        }
+        
+        /// Spawn a chain of lily pads quickly
+        private func spawnPadChain(count: Int, startingFrom position: CGPoint, sceneSize: CGSize, lilyPads: inout [LilyPad], worldNode: SKNode, maxRegular: CGFloat, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], lifeVests: inout [LifeVest], enemies: inout [Enemy]) {
+            var anchor = position
+            
+            // Check if ice sliding to reduce horizontal spreading
+            var horizontalSpread: CGFloat = 70
+            if let gameScene = scene as? GameScene, gameScene.frogController.onIce {
+                horizontalSpread = 30  // Much smaller spread when sliding
+                print("🧊 Reducing pad chain horizontal spread due to ice sliding")
+            }
+            
+            for i in 0..<count {
+                let minSpacing: CGFloat = 130
+                let maxSpacing = min(maxRegular * 0.85, 180)
+                let targetY = anchor.y + CGFloat.random(in: minSpacing...maxSpacing)
+                
+                // Alternate between left, center, and right paths
+                var targetX = anchor.x
                 if i % 3 == 0 {
-                    xPosition = CGFloat.random(in: 100...sceneSize.width/3)  // Left third
-                } else if i % 3 == 1 {
-                    xPosition = CGFloat.random(in: sceneSize.width/3...2*sceneSize.width/3)  // Middle third
+                    targetX = max(90, anchor.x - CGFloat.random(in: 20...horizontalSpread))
+                } else if i % 3 == 2 {
+                    targetX = min(sceneSize.width - 90, anchor.x + CGFloat.random(in: 20...horizontalSpread))
                 } else {
-                    xPosition = CGFloat.random(in: 2*sceneSize.width/3...sceneSize.width-100)  // Right third
+                    targetX = anchor.x + CGFloat.random(in: -30...30)
                 }
                 
-                let yOffset = CGFloat.random(in: -80...80)  // Reduced variation from -100...100
-                let candidatePosition = CGPoint(x: xPosition, y: spawnWorldY + yOffset)
+                let constrainedX = max(90, min(sceneSize.width - 90, targetX))
+                var padPosition = CGPoint(x: constrainedX, y: targetY)
                 let candidateRadius = CGFloat.random(in: GameConfig.minLilyPadRadius...GameConfig.maxLilyPadRadius)
                 
-                var finalPosition = candidatePosition
                 var tries = 0
-                while isOverlappingExisting(position: finalPosition, candidateRadius: candidateRadius, lilyPads: lilyPads) && tries < 10 {
-                    finalPosition.x = max(90, min(sceneSize.width - 90, finalPosition.x + CGFloat.random(in: -40...40)))
+                while isOverlappingExisting(position: padPosition, candidateRadius: candidateRadius, lilyPads: lilyPads) && tries < 10 {
+                    padPosition.x = max(90, min(sceneSize.width - 90, padPosition.x + CGFloat.random(in: -40...40)))
                     tries += 1
                 }
                 
-                if !isOverlappingExisting(position: finalPosition, candidateRadius: candidateRadius, lilyPads: lilyPads) {
-                    if createLilyPadSafely(position: finalPosition, radius: candidateRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies) {
+                if !isOverlappingExisting(position: padPosition, candidateRadius: candidateRadius, lilyPads: lilyPads) {
+                    if createLilyPadSafely(position: padPosition, radius: candidateRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies) {
+                        anchor = padPosition
+                        print("✅ Created pad chain element #\(i+1) at \(Int(padPosition.x)), \(Int(padPosition.y))")
                     }
+                } else {
+                    print("⚠️ Skipping pad chain element #\(i+1) - would violate spacing requirements")
+                    // Still advance anchor to prevent getting stuck
+                    anchor.y = targetY
                 }
             }
         }
-    }
-    
-    /// Calculate current scroll speed based on score and active abilities
-    private func calculateCurrentScrollSpeed(score: Int, superJumpActive: Bool) -> CGFloat {
-        // Base scroll speed increases with score
-        let scoreMultiplier = CGFloat(score / GameConfig.scoreIntervalForSpeedIncrease)
-        let baseSpeed = min(GameConfig.scrollSpeed + (scoreMultiplier * GameConfig.scrollSpeedIncrement), GameConfig.maxScrollSpeed)
         
-        // Check if rocket is active by examining the scene
-        if let gameScene = scene as? GameScene {
-            if gameScene.frogController.rocketActive {
-                return GameConfig.rocketScrollSpeed
-            }
-        }
-        
-        // During super jump, scroll is faster
-        return superJumpActive ? GameConfig.scrollSpeedWhileJumping : baseSpeed
-    }
-    
-    /// Spawn a chain of lily pads quickly
-    private func spawnPadChain(count: Int, startingFrom position: CGPoint, sceneSize: CGSize, lilyPads: inout [LilyPad], worldNode: SKNode, maxRegular: CGFloat, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], enemies: inout [Enemy]) {
-        var anchor = position
-        
-        // Check if ice sliding to reduce horizontal spreading
-        var horizontalSpread: CGFloat = 70
-        if let gameScene = scene as? GameScene, gameScene.frogController.onIce {
-            horizontalSpread = 30  // Much smaller spread when sliding
-            print("🧊 Reducing pad chain horizontal spread due to ice sliding")
-        }
-        
-        for i in 0..<count {
-            let minSpacing: CGFloat = 130
-            let maxSpacing = min(maxRegular * 0.85, 180)
-            let targetY = anchor.y + CGFloat.random(in: minSpacing...maxSpacing)
+        /// Fill only genuinely large gaps that would be unjumpable
+        private func fillLargeGaps(frogPosition: CGPoint, maxRegular: CGFloat, sceneSize: CGSize, lilyPads: inout [LilyPad], worldNode: SKNode, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], lifeVests: inout [LifeVest], enemies: inout [Enemy]) {
+            // Look further ahead to catch gaps before they become problematic
+            let recentPads = lilyPads.filter { $0.position.y >= frogPosition.y - 200 && $0.position.y <= frogPosition.y + maxRegular * 3.0 }.sorted { $0.position.y < $1.position.y }
             
-            // Alternate between left, center, and right paths
-            var targetX = anchor.x
-            if i % 3 == 0 {
-                targetX = max(90, anchor.x - CGFloat.random(in: 20...horizontalSpread))
-            } else if i % 3 == 2 {
-                targetX = min(sceneSize.width - 90, anchor.x + CGFloat.random(in: 20...horizontalSpread))
-            } else {
-                targetX = anchor.x + CGFloat.random(in: -30...30)
+            guard recentPads.count >= 2 else {
+                // If we have fewer than 2 pads in our lookahead range, that's a problem
+                print("🚨 Gap filling: Only \(recentPads.count) pads in range - creating emergency pads")
+                let emergencyY = frogPosition.y + 200
+                createReachablePad(from: frogPosition, targetY: emergencyY, sceneSize: sceneSize, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies, forceCreate: true)
+                return
             }
             
-            let constrainedX = max(90, min(sceneSize.width - 90, targetX))
-            var padPosition = CGPoint(x: constrainedX, y: targetY)
-            let candidateRadius = CGFloat.random(in: GameConfig.minLilyPadRadius...GameConfig.maxLilyPadRadius)
-            
-            var tries = 0
-            while isOverlappingExisting(position: padPosition, candidateRadius: candidateRadius, lilyPads: lilyPads) && tries < 10 {
-                padPosition.x = max(90, min(sceneSize.width - 90, padPosition.x + CGFloat.random(in: -40...40)))
-                tries += 1
-            }
-            
-            if !isOverlappingExisting(position: padPosition, candidateRadius: candidateRadius, lilyPads: lilyPads) {
-                if createLilyPadSafely(position: padPosition, radius: candidateRadius, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies) {
-                    anchor = padPosition
-                    print("✅ Created pad chain element #\(i+1) at \(Int(padPosition.x)), \(Int(padPosition.y))")
-                }
-            } else {
-                print("⚠️ Skipping pad chain element #\(i+1) - would violate spacing requirements")
-                // Still advance anchor to prevent getting stuck
-                anchor.y = targetY
-            }
-        }
-    }
-    
-    /// Fill only genuinely large gaps that would be unjumpable
-    private func fillLargeGaps(frogPosition: CGPoint, maxRegular: CGFloat, sceneSize: CGSize, lilyPads: inout [LilyPad], worldNode: SKNode, tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], enemies: inout [Enemy]) {
-        // Look further ahead to catch gaps before they become problematic
-        let recentPads = lilyPads.filter { $0.position.y >= frogPosition.y - 200 && $0.position.y <= frogPosition.y + maxRegular * 3.0 }.sorted { $0.position.y < $1.position.y }
-        
-        guard recentPads.count >= 2 else { 
-            // If we have fewer than 2 pads in our lookahead range, that's a problem
-            print("🚨 Gap filling: Only \(recentPads.count) pads in range - creating emergency pads")
-            let emergencyY = frogPosition.y + 200
-            createReachablePad(from: frogPosition, targetY: emergencyY, sceneSize: sceneSize, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies, forceCreate: true)
-            return 
-        }
-        
-        var prev = recentPads.first!.position
-        for pad in recentPads.dropFirst() {
-            let dy = pad.position.y - prev.y
-            let dx = abs(pad.position.x - prev.x)
-            let totalDistance = sqrt(dx*dx + dy*dy)
-            
-            // CRITICAL FIX: Only fill gaps that are genuinely too large (increased threshold)
-            if totalDistance > maxRegular * 1.15 {  // Much higher threshold - only fill actually impossible gaps
-                print("🔧 Filling gap: distance \(Int(totalDistance)) vs max \(Int(maxRegular))")
+            var prev = recentPads.first!.position
+            for pad in recentPads.dropFirst() {
+                let dy = pad.position.y - prev.y
+                let dx = abs(pad.position.x - prev.x)
+                let totalDistance = sqrt(dx*dx + dy*dy)
                 
-                // Calculate exactly how many intermediate pads we need
-                let gapSize = totalDistance
-                let maxSafeJump = maxRegular * 0.8
-                let numberOfPadsNeeded = max(1, Int(ceil(gapSize / maxSafeJump)) - 1)
-                let actualPadsToCreate = min(numberOfPadsNeeded, 2)  // Never create more than 2 at once
-                
-                var currentAnchor = prev
-                var gapsFilled = 0
-                
-                for _ in 0..<actualPadsToCreate {
-                    let progress = CGFloat(gapsFilled + 1) / CGFloat(actualPadsToCreate + 1)
-                    let nextY = prev.y + (pad.position.y - prev.y) * progress
-                    let padCountBefore = lilyPads.count
+                // CRITICAL FIX: Only fill gaps that are genuinely too large (increased threshold)
+                if totalDistance > maxRegular * 1.15 {  // Much higher threshold - only fill actually impossible gaps
+                    print("🔧 Filling gap: distance \(Int(totalDistance)) vs max \(Int(maxRegular))")
                     
-                    createReachablePad(from: currentAnchor, targetY: nextY, sceneSize: sceneSize, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, enemies: &enemies, forceCreate: true)
+                    // Calculate exactly how many intermediate pads we need
+                    let gapSize = totalDistance
+                    let maxSafeJump = maxRegular * 0.8
+                    let numberOfPadsNeeded = max(1, Int(ceil(gapSize / maxSafeJump)) - 1)
+                    let actualPadsToCreate = min(numberOfPadsNeeded, 2)  // Never create more than 2 at once
                     
-                    // Always advance the anchor to prevent infinite loops
-                    if lilyPads.count > padCountBefore, let newPad = lilyPads.last {
-                        currentAnchor = newPad.position
-                        gapsFilled += 1
-                        print("🔧 Gap fill #\(gapsFilled): Created pad at Y=\(Int(newPad.position.y))")
-                    } else {
-                        // Emergency: Force advance to prevent infinite loop
-                        currentAnchor.y = nextY
-                        gapsFilled += 1
-                        print("⚠️ Gap fill #\(gapsFilled): No pad created, advancing anchor to Y=\(Int(nextY))")
-                        break  // If we can't create pads, stop trying
+                    var currentAnchor = prev
+                    var gapsFilled = 0
+                    
+                    for _ in 0..<actualPadsToCreate {
+                        let progress = CGFloat(gapsFilled + 1) / CGFloat(actualPadsToCreate + 1)
+                        let nextY = prev.y + (pad.position.y - prev.y) * progress
+                        let padCountBefore = lilyPads.count
+                        
+                        createReachablePad(from: currentAnchor, targetY: nextY, sceneSize: sceneSize, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies, forceCreate: true)
+                        
+                        // Always advance the anchor to prevent infinite loops
+                        if lilyPads.count > padCountBefore, let newPad = lilyPads.last {
+                            currentAnchor = newPad.position
+                            gapsFilled += 1
+                            print("🔧 Gap fill #\(gapsFilled): Created pad at Y=\(Int(newPad.position.y))")
+                        } else {
+                            // Emergency: Force advance to prevent infinite loop
+                            currentAnchor.y = nextY
+                            gapsFilled += 1
+                            print("⚠️ Gap fill #\(gapsFilled): No pad created, advancing anchor to Y=\(Int(nextY))")
+                            break  // If we can't create pads, stop trying
+                        }
                     }
-                }
-                
-                print("✅ Gap filling complete: created \(gapsFilled) pads for distance \(Int(totalDistance))")
-            }
-            prev = pad.position
-        }
-    }
-    
-    /// PERFORMANCE FIX: Remove lily pads that are far behind the frog to prevent memory bloat
-    private func cullDistantLilyPads(lilyPads: inout [LilyPad], frogPosition: CGPoint, sceneSize: CGSize, worldNode: SKNode) {
-        let cullBehindY = frogPosition.y - sceneSize.height * 2.0  // Remove pads 2 screen heights behind frog
-        let initialCount = lilyPads.count
-        
-        // Find lily pads to remove
-        let indicesToRemove = lilyPads.enumerated().compactMap { index, pad in
-            return pad.position.y < cullBehindY ? index : nil
-        }.sorted(by: >)  // Remove from back to front to maintain valid indices
-        
-        // Remove pads from scene, spatial grid, and array
-        for index in indicesToRemove {
-            let pad = lilyPads[index]
-            
-            // Clear any tadpoles on this pad
-            pad.clearTadpoles()
-            
-            // Remove from spatial grid
-            spatialGrid.remove(pad)
-            
-            // Remove from scene
-            pad.node.removeFromParent()
-            
-            // Remove from array
-            lilyPads.remove(at: index)
-        }
-        
-        let removedCount = indicesToRemove.count
-        if removedCount > 0 {
-            print("🧹 Culled \(removedCount) distant lily pads (was \(initialCount), now \(lilyPads.count))")
-        }
-    }
-    
-    /// DEBUG: Validate that no lily pads are overlapping (call periodically for debugging)
-    func validateNoOverlappingPads(lilyPads: [LilyPad]) -> Bool {
-        var hasOverlaps = false
-        let minimumSpacing: CGFloat = 75.0
-        
-        for i in 0..<lilyPads.count {
-            for j in (i+1)..<lilyPads.count {
-                let pad1 = lilyPads[i]
-                let pad2 = lilyPads[j]
-                
-                let dx = pad1.position.x - pad2.position.x
-                let dy = pad1.position.y - pad2.position.y
-                let distance = sqrt(dx * dx + dy * dy)
-                
-                let radiusBasedSeparation = pad1.radius + pad2.radius + 20.0  // Standard padding
-                let requiredSeparation = max(minimumSpacing, radiusBasedSeparation)
-                
-                if distance < requiredSeparation {
                     
-                    hasOverlaps = true
+                    print("✅ Gap filling complete: created \(gapsFilled) pads for distance \(Int(totalDistance))")
                 }
+                prev = pad.position
             }
         }
         
-        if !hasOverlaps {
-            print("✅ Validation passed: No overlapping lily pads detected among \(lilyPads.count) pads")
-        }
-        return !hasOverlaps
-    }
-    
-    /// PERFORMANCE: Central cleanup method to call all cleanup functions
-    func performCleanup(lilyPads: inout [LilyPad], enemies: inout [Enemy], frogPosition: CGPoint, sceneSize: CGSize, worldNode: SKNode) {
-        // Cleanup distant lily pads
-        cullDistantLilyPads(lilyPads: &lilyPads, frogPosition: frogPosition, sceneSize: sceneSize, worldNode: worldNode)
-        
-        // Cleanup distant enemies (logs, etc.)
-        cullDistantEnemies(enemies: &enemies, frogPosition: frogPosition, sceneSize: sceneSize)
-        
-        // PERFORMANCE FIX: Specific cleanup for edge spike bushes
-        cullExcessEdgeSpikeBushes(enemies: &enemies, frogPosition: frogPosition, sceneSize: sceneSize)
-        
-        // Enforce maximum object limits
-        enforceObjectLimits(lilyPads: &lilyPads, enemies: &enemies, frogPosition: frogPosition, worldNode: worldNode)
-    }
-    
-    /// PERFORMANCE FIX: Remove enemies that are far behind the frog
-    private func cullDistantEnemies(enemies: inout [Enemy], frogPosition: CGPoint, sceneSize: CGSize) {
-        let cullBehindY = frogPosition.y - sceneSize.height * 2.0
-        let cullAheadY = frogPosition.y + sceneSize.height * 3.0
-        
-        let indicesToRemove = enemies.enumerated().compactMap { index, enemy in
-            return (enemy.position.y < cullBehindY || enemy.position.y > cullAheadY) ? index : nil
-        }.sorted(by: >)
-        
-        for index in indicesToRemove {
-            enemies[index].node.removeFromParent()
-            enemies.remove(at: index)
-        }
-        
-        if !indicesToRemove.isEmpty {
-            print("🧹 Culled \(indicesToRemove.count) distant enemies")
-        }
-    }
-    
-    /// PERFORMANCE FIX: Aggressive cleanup of edge spike bushes to prevent accumulation
-    private func cullExcessEdgeSpikeBushes(enemies: inout [Enemy], frogPosition: CGPoint, sceneSize: CGSize) {
-        // More aggressive culling for edge spike bushes since they're static and can accumulate
-        let cullBehindY = frogPosition.y - sceneSize.height * 1.5  // Closer cull distance
-        let cullAheadY = frogPosition.y + sceneSize.height * 2.0   // Don't need as many ahead
-        
-        // Find all edge spike bushes
-        let edgeBushes = enemies.enumerated().compactMap { index, enemy in
-            enemy.type == .edgeSpikeBush ? (index: index, enemy: enemy) : nil
-        }
-        
-        // Remove bushes outside the tighter bounds
-        let indicesToRemove = edgeBushes.compactMap { item in
-            let y = item.enemy.position.y
-            return (y < cullBehindY || y > cullAheadY) ? item.index : nil
-        }.sorted(by: >)
-        
-        for index in indicesToRemove {
-            enemies[index].node.removeFromParent()
-            enemies.remove(at: index)
-        }
-        
-        // Also enforce a maximum count of edge spike bushes
-        let maxEdgeBushes = 20  // Reasonable limit for edge bushes
-        let remainingEdgeBushes = enemies.enumerated().compactMap { index, enemy in
-            enemy.type == .edgeSpikeBush ? (index: index, enemy: enemy, distance: abs(enemy.position.y - frogPosition.y)) : nil
-        }.sorted { $0.distance > $1.distance }  // Sort by distance from frog (furthest first)
-        
-        if remainingEdgeBushes.count > maxEdgeBushes {
-            let excessBushes = Array(remainingEdgeBushes.prefix(remainingEdgeBushes.count - maxEdgeBushes))
-            let excessIndices = excessBushes.map { $0.index }.sorted(by: >)
+        /// PERFORMANCE FIX: Remove lily pads that are far behind the frog to prevent memory bloat
+        private func cullDistantLilyPads(lilyPads: inout [LilyPad], frogPosition: CGPoint, sceneSize: CGSize, worldNode: SKNode) {
+            let cullBehindY = frogPosition.y - sceneSize.height * 2.0  // Remove pads 2 screen heights behind frog
+            let initialCount = lilyPads.count
             
-            for index in excessIndices {
-                enemies[index].node.removeFromParent()
-                enemies.remove(at: index)
-            }
+            // Find lily pads to remove
+            let indicesToRemove = lilyPads.enumerated().compactMap { index, pad in
+                return pad.position.y < cullBehindY ? index : nil
+            }.sorted(by: >)  // Remove from back to front to maintain valid indices
             
-            print("🌿 Culled \(excessIndices.count) excess edge spike bushes (limit: \(maxEdgeBushes))")
-        }
-        
-        let totalRemoved = indicesToRemove.count + (remainingEdgeBushes.count > maxEdgeBushes ? remainingEdgeBushes.count - maxEdgeBushes : 0)
-        if totalRemoved > 0 {
-            print("🧹 Culled \(totalRemoved) edge spike bushes for performance")
-        }
-    }
-    
-    /// PERFORMANCE FIX: Enforce maximum object limits by removing oldest objects
-    private func enforceObjectLimits(lilyPads: inout [LilyPad], enemies: inout [Enemy], frogPosition: CGPoint, worldNode: SKNode) {
-        // Enforce lily pad limit
-        if lilyPads.count > GameConfig.maxActiveLilyPads {
-            let excessCount = lilyPads.count - GameConfig.maxActiveLilyPads
-            
-            // Sort lily pads by distance from frog (furthest first)
-            let indexedPads = lilyPads.enumerated().map { index, pad in
-                let distance = abs(pad.position.y - frogPosition.y)
-                return (index: index, distance: distance)
-            }
-            
-            let sortedByDistance = indexedPads.sorted { $0.distance > $1.distance }
-            let limitedPads = Array(sortedByDistance.prefix(excessCount))
-            let indices = limitedPads.map { $0.index }
-            let sortedIndices = indices.sorted(by: >)
-            
-            for index in sortedIndices {
+            // Remove pads from scene, spatial grid, and array
+            for index in indicesToRemove {
                 let pad = lilyPads[index]
+                
+                // Clear any tadpoles on this pad
                 pad.clearTadpoles()
+                
+                // Remove from spatial grid
                 spatialGrid.remove(pad)
+                
+                // Remove from scene
                 pad.node.removeFromParent()
+                
+                // Remove from array
                 lilyPads.remove(at: index)
             }
             
-            print("🧹 Enforced lily pad limit: removed \(excessCount) pads (now \(lilyPads.count))")
+            let removedCount = indicesToRemove.count
+            if removedCount > 0 {
+                print("🧹 Culled \(removedCount) distant lily pads (was \(initialCount), now \(lilyPads.count))")
+            }
         }
         
-        // Enforce enemy limit
-        if enemies.count > GameConfig.maxActiveEnemies {
-            let excessCount = enemies.count - GameConfig.maxActiveEnemies
+        /// DEBUG: Validate that no lily pads are overlapping (call periodically for debugging)
+        func validateNoOverlappingPads(lilyPads: [LilyPad]) -> Bool {
+            var hasOverlaps = false
+            let minimumSpacing: CGFloat = 75.0
             
-            // Remove oldest/furthest enemies
-            let indexedEnemies = enemies.enumerated().map { index, enemy in
-                let distance = abs(enemy.position.y - frogPosition.y)
-                return (index: index, distance: distance)
+            for i in 0..<lilyPads.count {
+                for j in (i+1)..<lilyPads.count {
+                    let pad1 = lilyPads[i]
+                    let pad2 = lilyPads[j]
+                    
+                    let dx = pad1.position.x - pad2.position.x
+                    let dy = pad1.position.y - pad2.position.y
+                    let distance = sqrt(dx * dx + dy * dy)
+                    
+                    let radiusBasedSeparation = pad1.radius + pad2.radius + 20.0  // Standard padding
+                    let requiredSeparation = max(minimumSpacing, radiusBasedSeparation)
+                    
+                    if distance < requiredSeparation {
+                        
+                        hasOverlaps = true
+                    }
+                }
             }
             
-            let sortedByDistance = indexedEnemies.sorted { $0.distance > $1.distance }
-            let limitedEnemies = Array(sortedByDistance.prefix(excessCount))
-            let indices = limitedEnemies.map { $0.index }
-            let sortedIndices = indices.sorted(by: >)
+            if !hasOverlaps {
+                print("✅ Validation passed: No overlapping lily pads detected among \(lilyPads.count) pads")
+            }
+            return !hasOverlaps
+        }
+        
+        /// PERFORMANCE: Central cleanup method to call all cleanup functions
+        func performCleanup(lilyPads: inout [LilyPad], enemies: inout [Enemy], frogPosition: CGPoint, sceneSize: CGSize, worldNode: SKNode) {
+            // Cleanup distant lily pads
+            cullDistantLilyPads(lilyPads: &lilyPads, frogPosition: frogPosition, sceneSize: sceneSize, worldNode: worldNode)
             
-            for index in sortedIndices {
+            // Cleanup distant enemies (logs, etc.)
+            cullDistantEnemies(enemies: &enemies, frogPosition: frogPosition, sceneSize: sceneSize)
+            
+            // PERFORMANCE FIX: Specific cleanup for edge spike bushes
+            cullExcessEdgeSpikeBushes(enemies: &enemies, frogPosition: frogPosition, sceneSize: sceneSize)
+            
+            // Enforce maximum object limits
+            enforceObjectLimits(lilyPads: &lilyPads, enemies: &enemies, frogPosition: frogPosition, worldNode: worldNode)
+        }
+        
+        /// PERFORMANCE FIX: Remove enemies that are far behind the frog
+        private func cullDistantEnemies(enemies: inout [Enemy], frogPosition: CGPoint, sceneSize: CGSize) {
+            let cullBehindY = frogPosition.y - sceneSize.height * 2.0
+            let cullAheadY = frogPosition.y + sceneSize.height * 3.0
+            
+            let indicesToRemove = enemies.enumerated().compactMap { index, enemy in
+                return (enemy.position.y < cullBehindY || enemy.position.y > cullAheadY) ? index : nil
+            }.sorted(by: >)
+            
+            for index in indicesToRemove {
                 enemies[index].node.removeFromParent()
                 enemies.remove(at: index)
             }
             
-            print("🧹 Enforced enemy limit: removed \(excessCount) enemies (now \(enemies.count))")
+            if !indicesToRemove.isEmpty {
+                print("🧹 Culled \(indicesToRemove.count) distant enemies")
+            }
         }
-    }
+        
+        /// PERFORMANCE FIX: Aggressive cleanup of edge spike bushes to prevent accumulation
+        private func cullExcessEdgeSpikeBushes(enemies: inout [Enemy], frogPosition: CGPoint, sceneSize: CGSize) {
+            // More aggressive culling for edge spike bushes since they're static and can accumulate
+            let cullBehindY = frogPosition.y - sceneSize.height * 1.5  // Closer cull distance
+            let cullAheadY = frogPosition.y + sceneSize.height * 2.0   // Don't need as many ahead
+            
+            // Find all edge spike bushes
+            let edgeBushes = enemies.enumerated().compactMap { index, enemy in
+                enemy.type == .edgeSpikeBush ? (index: index, enemy: enemy) : nil
+            }
+            
+            // Remove bushes outside the tighter bounds
+            let indicesToRemove = edgeBushes.compactMap { item in
+                let y = item.enemy.position.y
+                return (y < cullBehindY || y > cullAheadY) ? item.index : nil
+            }.sorted(by: >)
+            
+            for index in indicesToRemove {
+                enemies[index].node.removeFromParent()
+                enemies.remove(at: index)
+            }
+            
+            // Also enforce a maximum count of edge spike bushes
+            let maxEdgeBushes = 20  // Reasonable limit for edge bushes
+            let remainingEdgeBushes = enemies.enumerated().compactMap { index, enemy in
+                enemy.type == .edgeSpikeBush ? (index: index, enemy: enemy, distance: abs(enemy.position.y - frogPosition.y)) : nil
+            }.sorted { $0.distance > $1.distance }  // Sort by distance from frog (furthest first)
+            
+            if remainingEdgeBushes.count > maxEdgeBushes {
+                let excessBushes = Array(remainingEdgeBushes.prefix(remainingEdgeBushes.count - maxEdgeBushes))
+                let excessIndices = excessBushes.map { $0.index }.sorted(by: >)
+                
+                for index in excessIndices {
+                    enemies[index].node.removeFromParent()
+                    enemies.remove(at: index)
+                }
+                
+                print("🌿 Culled \(excessIndices.count) excess edge spike bushes (limit: \(maxEdgeBushes))")
+            }
+            
+            let totalRemoved = indicesToRemove.count + (remainingEdgeBushes.count > maxEdgeBushes ? remainingEdgeBushes.count - maxEdgeBushes : 0)
+            if totalRemoved > 0 {
+                print("🧹 Culled \(totalRemoved) edge spike bushes for performance")
+            }
+        }
+        
+        /// PERFORMANCE FIX: Enforce maximum object limits by removing oldest objects
+        private func enforceObjectLimits(lilyPads: inout [LilyPad], enemies: inout [Enemy], frogPosition: CGPoint, worldNode: SKNode) {
+            // Enforce lily pad limit
+            if lilyPads.count > GameConfig.maxActiveLilyPads {
+                let excessCount = lilyPads.count - GameConfig.maxActiveLilyPads
+                
+                // Sort lily pads by distance from frog (furthest first)
+                let indexedPads = lilyPads.enumerated().map { index, pad in
+                    let distance = abs(pad.position.y - frogPosition.y)
+                    return (index: index, distance: distance)
+                }
+                
+                let sortedByDistance = indexedPads.sorted { $0.distance > $1.distance }
+                let limitedPads = Array(sortedByDistance.prefix(excessCount))
+                let indices = limitedPads.map { $0.index }
+                let sortedIndices = indices.sorted(by: >)
+                
+                for index in sortedIndices {
+                    let pad = lilyPads[index]
+                    pad.clearTadpoles()
+                    spatialGrid.remove(pad)
+                    pad.node.removeFromParent()
+                    lilyPads.remove(at: index)
+                }
+                
+                print("🧹 Enforced lily pad limit: removed \(excessCount) pads (now \(lilyPads.count))")
+            }
+            
+            // Enforce enemy limit
+            if enemies.count > GameConfig.maxActiveEnemies {
+                let excessCount = enemies.count - GameConfig.maxActiveEnemies
+                
+                // Remove oldest/furthest enemies
+                let indexedEnemies = enemies.enumerated().map { index, enemy in
+                    let distance = abs(enemy.position.y - frogPosition.y)
+                    return (index: index, distance: distance)
+                }
+                
+                let sortedByDistance = indexedEnemies.sorted { $0.distance > $1.distance }
+                let limitedEnemies = Array(sortedByDistance.prefix(excessCount))
+                let indices = limitedEnemies.map { $0.index }
+                let sortedIndices = indices.sorted(by: >)
+                
+                for index in sortedIndices {
+                    enemies[index].node.removeFromParent()
+                    enemies.remove(at: index)
+                }
+                
+                print("🧹 Enforced enemy limit: removed \(excessCount) enemies (now \(enemies.count))")
+            }
+        }
+        
+       
 }
 
 // MARK: - Spatial Grid for Performant Overlap Detection
 
-/// A spatial partitioning data structure for fast lily pad overlap queries.
-/// Divides space into grid cells and only checks lily pads in nearby cells.
-class SpatialGrid {
+private struct GridKey: Hashable {
+    let x: Int
+    let y: Int
+}
+
+/// A spatial grid for fast overlap detection of lily pads
+private class SpatialGrid {
     private let cellSize: CGFloat
     private var grid: [GridKey: [LilyPad]] = [:]
     
@@ -2168,9 +2334,3 @@ class SpatialGrid {
         return keys
     }
 }
-
-private struct GridKey: Hashable {
-    let x: Int
-    let y: Int
-}
-

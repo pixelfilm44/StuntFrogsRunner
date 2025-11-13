@@ -20,6 +20,113 @@ enum AbilityType: CaseIterable {
     case axe
 }
 
+// MARK: - Super Power System
+enum SuperPowerType: CaseIterable {
+    case jumpRange
+    case jumpRecoil
+    case maxHealth
+    case superJumpFocus
+    case ghostMagic
+    case impactJumps
+    
+    var name: String {
+        switch self {
+        case .jumpRange: return "Jump Range"
+        case .jumpRecoil: return "Jump Speed"
+        case .maxHealth: return "Max Health"
+        case .superJumpFocus: return "Super Jump Longer"
+        case .ghostMagic: return "Bust ghosts"
+        case .impactJumps: return "Impact Jumps"
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .jumpRange: return "Jump farther"
+        case .jumpRecoil: return "Jump faster"
+        case .maxHealth: return "Permanent Max Heart increase (max 6)"
+        case .superJumpFocus: return "Extend Super Jump Timer"
+        case .ghostMagic: return "Destroy ghosts in your way"
+        case .impactJumps: return "Jumps destroy enemies (limited per level)"
+        }
+    }
+    
+    var baseCost: Int {
+        switch self {
+        case .jumpRange: return 10
+        case .jumpRecoil: return 20
+        case .maxHealth: return 25
+        case .superJumpFocus: return 40
+        case .ghostMagic: return 50
+        case .impactJumps: return 100
+        }
+    }
+    
+    var emoji: String {
+        switch self {
+        case .jumpRange: return "🦘"
+        case .jumpRecoil: return "⚡"
+        case .maxHealth: return "❤️"
+        case .superJumpFocus: return "🎯"
+        case .ghostMagic: return "👻"
+        case .impactJumps: return "💥"
+        }
+    }
+    
+    var imageName: String {
+        switch self {
+        case .jumpRange: return "jumpRange.png"
+        case .jumpRecoil: return "jumpRecoil.png"
+        case .maxHealth: return "heartBoost.png"
+        case .superJumpFocus: return "superJumpFocus.png"
+        case .ghostMagic: return "ghostMagic.png"
+        case .impactJumps: return "impactJumps.png"
+        }
+    }
+    
+    func effectDescription(level: Int) -> String {
+        switch self {
+        case .jumpRange:
+            let percentage = level * 10
+            return "+\(percentage)% jump distance"
+        case .jumpRecoil:
+            let reduction = level * 2
+            return "-\(reduction)s jump speed"
+        case .maxHealth:
+            return "+\(level) max hearts"
+        case .superJumpFocus:
+            let extensionTime = level * 2
+            return "+\(extensionTime)s super jump duration"
+        case .ghostMagic:
+            let escapes = level * 2
+            return "\(escapes) ghost busts"
+        case .impactJumps:
+            let destroys = level * 3
+            return "\(destroys) enemy destroys per level"
+        }
+    }
+    
+    func costForLevel(_ level: Int) -> Int {
+        // Cost increases by base cost for each level
+        return baseCost * level
+    }
+}
+
+struct SuperPowerProgress {
+    let type: SuperPowerType
+    var level: Int = 0
+    var isMaxed: Bool { 
+        // Different max levels for different super powers
+        let maxLevel = type == .maxHealth ? 6 : 10
+        return level >= maxLevel
+    }
+    
+    var nextLevelCost: Int {
+        guard !isMaxed else { return 0 }
+        return type.costForLevel(level + 1)
+    }
+}
+
 extension AbilityType {
     static var allPowerUps: [AbilityType] { [.extraHeart, .superJump, .refillHearts, .lifeVest, .scrollSaver, .flySwatter, .honeyJar, .rocket, .axe] }
 
@@ -81,6 +188,9 @@ extension AbilityType {
 }
 
 class UIManager: NSObject {
+    // Coins collected during the current session awaiting persistence
+    var pendingTadpoleCoins: Int = 0
+
     // Set this to your App Store Connect leaderboard identifier
     var leaderboardID: String = "com.yourcompany.yourapp.leaderboard"
 
@@ -89,6 +199,27 @@ class UIManager: NSObject {
     var tadpoleLabel: SKLabelNode?
     var healthIcons: [SKLabelNode] = []
     var pauseButton: SKLabelNode?
+    
+    // Super Powers System
+    var tadpoleCoins: Int = 0 {
+        didSet {
+            updateTadpoleCoinsDisplay()
+        }
+    }
+    var superPowers: [SuperPowerType: SuperPowerProgress] = [:]
+    var superPowersMenu: SKNode?
+    
+    // Initialize super powers with default values
+    private func initializeSuperPowers() {
+        for powerType in SuperPowerType.allCases {
+            superPowers[powerType] = SuperPowerProgress(type: powerType, level: 0)
+        }
+        
+        // Add some debug coins if none exist (for testing)
+        if tadpoleCoins == 0 {
+            tadpoleCoins = 500 // Give some coins for testing
+        }
+    }
     
  
     
@@ -110,7 +241,18 @@ class UIManager: NSObject {
     weak var scene: SKScene?
     
     init(scene: SKScene) {
+        print("🔧 UIManager.init: Starting initialization")
         self.scene = scene
+        super.init()
+        print("🔧 UIManager.init: Initializing super powers")
+        initializeSuperPowers()
+        print("🔧 UIManager.init: Loading super power progress")
+        loadSuperPowerProgress()
+        print("🔧 UIManager.init: Initialization complete")
+    }
+    
+    deinit {
+        print("🔧 UIManager.deinit: UIManager is being deallocated")
     }
     
     // MARK: - Haptics & Button Animations
@@ -138,7 +280,10 @@ class UIManager: NSObject {
     }
     
     func setupUI(sceneSize: CGSize) {
-        guard let scene = scene else { return }
+        guard let scene = scene else { 
+            print("⚠️ UIManager.setupUI: Scene is nil")
+            return 
+        }
         
         // Score label
         scoreLabel = SKLabelNode(text: "Score: 0")
@@ -148,7 +293,9 @@ class UIManager: NSObject {
         scoreLabel?.horizontalAlignmentMode = SKLabelHorizontalAlignmentMode.left
         scoreLabel?.position = CGPoint(x: 20, y: sceneSize.height - 85)
         scoreLabel?.zPosition = 200
-        scene.addChild(scoreLabel!)
+        if let scoreLabel = scoreLabel {
+            scene.addChild(scoreLabel)
+        }
         
         // Tadpole counter removed from top UI; handled elsewhere
         tadpoleLabel = nil
@@ -172,7 +319,9 @@ class UIManager: NSObject {
             pauseButton?.name = "pauseButton"
             pauseButton?.position = CGPoint(x: sceneSize.width - 35, y: sceneSize.height - 85)
             pauseButton?.zPosition = 200
-            scene.addChild(pauseButton!)
+            if let pauseButton = pauseButton {
+                scene.addChild(pauseButton)
+            }
         }
         
         // Star progress at top - replace emoji with star.png sprite
@@ -247,10 +396,9 @@ class UIManager: NSObject {
         let newCenterX = bgLeftX + 2 + targetWidth / 2
         
         let duration: TimeInterval = 0.18
-        let pathAction = SKAction.customAction(withDuration: duration) { node, _ in
-            if let shape = node as? SKShapeNode {
-                shape.path = newPath
-            }
+        let pathAction = SKAction.customAction(withDuration: duration) { [weak fill] node, _ in
+            guard let fill = fill, let shape = node as? SKShapeNode else { return }
+            shape.path = newPath
         }
         pathAction.timingMode = SKActionTimingMode.easeOut
         
@@ -352,7 +500,10 @@ class UIManager: NSObject {
             return
         }
         
-        guard let scene = scene else { return }
+        guard let scene = scene else { 
+            print("⚠️ UIManager.showGlideIndicator: Scene is nil")
+            return 
+        }
         
         let indicator = SKLabelNode(text: String(format: "ðŸª‚ GLIDE: %.1fs", duration))
         indicator.fontSize = 28
@@ -415,10 +566,14 @@ class UIManager: NSObject {
         // When main UI is visible, menus should be hidden, and vice versa
         menuLayer?.isHidden = visible
         abilityLayer?.isHidden = visible
+        superPowersMenu?.isHidden = visible
     }
     
     // MARK: - Menu Methods
     func showMainMenu(sceneSize: CGSize) {
+        // Ensure any pending tadpole coins are saved before showing main menu
+        savePendingTadpoleCoins()
+        
         // Remove any existing menus to prevent stacking
         hideMenus()
         setUIVisible(false)
@@ -435,8 +590,8 @@ class UIManager: NSObject {
         titleBG.zPosition = -1 // behind menu contents
         titleBG.position = CGPoint(x: sceneSize.width/2, y: sceneSize.height/2)
         // Scale to fill the screen while preserving aspect ratio
-        if titleTexture.size() != .zero {
-            let texSize = titleTexture.size()
+        let texSize = titleTexture.size()
+        if texSize != .zero {
             let xScale = sceneSize.width / texSize.width
             let yScale = sceneSize.height / texSize.height
             let scale = max(xScale, yScale)
@@ -467,24 +622,74 @@ class UIManager: NSObject {
             menu.addChild(titleTextSprite)
         }
 
-        // Single centered Play button
-        let buttonSize = CGSize(width: sceneSize.width * 0.75, height: 60)
-        let playButton = createButton(text: "Play", name: "playGameButton", size: buttonSize)
-        playButton.position = CGPoint(x: sceneSize.width/2, y: 170)
-        menu.addChild(playButton)
-
-        // Add a smaller Leaderboard button below Play (8px spacing)
-        let leaderboardSize = CGSize(width: sceneSize.width * 0.6, height: 48)
-        let leaderboardButton = createButton(text: "Leaderboard", name: "leaderboardButton", size: leaderboardSize)
-        // Play button bottom: 170 - 30 = 140, then 8px gap: 140 - 8 - 24 = 108
-        leaderboardButton.position = CGPoint(x: sceneSize.width/2, y: 108)
-        menu.addChild(leaderboardButton)
+        // Button layout based on whether player can continue
+        let scoreManager = ScoreManager.shared
+        let canContinue = scoreManager.shouldContinueFromLastLevel()
+        let maxLevel = scoreManager.getMaxCompletedLevel()
         
-        // Add Tutorial button under Leaderboard (8px spacing)
-        let tutorialButton = createButton(text: "Tutorial", name: "tutorialButton", size: leaderboardSize)
-        // Leaderboard button bottom: 108 - 24 = 84, then 8px gap: 84 - 8 - 24 = 52
-        tutorialButton.position = CGPoint(x: sceneSize.width/2, y: 52)
-        menu.addChild(tutorialButton)
+        if canContinue {
+            // Show both "Continue" and "New Game" options
+            let buttonSize = CGSize(width: sceneSize.width * 0.75, height: 55)
+            
+            // Continue button (primary action)
+            let continueButton = createButton(text: "Continue (Level \(maxLevel + 1))", name: "continueGameButton", size: buttonSize)
+            continueButton.position = CGPoint(x: sceneSize.width/2, y: 260)
+            menu.addChild(continueButton)
+            
+            // Progress indicator text
+            let progressText = SKLabelNode(text: "Progress: Level \(maxLevel) completed")
+            progressText.fontName = "ArialRoundedMT"
+            progressText.fontSize = 16
+            progressText.fontColor = UIColor.systemYellow
+            progressText.position = CGPoint(x: sceneSize.width/2, y: 230)
+            progressText.zPosition = 1
+            menu.addChild(progressText)
+            
+            // New Game button (secondary action, smaller)
+            let newGameSize = CGSize(width: sceneSize.width * 0.6, height: 45)
+            let newGameButton = createButton(text: "New Game", name: "newGameButton", size: newGameSize)
+            newGameButton.position = CGPoint(x: sceneSize.width/2, y: 190)
+            menu.addChild(newGameButton)
+            
+            // Adjust other buttons lower
+            let leaderboardSize = CGSize(width: sceneSize.width * 0.6, height: 48)
+            let leaderboardButton = createButton(text: "Leaderboard", name: "leaderboardButton", size: leaderboardSize)
+            leaderboardButton.position = CGPoint(x: sceneSize.width/2, y: 130)
+            menu.addChild(leaderboardButton)
+            
+            // Add Tutorial button
+            let tutorialButton = createButton(text: "Tutorial", name: "tutorialButton", size: leaderboardSize)
+            tutorialButton.position = CGPoint(x: sceneSize.width/2, y: 74)
+            menu.addChild(tutorialButton)
+            
+            // Add Super Powers button
+            let superPowersButton = createButton(text: "Super Powers", name: "superPowersButton", size: leaderboardSize)
+            superPowersButton.position = CGPoint(x: sceneSize.width/2, y: 18)
+            menu.addChild(superPowersButton)
+            
+        } else {
+            // Show single Play button for new players
+            let buttonSize = CGSize(width: sceneSize.width * 0.75, height: 60)
+            let playButton = createButton(text: "Play", name: "playGameButton", size: buttonSize)
+            playButton.position = CGPoint(x: sceneSize.width/2, y: 240)
+            menu.addChild(playButton)
+
+            // Add other buttons as before
+            let leaderboardSize = CGSize(width: sceneSize.width * 0.6, height: 48)
+            let leaderboardButton = createButton(text: "Leaderboard", name: "leaderboardButton", size: leaderboardSize)
+            leaderboardButton.position = CGPoint(x: sceneSize.width/2, y: 170)
+            menu.addChild(leaderboardButton)
+            
+            // Add Tutorial button under Leaderboard
+            let tutorialButton = createButton(text: "Tutorial", name: "tutorialButton", size: leaderboardSize)
+            tutorialButton.position = CGPoint(x: sceneSize.width/2, y: 114)
+            menu.addChild(tutorialButton)
+            
+            // Add Super Powers button under Tutorial
+            let superPowersButton = createButton(text: "Super Powers", name: "superPowersButton", size: leaderboardSize)
+            superPowersButton.position = CGPoint(x: sceneSize.width/2, y: 58)
+            menu.addChild(superPowersButton)
+        }
 
         // Assign and add
         menuLayer = menu
@@ -545,6 +750,9 @@ class UIManager: NSObject {
     }
     
     func showGameOverMenu(sceneSize: CGSize, score: Int, highScore: Int, isNewHighScore: Bool, reason: GameOverReason) {
+        // CRITICAL FIX: Save pending tadpole coins immediately when game is over
+        savePendingTadpoleCoins()
+        
         hideMenus()
         setUIVisible(false)
         guard let scene = scene else { return }
@@ -869,9 +1077,11 @@ class UIManager: NSObject {
     func hideMenus() {
         menuLayer?.removeFromParent()
         abilityLayer?.removeFromParent()
+        superPowersMenu?.removeFromParent()
         hideTutorialModal()
         menuLayer = nil
         abilityLayer = nil
+        superPowersMenu = nil
         
         // Restore all UI elements to visible
         pauseButton?.isHidden = false
@@ -1116,10 +1326,11 @@ class UIManager: NSObject {
             presentLeaderboardView(leaderboardID: leaderboardID)
         } else {
             GKLocalPlayer.local.authenticateHandler = { [weak self] vc, error in
+                guard let self = self else { return }
                 if let vc = vc {
-                    self?.present(viewController: vc)
+                    self.present(viewController: vc)
                 } else if GKLocalPlayer.local.isAuthenticated {
-                    self?.presentLeaderboardView(leaderboardID: leaderboardID)
+                    self.presentLeaderboardView(leaderboardID: leaderboardID)
                 } else {
                     #if DEBUG
                     print("Game Center authentication failed: \(error?.localizedDescription ?? "unknown error")")
@@ -1185,7 +1396,769 @@ class UIManager: NSObject {
         hideRocketIndicator()
     }
 
-    // MARK: - Button tap routing
+    // MARK: - Super Powers Menu
+    
+    func showSuperPowersMenu(sceneSize: CGSize) {
+        hideMenus()
+        setUIVisible(false)
+        
+        // Create and present the UIKit-based Super Powers modal
+        presentSuperPowersViewController()
+    }
+    
+    private func presentSuperPowersViewController() {
+        let superPowersVC = SuperPowersViewController()
+        superPowersVC.uiManager = self
+        superPowersVC.modalPresentationStyle = .overFullScreen
+        superPowersVC.modalTransitionStyle = .crossDissolve
+        
+        guard let rootVC = topViewController() else { 
+            print("❌ Could not find root view controller to present super powers modal")
+            return 
+        }
+        
+        print("🚀 Presenting Super Powers modal with \(SuperPowerType.allCases.count) super powers")
+        print("💰 Current tadpole coins: \(tadpoleCoins)")
+        
+        rootVC.present(superPowersVC, animated: true) {
+            print("✅ Super Powers modal presented successfully")
+        }
+    }
+    
+    private func createTadpoleCoinsDisplay() -> SKNode {
+        let container = SKNode()
+        container.name = "tadpoleCoinsDisplay"
+        
+        // Tadpole icon
+        let tadpoleTexture = SKTexture(imageNamed: "tadpole.png")
+        let tadpoleIcon: SKNode
+        
+        if tadpoleTexture.size() != .zero {
+            let sprite = SKSpriteNode(texture: tadpoleTexture)
+            sprite.size = CGSize(width: 24, height: 24)
+            tadpoleIcon = sprite
+        } else {
+            let emoji = SKLabelNode(text: "🐸")
+            emoji.fontSize = 24
+            emoji.verticalAlignmentMode = .center
+            tadpoleIcon = emoji
+        }
+        
+        tadpoleIcon.position = CGPoint(x: -60, y: 0)
+        container.addChild(tadpoleIcon)
+        
+        // Coins label
+        let coinsLabel = SKLabelNode(text: "\(tadpoleCoins)")
+        coinsLabel.name = "coinsLabel"
+        coinsLabel.fontSize = 24
+        coinsLabel.fontColor = .white
+        coinsLabel.fontName = "ArialRoundedMTBold"
+        coinsLabel.horizontalAlignmentMode = .left
+        coinsLabel.verticalAlignmentMode = .center
+        coinsLabel.position = CGPoint(x: -30, y: 0)
+        container.addChild(coinsLabel)
+        
+        // "Tadpole Coins" text
+        let titleLabel = SKLabelNode(text: "Tadpole Coins")
+        titleLabel.fontSize = 16
+        titleLabel.fontColor = UIColor.white.withAlphaComponent(0.8)
+        titleLabel.fontName = "ArialRoundedMTBold"
+        titleLabel.horizontalAlignmentMode = .left
+        titleLabel.verticalAlignmentMode = .center
+        titleLabel.position = CGPoint(x: 20, y: 0)
+        container.addChild(titleLabel)
+        
+        return container
+    }
+    
+    private func createStyledTadpoleCoinsDisplay() -> SKNode {
+        let container = SKNode()
+        container.name = "tadpoleCoinsDisplay"
+        
+        // Felt tag background
+        let tagWidth: CGFloat = 200
+        let tag = SKShapeNode(rectOf: CGSize(width: tagWidth, height: 35), cornerRadius: 6)
+        tag.fillColor = UIColor(red: 0.7, green: 0.5, blue: 0.2, alpha: 0.9) // Brown felt
+        tag.strokeColor = UIColor.white.withAlphaComponent(0.7)
+        tag.lineWidth = 1.5
+        container.addChild(tag)
+        
+        // Add subtle stitching effect with small dashes
+        let stitchContainer = SKNode()
+        let stitchRect = CGRect(x: -95, y: -15, width: 190, height: 30)
+        let dashLength: CGFloat = 3
+        let gapLength: CGFloat = 2
+        let perimeter = 2 * (stitchRect.width + stitchRect.height)
+        let dashCount = Int(perimeter / (dashLength + gapLength))
+        
+        for i in 0..<dashCount {
+            let progress = CGFloat(i) / CGFloat(dashCount)
+            let dash = SKShapeNode(rectOf: CGSize(width: dashLength, height: 1))
+            dash.fillColor = UIColor.white.withAlphaComponent(0.6)
+            dash.strokeColor = .clear
+            
+            // Position dash along the rectangle perimeter
+            let side = progress * 4.0 // 4 sides
+            if side < 1.0 { // Top side
+                dash.position = CGPoint(x: -95 + side * 190, y: 15)
+            } else if side < 2.0 { // Right side
+                dash.position = CGPoint(x: 95, y: 15 - (side - 1.0) * 30)
+                dash.zRotation = .pi / 2
+            } else if side < 3.0 { // Bottom side
+                dash.position = CGPoint(x: 95 - (side - 2.0) * 190, y: -15)
+            } else { // Left side
+                dash.position = CGPoint(x: -95, y: -15 + (side - 3.0) * 30)
+                dash.zRotation = .pi / 2
+            }
+            
+            stitchContainer.addChild(dash)
+        }
+        container.addChild(stitchContainer)
+        
+        // Coins display with star icon
+        let coinsContainer = SKNode()
+        coinsContainer.name = "coinsLabel"
+        
+        // Star icon
+        let starTexture = SKTexture(imageNamed: "star.png")
+        let starSprite = SKSpriteNode(texture: starTexture)
+        starSprite.size = CGSize(width: 18, height: 18)
+        starSprite.position = CGPoint(x: -80, y: 0)
+        coinsContainer.addChild(starSprite)
+        
+        // Coins text
+        let coinsText = SKLabelNode(text: "[\(tadpoleCoins) Tadpole Coins]")
+        coinsText.fontSize = 18
+        coinsText.fontColor = UIColor.white
+        coinsText.fontName = "ArialRoundedMTBold"
+        coinsText.horizontalAlignmentMode = .left
+        coinsText.verticalAlignmentMode = .center
+        coinsText.position = CGPoint(x: -65, y: 0)
+        coinsContainer.addChild(coinsText)
+        
+        container.addChild(coinsContainer)
+        
+        return container
+    }
+    
+    private func createStyledSuperPowerItem(power: SuperPowerProgress, sceneSize: CGSize) -> SKNode {
+        let container = SKNode()
+        container.name = "superPower_\(power.type)"
+        container.zPosition = 301 // Ensure container is above other elements
+        
+        let itemWidth = sceneSize.width * 0.92
+        let itemHeight: CGFloat = 70
+        
+        print("🔧 Creating super power item: \(power.type.name) (Level \(power.level))")
+        print("  - Container name: \(container.name ?? "nil")")
+        print("  - Item width: \(itemWidth), height: \(itemHeight)")
+        
+        // Separator line at top - positioned relative to container center
+        let separator = SKShapeNode(rectOf: CGSize(width: itemWidth * 0.9, height: 1))
+        separator.fillColor = UIColor.white.withAlphaComponent(0.3)
+        separator.strokeColor = .clear
+        separator.position = CGPoint(x: 0, y: 25) // Centered horizontally, top of item
+        separator.zPosition = 1
+        container.addChild(separator)
+        
+        // Status indicator dot - positioned relative to container center
+        let statusDot = SKShapeNode(circleOfRadius: 4)
+        statusDot.fillColor = power.isMaxed ? .green : (power.level > 0 ? .orange : .gray)
+        statusDot.strokeColor = .white
+        statusDot.lineWidth = 1
+        statusDot.position = CGPoint(x: -itemWidth/2 + 30, y: 0) // Left side with margin
+        statusDot.zPosition = 1
+        container.addChild(statusDot)
+        
+        // Power icon - positioned relative to container center
+        let iconTexture = SKTexture(imageNamed: power.type.imageName)
+        let icon: SKNode
+        
+        if iconTexture.size() != .zero {
+            let sprite = SKSpriteNode(texture: iconTexture)
+            sprite.size = CGSize(width: 28, height: 28)
+            icon = sprite
+            print("  - Using PNG icon: \(power.type.imageName)")
+        } else {
+            // Create a colored rectangle placeholder instead of emoji
+            let placeholderSize = CGSize(width: 28, height: 28)
+            let placeholder = SKShapeNode(rectOf: placeholderSize, cornerRadius: 4)
+            placeholder.fillColor = .systemBlue
+            placeholder.strokeColor = .white
+            placeholder.lineWidth = 1
+            
+            // Add abbreviated text
+            let abbreviation: String
+            switch power.type {
+            case .jumpRange: abbreviation = "JR"
+            case .jumpRecoil: abbreviation = "JRC"
+            case .maxHealth: abbreviation = "HP"
+            case .superJumpFocus: abbreviation = "SJ"
+            case .ghostMagic: abbreviation = "GM"
+            case .impactJumps: abbreviation = "IJ"
+            }
+            
+            let label = SKLabelNode(text: abbreviation)
+            label.fontSize = 10
+            label.fontColor = .white
+            label.fontName = "ArialRoundedMTBold"
+            label.verticalAlignmentMode = .center
+            placeholder.addChild(label)
+            
+            icon = placeholder
+            print("  - Using placeholder for missing icon: \(power.type.imageName)")
+        }
+        
+        icon.position = CGPoint(x: -itemWidth/2 + 60, y: 0) // After status dot
+        icon.zPosition = 1
+        container.addChild(icon)
+        
+        // Power name and level - positioned relative to container center
+        let titleText = power.isMaxed ? "\(power.type.name) MAX" : "\(power.type.name) Lv.\(power.level)"
+        let title = SKLabelNode(text: titleText)
+        title.fontSize = 18
+        title.fontColor = power.isMaxed ? .green : .white
+        title.fontName = "ArialRoundedMTBold"
+        title.horizontalAlignmentMode = .left
+        title.verticalAlignmentMode = .center
+        title.position = CGPoint(x: -itemWidth/2 + 90, y: 8) // After icon, upper text
+        title.zPosition = 1
+        container.addChild(title)
+        print("  - Title: '\(titleText)' at position \(title.position)")
+        
+        // Effect description - positioned relative to container center
+        let effectDesc = power.type.effectDescription(level: max(1, power.level))
+        let description = SKLabelNode(text: effectDesc)
+        description.fontSize = 14
+        description.fontColor = UIColor.white.withAlphaComponent(0.8)
+        description.fontName = "ArialRoundedMTBold"
+        description.horizontalAlignmentMode = .left
+        description.verticalAlignmentMode = .center
+        description.position = CGPoint(x: -itemWidth/2 + 90, y: -12) // Same x as title, lower text
+        description.zPosition = 1
+        container.addChild(description)
+        print("  - Description: '\(effectDesc)' at position \(description.position)")
+        
+        // Cost and upgrade button (if not maxed) - positioned relative to container center
+        if !power.isMaxed {
+            let cost = power.nextLevelCost
+            let canAfford = tadpoleCoins >= cost
+            
+            // Cost display with star icon
+            let costContainer = SKNode()
+            
+            // Cost text
+            let costText = "Cost: \(cost) "
+            let costLabel = SKLabelNode(text: costText)
+            costLabel.fontSize = 14
+            costLabel.fontColor = canAfford ? .yellow : .red
+            costLabel.fontName = "ArialRoundedMTBold"
+            costLabel.horizontalAlignmentMode = .right
+            costLabel.verticalAlignmentMode = .center
+            costLabel.position = CGPoint(x: itemWidth/2 - 140, y: 8)
+            costLabel.zPosition = 1
+            container.addChild(costLabel)
+            
+            // Star icon
+            let starTexture = SKTexture(imageNamed: "star.png")
+            let starSprite = SKSpriteNode(texture: starTexture)
+            starSprite.size = CGSize(width: 14, height: 14)
+            starSprite.position = CGPoint(x: itemWidth/2 - 120, y: 8)
+            starSprite.zPosition = 1
+            container.addChild(starSprite)
+            
+            // Styled upgrade button
+            let buttonText = canAfford ? "UPGRADE" : "NEED MORE"
+            let upgradeButton = createStyledButton(
+                text: buttonText,
+                name: "upgrade_\(power.type)",
+                size: CGSize(width: 100, height: 28),
+                color: canAfford ? UIColor(red: 0.2, green: 0.6, blue: 0.2, alpha: 0.9) : UIColor(red: 0.5, green: 0.2, blue: 0.2, alpha: 0.9)
+            )
+            upgradeButton.position = CGPoint(x: itemWidth/2 - 50, y: -12) // Right side, lower position
+            upgradeButton.zPosition = 1
+            
+            // Disable button if can't afford
+            if !canAfford {
+                upgradeButton.alpha = 0.6
+            }
+            
+            container.addChild(upgradeButton)
+            print("  - Cost: \(cost), Can afford: \(canAfford), Button: '\(buttonText)'")
+        } else {
+            print("  - Power is maxed, no upgrade button")
+        }
+        
+        print("  - Container children count: \(container.children.count)")
+        return container
+    }
+    
+    private func createStyledButton(text: String, name: String, size: CGSize, color: UIColor) -> SKNode {
+        let button = SKNode()
+        button.name = name
+        button.zPosition = 30 // Ensure button is above everything else
+        
+        // Button background with felt texture
+        let bg = SKShapeNode(rectOf: size, cornerRadius: 6)
+        bg.name = "background"
+        bg.fillColor = color
+        bg.strokeColor = UIColor.white.withAlphaComponent(0.7)
+        bg.lineWidth = 1.5
+        bg.zPosition = 31
+        button.addChild(bg)
+        
+        // Add subtle stitching effect with small dashes
+        let stitchContainer = SKNode()
+        stitchContainer.zPosition = 32
+        let stitchRect = CGRect(x: -size.width/2 + 2, y: -size.height/2 + 2, 
+                               width: size.width - 4, height: size.height - 4)
+        let dashLength: CGFloat = 2
+        let gapLength: CGFloat = 2
+        let perimeter = 2 * (stitchRect.width + stitchRect.height)
+        let dashCount = Int(perimeter / (dashLength + gapLength))
+        
+        for i in 0..<dashCount {
+            let progress = CGFloat(i) / CGFloat(dashCount)
+            let dash = SKShapeNode(rectOf: CGSize(width: dashLength, height: 0.8))
+            dash.fillColor = UIColor.white.withAlphaComponent(0.4)
+            dash.strokeColor = .clear
+            
+            // Position dash along the rectangle perimeter
+            let side = progress * 4.0 // 4 sides
+            let top = stitchRect.minY + stitchRect.height
+            let right = stitchRect.minX + stitchRect.width
+            
+            if side < 1.0 { // Top side
+                dash.position = CGPoint(x: stitchRect.minX + side * stitchRect.width, y: top)
+            } else if side < 2.0 { // Right side
+                dash.position = CGPoint(x: right, y: top - (side - 1.0) * stitchRect.height)
+                dash.zRotation = .pi / 2
+            } else if side < 3.0 { // Bottom side
+                dash.position = CGPoint(x: right - (side - 2.0) * stitchRect.width, y: stitchRect.minY)
+            } else { // Left side
+                dash.position = CGPoint(x: stitchRect.minX, y: stitchRect.minY + (side - 3.0) * stitchRect.height)
+                dash.zRotation = .pi / 2
+            }
+            
+            stitchContainer.addChild(dash)
+        }
+        button.addChild(stitchContainer)
+        
+        // Button label
+        let label = SKLabelNode(text: text)
+        label.name = "label"
+        label.fontSize = size.height * 0.4 // Scale font to button height
+        label.fontColor = UIColor.white
+        label.fontName = "ArialRoundedMTBold"
+        label.verticalAlignmentMode = .center
+        label.zPosition = 33
+        button.addChild(label)
+        
+        // Prepare for tap animations
+        button.setScale(1.0)
+        bg.name = "tapTarget"
+        
+        return button
+    }
+    
+    private func createSuperPowerButton(power: SuperPowerProgress, sceneSize: CGSize) -> SKNode {
+        let container = SKNode()
+        container.name = "superPower_\(power.type)"
+        
+        let buttonWidth = sceneSize.width * 0.9
+        let buttonHeight: CGFloat = 90
+        
+        // Background
+        let bg = SKShapeNode(rectOf: CGSize(width: buttonWidth, height: buttonHeight), cornerRadius: 12)
+        bg.fillColor = power.isMaxed ? 
+            UIColor(red: 0.2, green: 0.4, blue: 0.2, alpha: 0.8) : // Green for maxed
+            UIColor(red: 0.2, green: 0.2, blue: 0.3, alpha: 0.8)   // Dark blue for upgradeable
+        bg.strokeColor = power.isMaxed ? .green : .white
+        bg.lineWidth = 2
+        bg.zPosition = 0
+        container.addChild(bg)
+        
+        // Icon
+        let iconTexture = SKTexture(imageNamed: power.type.imageName)
+        let icon: SKNode
+        
+        if iconTexture.size() != .zero {
+            let sprite = SKSpriteNode(texture: iconTexture)
+            sprite.size = CGSize(width: 40, height: 40)
+            icon = sprite
+        } else {
+            // Create a colored rectangle placeholder instead of emoji
+            let placeholderSize = CGSize(width: 40, height: 40)
+            let placeholder = SKShapeNode(rectOf: placeholderSize, cornerRadius: 6)
+            placeholder.fillColor = .systemBlue
+            placeholder.strokeColor = .white
+            placeholder.lineWidth = 1.5
+            
+            // Add abbreviated text
+            let abbreviation: String
+            switch power.type {
+            case .jumpRange: abbreviation = "JR"
+            case .jumpRecoil: abbreviation = "JRC"
+            case .maxHealth: abbreviation = "HP"
+            case .superJumpFocus: abbreviation = "SJ"
+            case .ghostMagic: abbreviation = "GM"
+            case .impactJumps: abbreviation = "IJ"
+            }
+            
+            let label = SKLabelNode(text: abbreviation)
+            label.fontSize = 12
+            label.fontColor = .white
+            label.fontName = "ArialRoundedMTBold"
+            label.verticalAlignmentMode = .center
+            placeholder.addChild(label)
+            
+            icon = placeholder
+        }
+        
+        icon.position = CGPoint(x: -buttonWidth/2 + 40, y: 0)
+        icon.zPosition = 1
+        container.addChild(icon)
+        
+        // Title and level
+        let titleText = power.isMaxed ? "\(power.type.name) MAX" : "\(power.type.name) Lv.\(power.level)"
+        let title = SKLabelNode(text: titleText)
+        title.fontSize = 18
+        title.fontColor = power.isMaxed ? .green : .white
+        title.fontName = "ArialRoundedMTBold"
+        title.horizontalAlignmentMode = .left
+        title.verticalAlignmentMode = .center
+        title.position = CGPoint(x: -buttonWidth/2 + 80, y: 15)
+        title.zPosition = 1
+        container.addChild(title)
+        
+        // Description
+        let description = SKLabelNode(text: power.type.effectDescription(level: max(1, power.level)))
+        description.fontSize = 12
+        description.fontColor = UIColor.white.withAlphaComponent(0.8)
+        description.fontName = "ArialRoundedMTBold"
+        description.horizontalAlignmentMode = .left
+        description.verticalAlignmentMode = .center
+        description.position = CGPoint(x: -buttonWidth/2 + 80, y: -5)
+        description.zPosition = 1
+        container.addChild(description)
+        
+        // Cost and upgrade button (if not maxed)
+        if !power.isMaxed {
+            let cost = power.nextLevelCost
+            let canAfford = tadpoleCoins >= cost
+            
+            // Cost display
+            let costText = "Cost: \(cost)"
+            let costLabel = SKLabelNode(text: costText)
+            costLabel.fontSize = 12
+            costLabel.fontColor = canAfford ? .yellow : .red
+            costLabel.fontName = "ArialRoundedMTBold"
+            costLabel.horizontalAlignmentMode = .right
+            costLabel.verticalAlignmentMode = .center
+            costLabel.position = CGPoint(x: buttonWidth/2 - 100, y: 0)
+            costLabel.zPosition = 1
+            container.addChild(costLabel)
+            
+            // Upgrade button
+            let upgradeButton = createButton(
+                text: canAfford ? "UPGRADE" : "NEED MORE",
+                name: "upgrade_\(power.type)",
+                size: CGSize(width: 120, height: 30)
+            )
+            upgradeButton.position = CGPoint(x: buttonWidth/2 - 50, y: -10)
+            upgradeButton.zPosition = 1
+            
+            // Disable button if can't afford
+            if !canAfford {
+                upgradeButton.alpha = 0.5
+            }
+            
+            container.addChild(upgradeButton)
+        }
+        
+        return container
+    }
+    
+    private func updateTadpoleCoinsDisplay() {
+        guard let menu = superPowersMenu,
+              let display = menu.childNode(withName: "tadpoleCoinsDisplay"),
+              let coinsContainer = display.childNode(withName: "coinsLabel") else { return }
+        
+        // Update the text label within the coins container
+        if let textLabel = coinsContainer.children.compactMap({ $0 as? SKLabelNode }).first {
+            textLabel.text = "[\(tadpoleCoins) Tadpole Coins]"
+        }
+        
+        // Add a little animation when coins change
+        let pulse = SKAction.sequence([
+            SKAction.scale(to: 1.2, duration: 0.1),
+            SKAction.scale(to: 1.0, duration: 0.1)
+        ])
+        coinsContainer.run(pulse)
+    }
+    
+    // MARK: - Super Power Purchase Logic
+    
+    func purchaseSuperPower(_ powerType: SuperPowerType) -> Bool {
+        guard let progress = superPowers[powerType], !progress.isMaxed else { return false }
+        
+        let cost = progress.nextLevelCost
+        guard tadpoleCoins >= cost else { return false }
+        
+        // Deduct coins and upgrade
+        tadpoleCoins -= cost
+        superPowers[powerType]?.level += 1
+        
+        // Apply the upgrade effect immediately
+        if powerType == .maxHealth {
+            // Apply the max health bonus to the game (maxed at 6 levels)
+            if let gameScene = scene as? GameScene {
+                let newBonusHealth = getBonusMaxHealth()
+                // Calculate how much bonus we should have vs what we currently have
+                let currentMaxHealth = gameScene.healthManager.maxHealth
+                let baseMaxHealth = 3 // Default starting health (from GameConfig.startingHealth)
+                let currentBonus = currentMaxHealth - baseMaxHealth
+                let additionalBonus = newBonusHealth - currentBonus
+                
+                if additionalBonus > 0 {
+                    gameScene.healthManager.maxHealth += additionalBonus
+                    gameScene.healthManager.health += additionalBonus // Give the bonus health immediately
+                    print("❤️ Max Health Super Power upgraded: +\(additionalBonus) bonus hearts (total bonus: \(newBonusHealth), max possible: 6)")
+                }
+            }
+        }
+        
+        // Save progress
+        saveSuperPowerProgress()
+        
+        // Refresh the menu if it's currently shown
+        if let _ = superPowersMenu, let scene = scene {
+            showSuperPowersMenu(sceneSize: scene.size)
+        }
+        
+        return true
+    }
+    
+    func addTadpoleCoins(_ amount: Int) {
+        tadpoleCoins += amount
+        saveSuperPowerProgress()
+    }
+    
+    // MARK: - Debug Helper for Testing Super Powers
+    func testSuperPowerIntegration() {
+        print("🧪 Testing Super Power Integration:")
+        
+        // Test health integration
+        let baseHealth = GameConfig.startingHealth
+        let bonusHealth = getBonusMaxHealth()
+        print("  Health: Base=\(baseHealth), Bonus=\(bonusHealth)")
+        
+        // Test other super powers
+        print("  Jump Range: \(getJumpRangeMultiplier())x")
+        print("  Jump Recoil: -\(getJumpRecoilReduction())s")
+        print("  Super Jump Extension: +\(getSuperJumpExtension())s")
+        print("  Ghost Escapes: \(getGhostEscapes())")
+        print("  Impact Jump Destroys: \(getImpactJumpDestroysRemaining())")
+        
+        // Verify health integration if we have access to the game scene
+        if let gameScene = scene as? GameScene {
+            let expectedHealth = baseHealth + bonusHealth
+            if gameScene.healthManager.maxHealth == expectedHealth {
+                print("✅ Health integration working correctly")
+            } else {
+                print("❌ Health integration issue: expected \(expectedHealth), got \(gameScene.healthManager.maxHealth)")
+            }
+        }
+    }
+    
+    func debugMaxHealthSuperPower() {
+        guard let maxHealthProgress = superPowers[.maxHealth] else {
+            print("❌ Max Health super power not found")
+            return
+        }
+        
+        print("🔍 Max Health Super Power Debug:")
+        print("  - Current level: \(maxHealthProgress.level)")
+        print("  - Is maxed: \(maxHealthProgress.isMaxed)")
+        print("  - Max level cap: 6")
+        print("  - Next level cost: \(maxHealthProgress.nextLevelCost)")
+        print("  - Current bonus health: \(getBonusMaxHealth())")
+    }
+    
+    /// Test function to simulate max health upgrade (for debugging)
+    func testMaxHealthUpgrade() {
+        print("🧪 Testing Max Health upgrade process...")
+        debugMaxHealthSuperPower()
+        
+        // Give enough coins for testing
+        if tadpoleCoins < 200 {
+            tadpoleCoins = 200
+            print("💰 Added tadpole coins for testing")
+        }
+        
+        let success = purchaseSuperPower(.maxHealth)
+        print("✅ Purchase attempt result: \(success ? "SUCCESS" : "FAILED")")
+        
+        debugMaxHealthSuperPower()
+        
+        // Test hitting the limit
+        if let progress = superPowers[.maxHealth], progress.level < 6 {
+            print("🔄 Attempting to max out Max Health Super Power...")
+            for i in progress.level..<6 {
+                tadpoleCoins = 1000 // Ensure we have enough coins
+                let levelUp = purchaseSuperPower(.maxHealth)
+                print("  Level \(i+1) -> \(i+2): \(levelUp ? "SUCCESS" : "FAILED")")
+            }
+            
+            // Try to go beyond the limit
+            print("🚫 Attempting to go beyond level 6...")
+            tadpoleCoins = 1000
+            let beyondLimit = purchaseSuperPower(.maxHealth)
+            print("  Beyond level 6: \(beyondLimit ? "SUCCESS (BUG!)" : "CORRECTLY BLOCKED")")
+            
+            debugMaxHealthSuperPower()
+        }
+    }
+    
+    // MARK: - Super Power Persistence
+    
+    private func saveSuperPowerProgress() {
+        let defaults = UserDefaults.standard
+        defaults.set(tadpoleCoins, forKey: "tadpoleCoins")
+        
+        for (type, progress) in superPowers {
+            let key = "superPower_\(type)"
+            defaults.set(progress.level, forKey: key)
+        }
+    }
+    
+    /// Immediately save any pending tadpole coins to persistent storage
+    /// This should be called when the game ends to ensure coins aren't lost
+    func savePendingTadpoleCoins() {
+        guard pendingTadpoleCoins > 0 else { return }
+        
+        let defaults = UserDefaults.standard
+        let currentSavedCoins = defaults.integer(forKey: "tadpoleCoins")
+        let newTotal = currentSavedCoins + pendingTadpoleCoins
+        
+        defaults.set(newTotal, forKey: "tadpoleCoins")
+        defaults.synchronize()
+        
+        print("💰 Saved \(pendingTadpoleCoins) pending tadpole coins. New total: \(newTotal)")
+        
+        // Update in-memory cache
+        tadpoleCoins = newTotal
+        pendingTadpoleCoins = 0
+    }
+    
+    private func loadSuperPowerProgress() {
+        let defaults = UserDefaults.standard
+        var current = defaults.integer(forKey: "tadpoleCoins")
+        // Add any pending newly collected coins
+        if pendingTadpoleCoins > 0 {
+            current += pendingTadpoleCoins
+            // Persist updated total
+            defaults.set(current, forKey: "tadpoleCoins")
+            defaults.synchronize()
+            // Clear pending amount now that it's saved
+            pendingTadpoleCoins = 0
+        }
+        // Update in-memory cache
+        tadpoleCoins = current
+        
+        for powerType in SuperPowerType.allCases {
+            let key = "superPower_\(powerType)"
+            let level = defaults.integer(forKey: key)
+            superPowers[powerType] = SuperPowerProgress(type: powerType, level: level)
+        }
+    }
+    
+    // MARK: - Super Power Effects (for integration with game logic)
+    
+    func getSuperPowerLevel(_ type: SuperPowerType) -> Int {
+        return superPowers[type]?.level ?? 0
+    }
+    
+    func getJumpRangeMultiplier() -> CGFloat {
+        let level = getSuperPowerLevel(.jumpRange)
+        return 1.0 + (CGFloat(level) * 0.1) // 10% per level
+    }
+    
+    func getJumpRecoilReduction() -> TimeInterval {
+        let level = getSuperPowerLevel(.jumpRecoil)
+        return TimeInterval(level * 2) // 2 seconds per level
+    }
+    
+    func getBonusMaxHealth() -> Int {
+        return getSuperPowerLevel(.maxHealth) // 1 heart per level
+    }
+    
+    func getSuperJumpExtension() -> TimeInterval {
+        let level = getSuperPowerLevel(.superJumpFocus)
+        return TimeInterval(level * 2) // 2 seconds per level
+    }
+    
+    // Legacy method - returns total ghost escapes available (use getGhostEscapesRemaining() for remaining count)
+    func getGhostEscapes() -> Int {
+        return getSuperPowerLevel(.ghostMagic) * 2 // 2 escapes per level
+    }
+    
+    // MARK: - Impact Jumps Tracking (Per Level Limit)
+    private var impactJumpDestroysUsed: Int = 0
+    private var currentLevelForImpactJumps: Int = -1
+    
+    func getImpactJumpDestroysRemaining() -> Int {
+        let totalAllowed = getSuperPowerLevel(.impactJumps) * 3 // 3 destroys per level
+        return max(0, totalAllowed - impactJumpDestroysUsed)
+    }
+    
+    func useImpactJumpDestroy() -> Bool {
+        let remaining = getImpactJumpDestroysRemaining()
+        if remaining > 0 {
+            impactJumpDestroysUsed += 1
+            return true
+        }
+        return false
+    }
+    
+    func resetImpactJumpsForNewLevel(_ level: Int) {
+        if level != currentLevelForImpactJumps {
+            currentLevelForImpactJumps = level
+            impactJumpDestroysUsed = 0
+            print("💥 Impact Jumps reset for level \(level). Available destroys: \(getImpactJumpDestroysRemaining())")
+        }
+    }
+    
+    // MARK: - Ghost Escapes Tracking (Per Level Limit)
+    private var currentLevelForGhostEscapes: Int = -1
+    
+    func getGhostEscapesRemaining() -> Int {
+        let totalAllowed = getSuperPowerLevel(.ghostMagic) * 2 // 2 escapes per level
+        // Get the used count from health manager
+        if let gameScene = scene as? GameScene {
+            let usedEscapes = gameScene.healthManager.ghostEscapesUsed
+            return max(0, totalAllowed - usedEscapes)
+        }
+        return totalAllowed
+    }
+    
+    func resetGhostEscapesForNewLevel(_ level: Int) {
+        if level != currentLevelForGhostEscapes {
+            currentLevelForGhostEscapes = level
+            // Reset the counter in health manager through the game scene
+            if let gameScene = scene as? GameScene {
+                gameScene.healthManager.ghostEscapesUsed = 0
+                print("👻 Ghost Escapes reset for level \(level). Available escapes: \(getGhostEscapesRemaining())")
+            }
+        }
+    }
+    
+    // Legacy method for backward compatibility - now checks remaining uses
+    func getImpactJumpDestroys() -> Int {
+        return getImpactJumpDestroysRemaining() > 0 ? 1 : 0 // Can destroy 1 enemy if uses remain
+    }
+    
+    // MARK: - Button tap routing update
     /// Call this from your scene when a node is tapped. It routes based on the node's name.
     /// - Parameter nodeName: The `name` of the tapped node (e.g., "leaderboardButton").
     func handleNamedButtonTap(_ nodeName: String) {
@@ -1201,7 +2174,31 @@ class UIManager: NSObject {
         case "closeTutorialButton":
             // Close the tutorial modal
             hideTutorialModal()
+        case "superPowersButton":
+            // Show the Super Powers menu
+            presentSuperPowersViewController()
+        case "backFromSuperPowersButton":
+            // Return to main menu
+            if let scene = scene {
+                showMainMenu(sceneSize: scene.size)
+            }
         default:
+            // Handle super power upgrade buttons
+            if nodeName.hasPrefix("upgrade_") {
+                let powerName = String(nodeName.dropFirst("upgrade_".count))
+                if let powerType = SuperPowerType.allCases.first(where: { "\($0)" == powerName }) {
+                    let success = purchaseSuperPower(powerType)
+                    if success {
+                        // Add purchase success feedback
+                        triggerTapHaptic()
+                        // Could add a purchase success animation here
+                    } else {
+                        // Add failure feedback (different haptic or sound)
+                        let generator = UINotificationFeedbackGenerator()
+                        generator.notificationOccurred(.error)
+                    }
+                }
+            }
             break
         }
     }
@@ -1215,6 +2212,18 @@ class UIManager: NSObject {
     func handleButtonRelease(node: SKNode?) {
         guard let node = node else { return }
         animateButtonRelease(node)
+    }
+    
+    // MARK: - Super Powers Menu Scroll Support (Legacy - now handled by UIKit)
+    func handleSuperPowersScroll(_ scrollDelta: CGFloat) {
+        // No longer needed with UIKit implementation
+        // UITableView handles scrolling automatically
+    }
+    
+    // Check if super powers menu is currently scrollable (Legacy)
+    func isSuperPowersMenuScrollable() -> Bool {
+        // No longer needed with UIKit implementation
+        return false
     }
     
     // MARK: - Enable Button Input Helper
@@ -1491,6 +2500,711 @@ private extension CGPath {
         let countMinusOneF: CGFloat = CGFloat(countMinusOne)
         let idx: Int = Int((clampedT * countMinusOneF).rounded())
         return points[idx]
+    }
+}
+
+// MARK: - SuperPowersViewController
+
+class SuperPowersViewController: UIViewController {
+    weak var uiManager: UIManager?
+    
+    // UI Components
+    private let backgroundView = UIView()
+    private let backgroundImageView = UIImageView()
+    private let containerView = UIView()
+    private let headerView = UIView()
+    private let titleLabel = UILabel()
+    private let coinsLabel = UILabel()
+    private let tableView = UITableView()
+    private let closeButton = UIButton(type: .system)
+    
+    private var didPerformInitialReload = false
+    
+    // Data
+    private var superPowers: [SuperPowerProgress] = []
+    
+    deinit {
+        print("🧹 SuperPowersViewController deinitializing")
+        uiManager = nil
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupData()
+        setupViews()
+        setupConstraints()
+        setupTableView()
+        
+        // Debug: Force a reload after everything is set up
+        DispatchQueue.main.async {
+            print("🔄 Forcing table view reload after setup")
+            self.tableView.reloadData()
+        }
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        animateIn()
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        if !didPerformInitialReload {
+            didPerformInitialReload = true
+            tableView.reloadData()
+        }
+    }
+    
+    private func setupData() {
+        guard let uiManager = uiManager else { return }
+        
+        // Convert the dictionary to an array for table view, sorted by name for consistency
+        superPowers = SuperPowerType.allCases.compactMap { type in
+            uiManager.superPowers[type]
+        }.sorted { $0.type.name < $1.type.name }
+        
+        print("📊 SuperPowersViewController: Loaded \(superPowers.count) super powers")
+        for power in superPowers {
+            print("  - \(power.type.name): Level \(power.level), Cost: \(power.nextLevelCost), Maxed: \(power.isMaxed)")
+        }
+    }
+    
+    private func setupViews() {
+        view.backgroundColor = UIColor.clear
+        
+        // Optional PNG background image behind the dim view
+        if let bgImage = UIImage(named: "superPowersBG.png") {
+            backgroundImageView.image = bgImage
+            backgroundImageView.contentMode = .scaleAspectFill
+            backgroundImageView.alpha = 1.0
+            backgroundImageView.isUserInteractionEnabled = false
+            view.addSubview(backgroundImageView)
+        }
+        
+        // Background view with blur effect
+        backgroundView.backgroundColor = UIColor.black.withAlphaComponent(0.8)
+        backgroundView.alpha = 0
+        view.addSubview(backgroundView)
+        
+        // Container view with transparent background to show table background, rounded corners and shadow
+        containerView.backgroundColor = UIColor.clear
+        containerView.layer.cornerRadius = 16
+        containerView.layer.shadowColor = UIColor.black.cgColor
+        containerView.layer.shadowOffset = CGSize(width: 0, height: 4)
+        containerView.layer.shadowRadius = 12
+        containerView.layer.shadowOpacity = 0.3
+        containerView.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+        containerView.alpha = 0
+        containerView.clipsToBounds = true
+        view.addSubview(containerView)
+        
+        // Header view with PNG background
+        headerView.backgroundColor = UIColor.clear // Clear background to show the image
+        headerView.layer.maskedCorners = [.layerMaxXMinYCorner, .layerMinXMinYCorner]
+        headerView.layer.cornerRadius = 16
+        headerView.clipsToBounds = true // Ensure image respects rounded corners
+        
+        // Add PNG background image to header
+        if let headerImage = UIImage(named: "superPowersTop.png") {
+            let headerImageView = UIImageView(image: headerImage)
+            headerImageView.contentMode = .scaleAspectFill
+            headerImageView.translatesAutoresizingMaskIntoConstraints = false
+            headerView.addSubview(headerImageView)
+            
+            // Pin the image to fill the entire header view
+            NSLayoutConstraint.activate([
+                headerImageView.topAnchor.constraint(equalTo: headerView.topAnchor),
+                headerImageView.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
+                headerImageView.trailingAnchor.constraint(equalTo: headerView.trailingAnchor),
+                headerImageView.bottomAnchor.constraint(equalTo: headerView.bottomAnchor)
+            ])
+            print("✅ Using superPowersTop.png for header background")
+        } else {
+            // Fallback to blue background if PNG not found
+            headerView.backgroundColor = UIColor.systemBlue
+            print("⚠️ superPowersTop.png not found, using blue fallback")
+        }
+        
+        containerView.addSubview(headerView)
+        
+        // Title label
+        titleLabel.text = "Super Powers"
+        titleLabel.font = UIFont(name: "ArialRoundedMTBold", size: 24)
+        titleLabel.textColor = .white
+        titleLabel.textAlignment = .center
+        headerView.addSubview(titleLabel)
+        
+        // Coins label
+        updateCoinsLabel()
+        coinsLabel.font = UIFont(name: "ArialRoundedMT", size: 18)
+        coinsLabel.textColor = .systemYellow
+        coinsLabel.textAlignment = .center
+        headerView.addSubview(coinsLabel)
+        
+        // Table view with PNG background
+        tableView.backgroundColor = UIColor.clear // Make table view transparent
+        tableView.separatorStyle = .none
+        tableView.showsVerticalScrollIndicator = true
+        tableView.layer.cornerRadius = 12
+        tableView.clipsToBounds = true // Respect rounded corners
+        
+        // Add PNG background image to table view
+        if let tableBackgroundImage = UIImage(named: "superPowersBG.png") {
+            let backgroundImageView = UIImageView(image: tableBackgroundImage)
+            backgroundImageView.contentMode = .scaleAspectFill
+            backgroundImageView.translatesAutoresizingMaskIntoConstraints = false
+            tableView.backgroundView = backgroundImageView
+            print("✅ Using superPowersBG.png for table view background")
+        } else {
+            // Fallback to system background if PNG not found
+            tableView.backgroundColor = UIColor.systemBackground
+            print("⚠️ superPowersBG.png not found, using system background fallback")
+        }
+        
+        containerView.addSubview(tableView)
+        
+        // Close button
+        closeButton.setTitle("Close", for: .normal)
+        closeButton.setTitleColor(.white, for: .normal)
+        closeButton.titleLabel?.font = UIFont(name: "ArialRoundedMT", size: 18)
+        closeButton.backgroundColor = UIColor.systemRed
+        closeButton.layer.cornerRadius = 8
+        closeButton.addTarget(self, action: #selector(closeButtonTapped), for: .touchUpInside)
+        containerView.addSubview(closeButton)
+    }
+    
+    private func setupConstraints() {
+        backgroundView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        headerView.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        coinsLabel.translatesAutoresizingMaskIntoConstraints = false
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            // Background view
+            backgroundView.topAnchor.constraint(equalTo: view.topAnchor),
+            backgroundView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backgroundView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            backgroundView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        
+        // Pin background image if present
+        if backgroundImageView.superview != nil {
+            backgroundImageView.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                backgroundImageView.topAnchor.constraint(equalTo: view.topAnchor),
+                backgroundImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                backgroundImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                backgroundImageView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            ])
+        }
+        
+        NSLayoutConstraint.activate([
+            // Container view – pin to safe area with insets (prevents table from collapsing)
+            containerView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            containerView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            containerView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 40),
+            containerView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -40),
+            
+            // Header view
+            headerView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            headerView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            headerView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            headerView.heightAnchor.constraint(equalToConstant: 100),
+            
+            // Title label
+            titleLabel.topAnchor.constraint(equalTo: headerView.topAnchor, constant: 16),
+            titleLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 16),
+            titleLabel.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -16),
+            
+            // Coins label
+            coinsLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+            coinsLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 16),
+            coinsLabel.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -16),
+            coinsLabel.bottomAnchor.constraint(equalTo: headerView.bottomAnchor, constant: -16),
+            
+            // Table view - ensure it has enough space
+            tableView.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 8),
+            tableView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
+            tableView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -8),
+            tableView.bottomAnchor.constraint(equalTo: closeButton.topAnchor, constant: -12),
+            
+            // Close button
+            closeButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            closeButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            closeButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -16),
+            closeButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+    }
+    
+    private func setupTableView() {
+        tableView.delegate = self
+        tableView.dataSource = self
+        tableView.register(SuperPowerCell.self, forCellReuseIdentifier: "SuperPowerCell")
+        tableView.estimatedRowHeight = 120
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.allowsSelection = false
+        tableView.bounces = true
+        tableView.alwaysBounceVertical = true
+        tableView.contentInsetAdjustmentBehavior = .never
+        
+        // Add some padding to the table view content
+        tableView.contentInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+        tableView.tableFooterView = UIView()
+        tableView.scrollIndicatorInsets = tableView.contentInset
+        
+        print("📋 Table view setup complete. Estimated row height: 120pt")
+    }
+    
+    private func updateCoinsLabel() {
+        let coins = uiManager?.tadpoleCoins ?? 0
+        coinsLabel.font = UIFont(name: "ArialRoundedMT", size: 18)
+
+        coinsLabel.text = "\(coins) Tadpole Coins"
+    }
+    
+    private func animateIn() {
+        UIView.animate(withDuration: 0.6, delay: 0, options: [.curveEaseOut]) {
+            self.backgroundView.alpha = 1
+        }
+        
+        UIView.animate(withDuration: 0.5, delay: 0.1, usingSpringWithDamping: 0.8, initialSpringVelocity: 0.3, options: [.curveEaseOut]) {
+            self.containerView.transform = .identity
+            self.containerView.alpha = 1
+        }
+    }
+    
+    private func animateOut(completion: @escaping () -> Void) {
+        UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseIn]) {
+            self.backgroundView.alpha = 0
+            self.containerView.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+            self.containerView.alpha = 0
+        } completion: { _ in
+            completion()
+        }
+    }
+    
+    @objc private func closeButtonTapped() {
+        animateOut { [weak self] in
+            guard let self = self else { return }
+            self.dismiss(animated: false) {
+                // Restore game UI
+                guard let uiManager = self.uiManager,
+                      let scene = uiManager.scene as? GameScene else {
+                    print("⚠️ closeButtonTapped: UIManager or scene is nil")
+                    return
+                }
+                uiManager.setUIVisible(true)
+                // Return to main menu
+                uiManager.showMainMenu(sceneSize: scene.size)
+            }
+        }
+    }
+    
+    private func purchaseSuperPower(_ powerType: SuperPowerType) {
+        guard let uiManager = uiManager else { return }
+        
+        print("💰 Attempting to purchase \(powerType.name)")
+        
+        let success = uiManager.purchaseSuperPower(powerType)
+        
+        if success {
+            print("✅ Purchase successful for \(powerType.name)")
+            
+            // Update local data
+            setupData()
+            // Update coins display
+            updateCoinsLabel()
+            
+            // Reload table with animation
+            DispatchQueue.main.async {
+                self.tableView.performBatchUpdates({
+                    self.tableView.reloadData()
+                }, completion: nil)
+            }
+            
+            // Add purchase success haptic feedback
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.impactOccurred()
+            
+            // Add a brief success animation
+            animateCoinsUpdate()
+        } else {
+            print("❌ Purchase failed for \(powerType.name)")
+            
+            // Add failure feedback
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.error)
+            
+            // Show brief error feedback
+            showPurchaseError()
+        }
+    }
+    
+    private func showPurchaseError() {
+        // Briefly flash the coins label red to indicate insufficient funds
+        let originalColor = coinsLabel.textColor
+        UIView.animate(withDuration: 0.2) {
+            self.coinsLabel.textColor = .systemRed
+        } completion: { _ in
+            UIView.animate(withDuration: 0.2) {
+                self.coinsLabel.textColor = originalColor
+            }
+        }
+    }
+    
+    private func animateCoinsUpdate() {
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut]) {
+            self.coinsLabel.transform = CGAffineTransform(scaleX: 1.1, y: 1.1)
+        } completion: { _ in
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseIn]) {
+                self.coinsLabel.transform = .identity
+            }
+        }
+    }
+}
+
+// MARK: - UITableViewDataSource & UITableViewDelegate
+
+extension SuperPowersViewController: UITableViewDataSource, UITableViewDelegate {
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        print("📊 Table view requesting number of rows: \(superPowers.count)")
+        return superPowers.count
+    }
+    
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "SuperPowerCell", for: indexPath) as! SuperPowerCell
+        let power = superPowers[indexPath.row]
+        let coins = uiManager?.tadpoleCoins ?? 0
+        
+        print("📱 Configuring cell for row \(indexPath.row): \(power.type.name)")
+        
+        cell.configure(with: power, coins: coins)
+        cell.onUpgrade = { [weak self] powerType in
+            self?.purchaseSuperPower(powerType)
+        }
+        
+        return cell
+    }
+    
+    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        return UITableView.automaticDimension
+    }
+    
+    func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
+        return 120
+    }
+}
+
+// MARK: - SuperPowerCell
+
+class SuperPowerCell: UITableViewCell {
+    var onUpgrade: ((SuperPowerType) -> Void)?
+    private var powerType: SuperPowerType?
+    
+    // UI Components
+    private let containerView = UIView()
+    private let iconImageView = UIImageView()
+    private let titleLabel = UILabel()
+    private let levelLabel = UILabel()
+    private let descriptionLabel = UILabel()
+    private let costLabel = UILabel()
+    private let upgradeButton = UIButton(type: .system)
+    private let maxedLabel = UILabel()
+    
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        setupViews()
+        setupConstraints()
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    deinit {
+        print("🧹 SuperPowerCell deinitializing")
+        onUpgrade = nil
+        powerType = nil
+    }
+    
+    private func setupViews() {
+        selectionStyle = .none
+        backgroundColor = .clear
+        
+        // Container view with rounded corners and semi-transparent background
+        containerView.backgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.8) // Semi-transparent
+        containerView.layer.cornerRadius = 12
+        containerView.layer.borderWidth = 1
+        containerView.layer.borderColor = UIColor.separator.withAlphaComponent(0.6).cgColor // Lighter border
+        contentView.addSubview(containerView)
+        
+        // Icon image view
+        iconImageView.contentMode = .scaleAspectFit
+        iconImageView.layer.cornerRadius = 4
+        iconImageView.backgroundColor = UIColor.tertiarySystemBackground
+        containerView.addSubview(iconImageView)
+        
+        // Title label
+        titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .bold)
+        titleLabel.textColor = UIColor.label
+        containerView.addSubview(titleLabel)
+        
+        // Level label
+        levelLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        levelLabel.textColor = UIColor.secondaryLabel
+        containerView.addSubview(levelLabel)
+        
+        // Description label
+        descriptionLabel.font = UIFont.systemFont(ofSize: 14, weight: .regular)
+        descriptionLabel.textColor = UIColor.secondaryLabel
+        descriptionLabel.numberOfLines = 2
+        containerView.addSubview(descriptionLabel)
+        
+        // Cost label
+        costLabel.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        costLabel.textAlignment = .right
+        containerView.addSubview(costLabel)
+        
+        // Upgrade button
+        upgradeButton.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        upgradeButton.layer.cornerRadius = 8
+        upgradeButton.addTarget(self, action: #selector(upgradeButtonTapped), for: .touchUpInside)
+        containerView.addSubview(upgradeButton)
+        
+        // Maxed label
+        maxedLabel.text = "MAX LEVEL"
+        maxedLabel.font = UIFont.systemFont(ofSize: 14, weight: .bold)
+        maxedLabel.textColor = UIColor.systemGreen
+        maxedLabel.textAlignment = .center
+        maxedLabel.isHidden = true
+        containerView.addSubview(maxedLabel)
+    }
+    
+    private func setupConstraints() {
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        iconImageView.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        levelLabel.translatesAutoresizingMaskIntoConstraints = false
+        descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
+        costLabel.translatesAutoresizingMaskIntoConstraints = false
+        upgradeButton.translatesAutoresizingMaskIntoConstraints = false
+        maxedLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            // Container view with proper margins
+            containerView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
+            containerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            containerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            containerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+            containerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 100),
+            
+            // Icon image view - positioned at fixed distance from left edge for consistent alignment
+            iconImageView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            iconImageView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 16),
+            iconImageView.widthAnchor.constraint(equalToConstant: 44),
+            iconImageView.heightAnchor.constraint(equalToConstant: 44),
+            
+            // Title label
+            titleLabel.leadingAnchor.constraint(equalTo: iconImageView.trailingAnchor, constant: 12),
+            titleLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 16),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: costLabel.leadingAnchor, constant: -8),
+            
+            // Level label
+            levelLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            levelLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            levelLabel.trailingAnchor.constraint(lessThanOrEqualTo: costLabel.leadingAnchor, constant: -8),
+            
+            // Description label
+            descriptionLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            descriptionLabel.topAnchor.constraint(equalTo: levelLabel.bottomAnchor, constant: 6),
+            descriptionLabel.trailingAnchor.constraint(lessThanOrEqualTo: costLabel.leadingAnchor, constant: -8),
+            descriptionLabel.bottomAnchor.constraint(lessThanOrEqualTo: containerView.bottomAnchor, constant: -16),
+            
+            // Cost label
+            costLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            costLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 16),
+            costLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 100),
+            
+            // Upgrade button
+            upgradeButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            upgradeButton.topAnchor.constraint(equalTo: costLabel.bottomAnchor, constant: 8),
+            upgradeButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 100),
+            upgradeButton.heightAnchor.constraint(equalToConstant: 36),
+            upgradeButton.bottomAnchor.constraint(lessThanOrEqualTo: containerView.bottomAnchor, constant: -16),
+            
+            // Maxed label
+            maxedLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            maxedLabel.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+            maxedLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 100)
+        ])
+    }
+    
+    func configure(with power: SuperPowerProgress, coins: Int) {
+        powerType = power.type
+        
+        // Icon - load PNG image, create placeholder if not found
+        let imageName = power.type.imageName
+        if let image = UIImage(named: imageName) {
+            iconImageView.image = image
+        } else {
+            // Create a placeholder image with the power type name if PNG not found
+            iconImageView.image = createPlaceholderImage(for: power.type, size: CGSize(width: 40, height: 40))
+            
+            #if DEBUG
+            print("⚠️ Missing PNG icon for \(power.type.name): \(imageName)")
+            #endif
+        }
+        
+        // Title and level
+        if power.isMaxed {
+            titleLabel.text = power.type.name
+            titleLabel.textColor = UIColor.systemGreen
+            levelLabel.text = "MAX LEVEL"
+            levelLabel.textColor = UIColor.systemGreen
+        } else {
+            titleLabel.text = power.type.name
+            titleLabel.textColor = UIColor.label
+            levelLabel.text = "Level \(power.level)"
+            levelLabel.textColor = UIColor.secondaryLabel
+        }
+        
+        // Description
+        descriptionLabel.text = power.type.effectDescription(level: max(1, power.level))
+        
+        // Cost and button
+        if power.isMaxed {
+            costLabel.isHidden = true
+            upgradeButton.isHidden = true
+            maxedLabel.isHidden = false
+        } else {
+            let cost = power.nextLevelCost
+            let canAfford = coins >= cost
+            
+            // Create attributed string with star image
+            let costText = "Cost: \(cost) "
+            let attributedString = NSMutableAttributedString(string: costText)
+            
+            // Add star image if available
+            if let starImage = UIImage(named: "star.png") {
+                let attachment = NSTextAttachment()
+                attachment.image = starImage
+                // Scale the image to match text height
+                let fontSize = costLabel.font.pointSize
+                let imageSize = CGSize(width: fontSize, height: fontSize)
+                attachment.bounds = CGRect(origin: CGPoint(x: 0, y: -fontSize * 0.1), size: imageSize)
+                
+                let imageAttributedString = NSAttributedString(attachment: attachment)
+                attributedString.append(imageAttributedString)
+            } else {
+                // Fallback to star emoji if image not found
+                attributedString.append(NSAttributedString(string: "⭐"))
+            }
+            
+            costLabel.attributedText = attributedString
+            costLabel.textColor = canAfford ? UIColor.systemYellow : UIColor.systemRed
+            costLabel.isHidden = false
+            
+            upgradeButton.setTitle(canAfford ? "UPGRADE" : "NEED MORE", for: .normal)
+            upgradeButton.backgroundColor = canAfford ? UIColor.systemGreen : UIColor.systemGray
+            upgradeButton.setTitleColor(.white, for: .normal)
+            upgradeButton.isEnabled = canAfford
+            upgradeButton.alpha = canAfford ? 1.0 : 0.6
+            upgradeButton.isHidden = false
+            
+            maxedLabel.isHidden = true
+        }
+    }
+    
+    private func createPlaceholderImage(for powerType: SuperPowerType, size: CGSize) -> UIImage? {
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { context in
+            // Draw a rounded rectangle background
+            let rect = CGRect(origin: .zero, size: size)
+            let path = UIBezierPath(roundedRect: rect, cornerRadius: 8)
+            
+            // Use different colors for different power types
+            let backgroundColor: UIColor
+            switch powerType {
+            case .jumpRange:
+                backgroundColor = UIColor.systemGreen.withAlphaComponent(0.3)
+            case .jumpRecoil:
+                backgroundColor = UIColor.systemYellow.withAlphaComponent(0.3)
+            case .maxHealth:
+                backgroundColor = UIColor.systemRed.withAlphaComponent(0.3)
+            case .superJumpFocus:
+                backgroundColor = UIColor.systemBlue.withAlphaComponent(0.3)
+            case .ghostMagic:
+                backgroundColor = UIColor.systemPurple.withAlphaComponent(0.3)
+            case .impactJumps:
+                backgroundColor = UIColor.systemOrange.withAlphaComponent(0.3)
+            }
+            
+            backgroundColor.setFill()
+            path.fill()
+            
+            // Draw border
+            UIColor.systemGray.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+            
+            // Draw abbreviated text
+            let abbreviation: String
+            switch powerType {
+            case .jumpRange: abbreviation = "JR"
+            case .jumpRecoil: abbreviation = "JRC"
+            case .maxHealth: abbreviation = "HP"
+            case .superJumpFocus: abbreviation = "SJ"
+            case .ghostMagic: abbreviation = "GM"
+            case .impactJumps: abbreviation = "IJ"
+            }
+            
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: size.height * 0.3, weight: .bold),
+                .foregroundColor: UIColor.label
+            ]
+            let attributedString = NSAttributedString(string: abbreviation, attributes: attributes)
+            let textSize = attributedString.size()
+            let drawPoint = CGPoint(
+                x: (size.width - textSize.width) / 2,
+                y: (size.height - textSize.height) / 2
+            )
+            attributedString.draw(at: drawPoint)
+        }
+    }
+
+    private func createEmojiImage(_ emoji: String, size: CGSize) -> UIImage? {
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { context in
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: size.height * 0.8),
+                .foregroundColor: UIColor.label
+            ]
+            let attributedString = NSAttributedString(string: emoji, attributes: attributes)
+            let textSize = attributedString.size()
+            let drawPoint = CGPoint(
+                x: (size.width - textSize.width) / 2,
+                y: (size.height - textSize.height) / 2
+            )
+            attributedString.draw(at: drawPoint)
+        }
+    }
+    
+    @objc private func upgradeButtonTapped() {
+        guard let powerType = powerType else { return }
+        
+        // Add button press animation
+        UIView.animate(withDuration: 0.1, delay: 0, options: [.curveEaseOut]) {
+            self.upgradeButton.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
+        } completion: { _ in
+            UIView.animate(withDuration: 0.1, delay: 0, options: [.curveEaseIn]) {
+                self.upgradeButton.transform = .identity
+            }
+        }
+        
+        onUpgrade?(powerType)
     }
 }
 

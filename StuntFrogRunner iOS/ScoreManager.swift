@@ -36,6 +36,7 @@ class ScoreManager {
     private var sessionStartScore: Int = 0  // Score at the beginning of current session
     private var currentLevel: Int = 1
     private var levelsCompletedThisSession: Int = 0
+    private var maxCompletedLevel: Int = 0  // Highest level ever completed
     
     var highScore: Int {
         didSet {
@@ -86,7 +87,9 @@ class ScoreManager {
     private init() {
         self.highScore = UserDefaults.standard.integer(forKey: "HighScore")
         
-        // Load persistent level progression data if score carryover is enabled
+        // Load persistent level progression data
+        self.maxCompletedLevel = UserDefaults.standard.integer(forKey: "MaxCompletedLevel")
+        
         if GameConfig.enableScoreCarryover {
             self.currentLevel = max(1, UserDefaults.standard.integer(forKey: "CurrentLevel"))
             self.score = UserDefaults.standard.integer(forKey: "PersistentScore")
@@ -97,6 +100,8 @@ class ScoreManager {
             self.score = 0
             self.sessionStartScore = 0
         }
+        
+        print("🎮 ScoreManager: Max completed level = \(maxCompletedLevel)")
     }
     
     // MARK: - Score Management
@@ -116,7 +121,7 @@ class ScoreManager {
         levelsCompletedThisSession = 0
         sessionStartScore = 0
         
-        // Clear persistent data
+        // Clear persistent data but keep max completed level
         UserDefaults.standard.removeObject(forKey: "CurrentLevel")
         UserDefaults.standard.removeObject(forKey: "PersistentScore")
         UserDefaults.standard.synchronize()
@@ -132,6 +137,9 @@ class ScoreManager {
             currentLevel += 1
             levelsCompletedThisSession += 1
             
+            // Update max completed level
+            maxCompletedLevel = max(maxCompletedLevel, currentLevel - 1)
+            
             // Award level completion bonus
             let bonus = GameConfig.levelCompletionBonus
             score += bonus
@@ -139,6 +147,7 @@ class ScoreManager {
             print("🎮 ScoreManager: Level \(currentLevel - 1) completed!")
             print("🎮 Level completion bonus: +\(bonus) points")
             print("🎮 Advanced to Level \(currentLevel)")
+            print("🎮 Max completed level: \(maxCompletedLevel)")
             print("🎮 Total score: \(score)")
             
             // Save progress
@@ -164,11 +173,119 @@ class ScoreManager {
         if GameConfig.enableScoreCarryover {
             UserDefaults.standard.set(currentLevel, forKey: "CurrentLevel")
             UserDefaults.standard.set(score, forKey: "PersistentScore")
+            UserDefaults.standard.set(maxCompletedLevel, forKey: "MaxCompletedLevel")
             UserDefaults.standard.synchronize()
         }
     }
     
     func isHighScore() -> Bool {
         return score > highScore
+    }
+    
+    // MARK: - Level Management
+    
+    /// Get the highest level ever completed by the player
+    func getMaxCompletedLevel() -> Int {
+        return maxCompletedLevel
+    }
+    
+    /// Check if the player should continue from their last level or start fresh
+    func shouldContinueFromLastLevel() -> Bool {
+        return GameConfig.enableScoreCarryover && maxCompletedLevel > 0
+    }
+    
+    /// Get the recommended starting level (either 1 for new players, or last completed + 1)
+    func getRecommendedStartingLevel() -> Int {
+        if shouldContinueFromLastLevel() {
+            return min(maxCompletedLevel + 1, maxCompletedLevel + 1)  // Start from the next uncompleted level
+        } else {
+            return 1
+        }
+    }
+    
+    /// Start a new game from the beginning (Level 1)
+    func startFreshGame() {
+        score = 0
+        currentLevel = 1
+        levelsCompletedThisSession = 0
+        sessionStartScore = 0
+        
+        // Clear current progress but keep max completed level
+        UserDefaults.standard.removeObject(forKey: "CurrentLevel") 
+        UserDefaults.standard.removeObject(forKey: "PersistentScore")
+        UserDefaults.standard.synchronize()
+        
+        print("🎮 ScoreManager: Starting fresh game from Level 1")
+    }
+    
+    /// Continue from the last completed level
+    func continueFromLastLevel() {
+        if shouldContinueFromLastLevel() {
+            // Reset current progress but start from recommended level
+            score = 0
+            currentLevel = getRecommendedStartingLevel()
+            levelsCompletedThisSession = 0
+            sessionStartScore = 0
+            
+            // Clear persistent progress since we're starting fresh from higher level
+            UserDefaults.standard.removeObject(forKey: "CurrentLevel")
+            UserDefaults.standard.removeObject(forKey: "PersistentScore") 
+            UserDefaults.standard.synchronize()
+            
+            print("🎮 ScoreManager: Continuing from Level \(currentLevel) (last completed: \(maxCompletedLevel))")
+        } else {
+            startFreshGame()
+        }
+    }
+    
+    /// Reset ALL progress including max completed level (for complete game reset)
+    func resetAllProgress() {
+        score = 0
+        currentLevel = 1
+        levelsCompletedThisSession = 0
+        sessionStartScore = 0
+        maxCompletedLevel = 0
+        
+        // Clear ALL persistent data
+        UserDefaults.standard.removeObject(forKey: "CurrentLevel")
+        UserDefaults.standard.removeObject(forKey: "PersistentScore")
+        UserDefaults.standard.removeObject(forKey: "MaxCompletedLevel")
+        UserDefaults.standard.synchronize()
+        
+        print("🎮 ScoreManager: ALL PROGRESS RESET - starting completely fresh")
+    }
+    
+    /// Test method to manually set the max completed level (for testing)
+    func debugSetMaxCompletedLevel(_ level: Int) {
+        maxCompletedLevel = level
+        UserDefaults.standard.set(maxCompletedLevel, forKey: "MaxCompletedLevel")
+        UserDefaults.standard.synchronize()
+        print("🧪 DEBUG: Set max completed level to \(level)")
+    }
+    
+    /// Debug method to show current state
+    func debugShowState() {
+        print("🎮 SCOREMANAGER DEBUG STATE:")
+        print("  - Current Level: \(currentLevel)")
+        print("  - Score: \(score)")
+        print("  - Max Completed Level: \(maxCompletedLevel)")
+        print("  - Should Continue: \(shouldContinueFromLastLevel())")
+        print("  - Recommended Starting Level: \(getRecommendedStartingLevel())")
+        print("  - Score Carryover Enabled: \(GameConfig.enableScoreCarryover)")
+    }
+    
+    // MARK: - Debug Methods for Level Continuation Testing
+    
+    /// Test method to simulate completing multiple levels for testing
+    func debugSimulateProgressToLevel(_ targetLevel: Int) {
+        print("🧪 DEBUG: Simulating progress to Level \(targetLevel)")
+        
+        for level in 1..<targetLevel {
+            currentLevel = level
+            completeLevel()
+            print("📈 Simulated completion of Level \(level)")
+        }
+        
+        debugShowState()
     }
 }

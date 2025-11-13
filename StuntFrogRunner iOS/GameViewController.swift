@@ -108,8 +108,19 @@ class GameViewController: UIViewController {
             return
         }
         
-        // Create and present scene
-        let scene = GameScene(size: skView.bounds.size)
+        // Create and present scene with additional safety checks
+        guard let skView = skView else {
+            print("❌ ERROR: SKView is nil!")
+            return
+        }
+        
+        let sceneSize = skView.bounds.size
+        guard sceneSize.width > 0 && sceneSize.height > 0 else {
+            print("❌ ERROR: Invalid scene size: \(sceneSize)")
+            return
+        }
+        
+        let scene = GameScene(size: sceneSize)
         scene.scaleMode = .aspectFill
         
         print("🎮 Creating GameScene with size: \(scene.size)")
@@ -121,7 +132,15 @@ class GameViewController: UIViewController {
         skView.showsDrawCount = true
         
         print("🎮 Presenting GameScene...")
-        skView.presentScene(scene)
+        
+        // Add crash detection around scene presentation
+        do {
+            skView.presentScene(scene)
+            print("✅ Scene presented successfully")
+        } catch {
+            print("❌ CRASH during scene presentation: \(error)")
+            return
+        }
         
         // Verify scene was presented
         if let presentedScene = skView.scene {

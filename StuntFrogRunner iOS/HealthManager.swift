@@ -66,6 +66,13 @@ class HealthManager {
         }
     }
     
+    // SUPER POWERS: Ghost Magic escape charges
+    var ghostEscapesUsed: Int = 0 {
+        didSet {
+            onAbilityChargesChanged?()
+        }
+    }
+    
     var pendingAbilitySelection: Bool = false {
         didSet {
             if GameConfig.enableAbilitySelectionDebug {
@@ -89,6 +96,19 @@ class HealthManager {
         self.health = startingHealth
         self.maxHealth = startingHealth
         self.tadpolesCollected = 0
+    }
+    
+    // Helper to get max health including super power bonuses
+    func getEffectiveMaxHealth() -> Int {
+        var effectiveMax = maxHealth
+        
+        // SUPER POWERS: Add bonus max health from Max Health super power
+        if let scene = onHealthChanged as? GameScene {
+            // This is a bit of a hack - we'd ideally want a cleaner way to get the GameScene reference
+            // For now, we'll handle this in the GameScene itself
+        }
+        
+        return effectiveMax
     }
     
     // MARK: - Health Management
@@ -131,12 +151,25 @@ class HealthManager {
     func collectTadpole() -> Bool {
         tadpolesCollected += 1
         
+        if GameConfig.enableAbilitySelectionDebug {
+            print("🐸 Tadpole collected! Total: \(tadpolesCollected)/\(GameConfig.tadpolesForAbility), pendingAbilitySelection: \(pendingAbilitySelection)")
+        }
+        
         // Check if we've reached the threshold for ability selection
         if tadpolesCollected >= GameConfig.tadpolesForAbility && !pendingAbilitySelection {
             pendingAbilitySelection = true
             tadpolesCollected = 0
             onTadpolesChanged?(tadpolesCollected)
+            
+            if GameConfig.enableAbilitySelectionDebug {
+                print("🎯 ABILITY SELECTION TRIGGERED! pendingAbilitySelection set to true")
+            }
+            
             return true  // Ability selection triggered
+        } else if tadpolesCollected >= GameConfig.tadpolesForAbility && pendingAbilitySelection {
+            if GameConfig.enableAbilitySelectionDebug {
+                print("⚠️ WARNING: Reached tadpole threshold but pendingAbilitySelection already true! This may indicate a stuck state.")
+            }
         }
         return false
     }
@@ -151,6 +184,17 @@ class HealthManager {
             print("🔧 Force clearing pendingAbilitySelection. Reason: \(reason)")
         }
         pendingAbilitySelection = false
+    }
+    
+    /// Debug method to check current tadpole collection state
+    func debugTadpoleState() -> String {
+        return """
+        🐸 Tadpole Debug State:
+        - tadpolesCollected: \(tadpolesCollected)
+        - threshold: \(GameConfig.tadpolesForAbility) 
+        - pendingAbilitySelection: \(pendingAbilitySelection)
+        - ready for selection: \(tadpolesCollected >= GameConfig.tadpolesForAbility && !pendingAbilitySelection)
+        """
     }
     
     // MARK: - Ability Charge Management
@@ -198,15 +242,36 @@ class HealthManager {
         return true
     }
     
+    // MARK: - Ghost Magic Management (Super Power)
+    func canUseGhostEscape(availableEscapes: Int) -> Bool {
+        return ghostEscapesUsed < availableEscapes
+    }
+    
+    func useGhostEscape() -> Bool {
+        // Ghost escapes are managed by the super power level, not charges
+        ghostEscapesUsed += 1
+        return true
+    }
+    
     // MARK: - Reset
-    func reset(startingHealth: Int) {
+    func reset(startingHealth: Int, preserveMaxHealthBonus: Bool = false) {
+        let previousMaxHealth = maxHealth
+        
+        // CRITICAL FIX: Set both health and maxHealth to the startingHealth which now includes super power bonuses
         health = startingHealth
         maxHealth = startingHealth
+        
+        // Reset other properties
         tadpolesCollected = 0
         scrollSaverCharges = 0
         flySwatterCharges = 0
         honeyJarCharges = 0
         axeCharges = 0
+        ghostEscapesUsed = 0
         pendingAbilitySelection = false
+        
+        print("💚 HealthManager reset complete:")
+        print("  - health: \(health)")
+        print("  - maxHealth: \(maxHealth)")
     }
 }

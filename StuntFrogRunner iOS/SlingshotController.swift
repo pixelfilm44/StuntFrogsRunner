@@ -56,7 +56,7 @@ class SlingshotController {
         }
     }
     
-    func handleTouchEnded(at location: CGPoint, frogScreenPosition: CGPoint, frogWorldPosition: CGPoint, worldOffset: CGFloat, superJumpActive: Bool) -> CGPoint? {
+    func handleTouchEnded(at location: CGPoint, frogScreenPosition: CGPoint, frogWorldPosition: CGPoint, worldOffset: CGFloat, superJumpActive: Bool, jumpRangeMultiplier: CGFloat = 1.0) -> CGPoint? {
         guard slingshotActive else { return nil }
         
         // Use the locked screen position from when aiming began, not the current position
@@ -83,8 +83,10 @@ class SlingshotController {
         soundController.playSlingshotSound(pullDistance: normalizedPull * 100.0)
         
         let distanceMultiplier = superJumpActive ? GameConfig.superJumpDistanceMultiplier : 1.0
-        let targetOffsetX = -cos(angle) * pullDistance * 1.5 * distanceMultiplier
-        let targetOffsetY = -sin(angle) * pullDistance * 1.5 * distanceMultiplier
+        // Apply the jump range multiplier from super powers
+        let finalDistanceMultiplier = distanceMultiplier * jumpRangeMultiplier
+        let targetOffsetX = -cos(angle) * pullDistance * 1.5 * finalDistanceMultiplier
+        let targetOffsetY = -sin(angle) * pullDistance * 1.5 * finalDistanceMultiplier
         
         // Calculate world position
         let targetWorldX = frogWorldPosition.x + targetOffsetX
@@ -93,11 +95,11 @@ class SlingshotController {
         slingshotActive = false
         clearVisuals()
         
-        print("🎯 Target: world(\(targetWorldX), \(targetWorldY))")
+        print("🎯 Target: world(\(targetWorldX), \(targetWorldY)) - Jump Range Multiplier: \(jumpRangeMultiplier)")
         return CGPoint(x: targetWorldX, y: targetWorldY)
     }
     
-    func drawSlingshot(frogScreenPosition: CGPoint, frogWorldPosition: CGPoint, superJumpActive: Bool, lilyPads: [LilyPad], worldNode: SKNode, scene: SKScene, worldOffset: CGFloat) {
+    func drawSlingshot(frogScreenPosition: CGPoint, frogWorldPosition: CGPoint, superJumpActive: Bool, lilyPads: [LilyPad], worldNode: SKNode, scene: SKScene, worldOffset: CGFloat, jumpRangeMultiplier: CGFloat = 1.0) {
         clearVisuals()
         
        
@@ -128,8 +130,10 @@ class SlingshotController {
         let pullDistance = min(sqrt(dx * dx + dy * dy), maxPull)
         let angle = atan2(dy, dx)
         let distanceMultiplier = superJumpActive ? GameConfig.superJumpDistanceMultiplier : 1.0
-        let targetOffsetX = -cos(angle) * pullDistance * 1.5 * distanceMultiplier
-        let targetOffsetY = -sin(angle) * pullDistance * 1.5 * distanceMultiplier
+        // Apply the jump range multiplier from super powers
+        let finalDistanceMultiplier = distanceMultiplier * jumpRangeMultiplier
+        let targetOffsetX = -cos(angle) * pullDistance * 1.5 * finalDistanceMultiplier
+        let targetOffsetY = -sin(angle) * pullDistance * 1.5 * finalDistanceMultiplier
         
         // If below dead zone, don't draw target reticle (keep nearest pad highlight only)
         if pullDistance < GameConfig.minPullDistance {
@@ -139,21 +143,31 @@ class SlingshotController {
         let targetScreenX = lockedFrogPos.x + targetOffsetX
         let targetScreenY = lockedFrogPos.y + targetOffsetY
         
-        // Draw target reticle
-        targetReticle = SKShapeNode(circleOfRadius: 35)
+        // Draw target reticle - make it slightly larger if jump range is boosted
+        let reticleRadius: CGFloat = jumpRangeMultiplier > 1.0 ? 40 : 35
+        targetReticle = SKShapeNode(circleOfRadius: reticleRadius)
         targetReticle?.position = CGPoint(x: targetScreenX, y: targetScreenY)
-        targetReticle?.strokeColor = superJumpActive ? .yellow : .green
-        targetReticle?.fillColor = (superJumpActive ? UIColor.yellow : UIColor.green).withAlphaComponent(0.3)
+        
+        // Color indication for boosted jump range
+        if jumpRangeMultiplier > 1.0 {
+            targetReticle?.strokeColor = superJumpActive ? .orange : .cyan
+            targetReticle?.fillColor = (superJumpActive ? UIColor.orange : UIColor.cyan).withAlphaComponent(0.3)
+        } else {
+            targetReticle?.strokeColor = superJumpActive ? .yellow : .green
+            targetReticle?.fillColor = (superJumpActive ? UIColor.yellow : UIColor.green).withAlphaComponent(0.3)
+        }
+        
         targetReticle?.lineWidth = 4
         targetReticle?.zPosition = 97
         
         // Add crosshair
         let crosshair = SKShapeNode()
         let crossPath = CGMutablePath()
-        crossPath.move(to: CGPoint(x: -20, y: 0))
-        crossPath.addLine(to: CGPoint(x: 20, y: 0))
-        crossPath.move(to: CGPoint(x: 0, y: -20))
-        crossPath.addLine(to: CGPoint(x: 0, y: 20))
+        let crossSize: CGFloat = jumpRangeMultiplier > 1.0 ? 25 : 20
+        crossPath.move(to: CGPoint(x: -crossSize, y: 0))
+        crossPath.addLine(to: CGPoint(x: crossSize, y: 0))
+        crossPath.move(to: CGPoint(x: 0, y: -crossSize))
+        crossPath.addLine(to: CGPoint(x: 0, y: crossSize))
         crosshair.path = crossPath
         crosshair.strokeColor = .white
         crosshair.lineWidth = 2
@@ -161,10 +175,11 @@ class SlingshotController {
         
         scene.addChild(targetReticle!)
         
-        // Pulsing animation
+        // Pulsing animation - faster for boosted jump range
+        let pulseDuration: TimeInterval = jumpRangeMultiplier > 1.0 ? 0.25 : 0.3
         let pulse = SKAction.sequence([
-            SKAction.scale(to: 1.2, duration: 0.3),
-            SKAction.scale(to: 1.0, duration: 0.3)
+            SKAction.scale(to: 1.2, duration: pulseDuration),
+            SKAction.scale(to: 1.0, duration: pulseDuration)
         ])
         targetReticle?.run(SKAction.repeatForever(pulse))
     }

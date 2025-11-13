@@ -595,5 +595,73 @@ class EffectsManager {
             createIceEffect(at: position, in: scene)
         }
     }
+    
+    func createExplosionEffect(at position: CGPoint) {
+        guard let scene = scene else { return }
+        
+        // Central explosion burst
+        let explosionBase = SKShapeNode(circleOfRadius: 30)
+        explosionBase.fillColor = UIColor(red: 1.0, green: 0.6, blue: 0.0, alpha: 0.8)
+        explosionBase.strokeColor = UIColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0)
+        explosionBase.lineWidth = 4
+        explosionBase.position = position
+        explosionBase.zPosition = 150
+        scene.addChild(explosionBase)
+        
+        // Explosion animation
+        let explosionAction = SKAction.sequence([
+            SKAction.group([
+                SKAction.scale(to: 3.0, duration: 0.4),
+                SKAction.fadeOut(withDuration: 0.4)
+            ]),
+            SKAction.removeFromParent()
+        ])
+        explosionBase.run(explosionAction)
+        
+        // Explosion particles
+        for i in 0..<12 {
+            let angle = CGFloat(i) * (CGFloat.pi * 2 / 12)
+            let particle = SKShapeNode(circleOfRadius: CGFloat.random(in: 4...8))
+            particle.fillColor = UIColor(red: 1.0, green: CGFloat.random(in: 0.3...0.8), blue: 0.0, alpha: 1.0)
+            particle.strokeColor = .yellow
+            particle.lineWidth = 1
+            particle.position = position
+            particle.zPosition = 151
+            particle.zRotation = angle
+            scene.addChild(particle)
+            
+            let distance = CGFloat.random(in: 40...80)
+            let particleAction = SKAction.sequence([
+                SKAction.wait(forDuration: Double(i) * 0.02), // Quick stagger
+                SKAction.group([
+                    SKAction.moveBy(x: cos(angle) * distance, y: sin(angle) * distance, duration: 0.5),
+                    SKAction.fadeOut(withDuration: 0.5),
+                    SKAction.scale(to: 0.1, duration: 0.5)
+                ]),
+                SKAction.removeFromParent()
+            ])
+            particle.run(particleAction)
+        }
+        
+        // "BOOM!" text effect
+        let explosionText = SKLabelNode(text: "💥 BOOM! 💥")
+        explosionText.fontSize = 42
+        explosionText.fontColor = .orange
+        explosionText.fontName = "ArialRoundedMTBold"
+        explosionText.position = CGPoint(x: position.x, y: position.y + 60)
+        explosionText.zPosition = 152
+        scene.addChild(explosionText)
+        
+        let textAction = SKAction.sequence([
+            SKAction.scale(to: 1.5, duration: 0.1),
+            SKAction.wait(forDuration: 0.3),
+            SKAction.group([
+                SKAction.fadeOut(withDuration: 0.4),
+                SKAction.moveBy(x: 0, y: 40, duration: 0.4)
+            ]),
+            SKAction.removeFromParent()
+        ])
+        explosionText.run(textAction)
+    }
 }
 
