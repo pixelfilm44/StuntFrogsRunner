@@ -134,22 +134,33 @@ class GameViewController: UIViewController {
         print("🎮 Presenting GameScene...")
         
         // Add crash detection around scene presentation
-        do {
-            skView.presentScene(scene)
-            print("✅ Scene presented successfully")
-        } catch {
-            print("❌ CRASH during scene presentation: \(error)")
-            return
-        }
+        print("🎮 About to present scene...")
         
-        // Verify scene was presented
-        if let presentedScene = skView.scene {
-            print("✅ GameScene presented successfully!")
-            print("🎮 Scene size: \(presentedScene.size)")
-            print("🎮 Scene scale mode: \(presentedScene.scaleMode.rawValue)")
-        } else {
-            print("❌ ERROR: Scene was not presented!")
+        // Ensure we're on main thread
+        DispatchQueue.main.async { [weak self, weak skView] in
+            guard let self = self, let skView = skView else {
+                print("❌ ERROR: Self or SKView deallocated before scene presentation")
+                return
+            }
+            
+            do {
+                skView.presentScene(scene)
+                print("✅ Scene presented successfully")
+                
+                // Verify scene was presented
+                if let presentedScene = skView.scene {
+                    print("✅ GameScene presented successfully!")
+                    print("🎮 Scene size: \(presentedScene.size)")
+                    print("🎮 Scene scale mode: \(presentedScene.scaleMode.rawValue)")
+                } else {
+                    print("❌ ERROR: Scene was not presented!")
+                }
+            } catch {
+                print("❌ CRASH during scene presentation: \(error)")
+                return
+            }
         }
+
         
         // Ensure the system applies our gesture deferral now that the view is active
         setNeedsUpdateOfScreenEdgesDeferringSystemGestures()

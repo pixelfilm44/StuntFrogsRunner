@@ -62,6 +62,12 @@ class SoundController: ObservableObject {
         case collectPowerup = "collect_powerup"
         case backgroundNature = "nature_ambience"
         
+        // Weather Effects
+        case rain = "rain_ambient"
+        case thunder = "thunder"
+        case windStorm = "wind_storm"
+        case nightAmbience = "night_ambience"
+        
         // UI & Feedback
         case buttonTap = "button_tap"
         case menuTransition = "menu_transition"
@@ -85,6 +91,12 @@ class SoundController: ObservableObject {
         case energetic = "energetic_hopping"
         case rocketFlight = "rocket_flight_music"
         case superJump = "super_jump_music"
+        
+        // Weather-specific background music
+        case nightMusic = "night_music"
+        case rainyMusic = "rainy_music"
+        case stormMusic = "storm_music"
+        case icyMusic = "icy_music"
     }
     
     // MARK: - Initialization
@@ -416,6 +428,65 @@ class SoundController: ObservableObject {
     /// Call this when special abilities end
     func handleSpecialAbilityEnded() {
         returnToGameplayMusic()
+    }
+    
+    // MARK: - Weather Audio Management
+    func playWeatherMusic(for weather: WeatherType) {
+        guard isMusicEnabled else { return }
+        
+        let musicTrack: BackgroundMusic
+        switch weather {
+        case .day:
+            musicTrack = .gameplay
+        case .night:
+            musicTrack = .nightMusic
+        case .rain:
+            musicTrack = .rainyMusic
+        case .ice:
+            musicTrack = .icyMusic
+        case .storm:
+            musicTrack = .stormMusic
+        case .winter:
+            musicTrack = .icyMusic
+        case .stormy:
+            musicTrack = .stormMusic
+        }
+        
+        playBackgroundMusic(musicTrack)
+        print("🎵 Playing weather-specific music for \(weather): \(musicTrack.rawValue)")
+    }
+    
+    func playWeatherAmbience(for weather: WeatherType) {
+        switch weather {
+        case .day:
+            playSoundEffect(.backgroundNature, volume: 0.3)
+            
+        case .night:
+            playSoundEffect(.nightAmbience, volume: 0.4)
+            
+        case .rain:
+            playSoundEffect(.rain, volume: 0.5)
+            
+        case .ice:
+            playSoundEffect(.iceCrack, volume: 0.2)
+            
+        case .storm:
+            playSoundEffect(.windStorm, volume: 0.4)
+            // Thunder will be played by lightning effects
+            
+        case .winter:
+            playSoundEffect(.iceCrack, volume: 0.2)
+            
+        case .stormy:
+            playSoundEffect(.windStorm, volume: 0.4)
+            // Thunder will be played by lightning effects
+        }
+        
+        print("🌦️ Playing weather ambience for \(weather)")
+    }
+    
+    func playThunder() {
+        playSoundEffect(.thunder, volume: 0.6, pitch: Float.random(in: 0.8...1.2))
     }
     
     // MARK: - Cleanup

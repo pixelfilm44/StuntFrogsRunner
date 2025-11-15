@@ -516,6 +516,37 @@ class FrogController {
         print("Jump started from \(jumpStartPos) to \(jumpTargetPos)")
     }
     
+    /// Adjust the target position of an ongoing jump (used for wind effects, etc.)
+    func adjustJumpTarget(to newTarget: CGPoint) {
+        guard isJumping else {
+            print("⚠️ Cannot adjust jump target - frog is not jumping")
+            return
+        }
+        
+        print("🌬️ Adjusting jump target from \(jumpTargetPos) to \(newTarget)")
+        
+        // Update the jump target
+        jumpTargetPos = newTarget
+        
+        // Recalculate velocity based on current position and new target
+        let dx = newTarget.x - position.x
+        let dy = newTarget.y - position.y
+        let distance = max(0.001, sqrt(dx*dx + dy*dy))
+        
+        let dirX = dx / distance
+        let dirY = dy / distance
+        velocity = CGVector(dx: dirX * jumpSpeed, dy: dirY * jumpSpeed)
+        
+        // Update cached jump distance for visual progress calculation
+        cachedJumpDistance = sqrt(pow(jumpTargetPos.x - jumpStartPos.x, 2) + pow(jumpTargetPos.y - jumpStartPos.y, 2))
+        
+        // Update facing direction to match new trajectory
+        let angle = atan2(dy, dx)
+        let correction: CGFloat = .pi / 2
+        frogSprite.removeAction(forKey: "face")
+        frogSprite.run(SKAction.rotate(toAngle: angle + correction, duration: 0.1, shortestUnitArc: true), withKey: "face")
+    }
+    
     func updateJump() {
         guard isJumping else { 
             jumpFrameCount = 0  // Reset counter when not jumping

@@ -10,7 +10,7 @@ import Foundation
 
 struct GameConfig {
     // Physics for top-down jumping
-    static let jumpSpeed: CGFloat = 8.0  // How fast frog moves during jump
+    static let jumpSpeed: CGFloat = 9.0  // How fast frog moves during jump
     static let launchMultiplier: CGFloat = 0.08
     static let superJumpMultiplier: CGFloat = 1.0
     static let maxPullDistance: CGFloat = 150

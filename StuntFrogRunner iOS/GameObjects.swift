@@ -7,6 +7,72 @@
 
 import SpriteKit
 
+// MARK: - Weather Type Definition
+// If WeatherType is defined elsewhere, this can be removed
+
+/// Weather gameplay effects that modify game mechanics
+enum WeatherGameplayEffect {
+    case slipperyPads(factor: CGFloat)
+    case windForce
+    case iceConversion
+    case rainParticles
+    case lightning
+    case reducedVisibility(amount: CGFloat)
+}
+
+// WeatherConfiguration is now defined in LevelConfigurations.swift
+// This prevents duplicate type definitions that cause ambiguity errors
+
+enum WeatherType: String, CaseIterable {
+    case day = "day"
+    case night = "night"
+    case rain = "rain"
+    case winter = "winter"
+    case stormy = "stormy"
+    case ice = "ice"
+    case storm = "storm"
+    
+    var displayName: String {
+        return rawValue.capitalized
+    }
+    
+    /// Gameplay effects that this weather type applies
+    var gameplayEffects: [WeatherGameplayEffect] {
+        switch self {
+        case .day:
+            return []
+        case .night:
+            return [.reducedVisibility(amount: 0.2)]
+        case .rain:
+            return [.slipperyPads(factor: 0.3), .rainParticles]
+        case .winter:
+            return [.slipperyPads(factor: 0.4), .iceConversion]
+        case .ice:
+            return [.slipperyPads(factor: 0.6), .iceConversion]
+        case .stormy, .storm:
+            return [.slipperyPads(factor: 0.2), .windForce, .lightning, .rainParticles]
+        }
+    }
+    
+    /// Asset suffix for weather-specific textures
+    var assetSuffix: String {
+        switch self {
+        case .day:
+            return "" // No suffix for default/day textures
+        case .night:
+            return "_night"
+        case .rain:
+            return "_rain"
+        case .winter:
+            return "_winter"
+        case .ice:
+            return "_ice"
+        case .stormy, .storm:
+            return "_stormy"
+        }
+    }
+}
+
 class Enemy {
     let type: EnemyType
     var position: CGPoint
@@ -265,6 +331,34 @@ enum LilyPadType {
     case grave
 }
 
+/// LilyPad class with weather-aware texture support
+/// 
+/// This class now supports weather-specific textures based on the following naming convention:
+/// - Day: "lilypad" or "graveLilypad" (no suffix)
+/// - Night: "lilypad_Night" or "graveLilypad_Night"
+/// - Rain: "lilypad_Rain" or "graveLilypad_Rain" 
+/// - Winter: "lilypad_Winter" or "graveLilypad_Winter"
+/// - Stormy: "lilypad_Storm" or "graveLilypad_Storm"
+///
+/// Usage:
+/// - `LilyPad(position:radius:type:weather:)` - Create with specific weather
+/// - `LilyPad.createDayLilyPad(position:radius:type:)` - Convenience factory methods
+/// - `lilyPad.updateTextureForWeather(_:)` - Update existing lily pad for weather changes
+///
+/// Example:
+/// ```swift
+/// // Create a rainy grave lily pad
+/// let rainyGrave = LilyPad(position: CGPoint(x: 100, y: 200), 
+///                         radius: 50, 
+///                         type: .grave, 
+///                         weather: .rain)
+///
+/// // Or use convenience method
+/// let winterPad = LilyPad.createWinterLilyPad(position: CGPoint(x: 200, y: 300), radius: 60)
+///
+/// // Update existing pad when weather changes
+/// existingPad.updateTextureForWeather(.stormy)
+/// ```
 class LilyPad {
     var position: CGPoint
     var radius: CGFloat
@@ -336,7 +430,7 @@ class LilyPad {
     // NEW: Store previous position for delta calculation
     private var previousPosition: CGPoint
     
-    init(position: CGPoint, radius: CGFloat, type: LilyPadType = .normal) {
+    init(position: CGPoint, radius: CGFloat, type: LilyPadType = .normal, weather: WeatherType? = nil) {
         self.position = position
         self.previousPosition = position
         self.radius = radius
@@ -346,13 +440,8 @@ class LilyPad {
         
         let container = SKNode()
         
-        // Choose texture based on lily pad type
-        let textureName: String
-        if type == .grave {
-            textureName = "graveLilypad"
-        } else {
-            textureName = "lilypad"
-        }
+        // Choose texture based on lily pad type and weather
+        let textureName = LilyPad.getTextureNameForTypeAndWeather(type: type, weather: weather)
         let texture = SKTexture(imageNamed: textureName)
         
         let textureSize = texture.size()
@@ -376,6 +465,109 @@ class LilyPad {
         } else if type == .moving {
             startMoving()
         }
+    }
+    
+    // MARK: - Convenience Factory Methods
+    
+    /// Create a lily pad for day weather
+    static func createDayLilyPad(position: CGPoint, radius: CGFloat, type: LilyPadType = .normal) -> LilyPad {
+        return LilyPad(position: position, radius: radius, type: type, weather: .day)
+    }
+    
+    /// Create a lily pad for night weather
+    static func createNightLilyPad(position: CGPoint, radius: CGFloat, type: LilyPadType = .normal) -> LilyPad {
+        return LilyPad(position: position, radius: radius, type: type, weather: .night)
+    }
+    
+    /// Create a lily pad for rainy weather
+    static func createRainyLilyPad(position: CGPoint, radius: CGFloat, type: LilyPadType = .normal) -> LilyPad {
+        return LilyPad(position: position, radius: radius, type: type, weather: .rain)
+    }
+    
+    /// Create a lily pad for winter weather
+    static func createWinterLilyPad(position: CGPoint, radius: CGFloat, type: LilyPadType = .normal) -> LilyPad {
+        return LilyPad(position: position, radius: radius, type: type, weather: .winter)
+    }
+    
+    /// Create a lily pad for stormy weather
+    static func createStormyLilyPad(position: CGPoint, radius: CGFloat, type: LilyPadType = .normal) -> LilyPad {
+        return LilyPad(position: position, radius: radius, type: type, weather: .stormy)
+    }
+    
+  
+    // MARK: - Texture Management
+    
+    /// Get the appropriate texture name based on lily pad type and weather
+    /// - Parameters:
+    ///   - type: The lily pad type (.normal, .pulsing, .moving, .grave)
+    ///   - weather: Optional weather type. If nil, uses default day weather
+    /// - Returns: The texture name to use for this lily pad
+    private static func getTextureNameForTypeAndWeather(type: LilyPadType, weather: WeatherType? = nil) -> String {
+        // Use provided weather or default to day
+        let currentWeather = weather ?? .day
+        
+        // Determine base texture name based on lily pad type
+        let baseTextureName: String
+        switch type {
+        case .grave:
+            baseTextureName = "graveLilypad"
+        case .normal, .pulsing, .moving:
+            baseTextureName = "lilypad"
+        }
+        
+        // Apply weather suffix if needed
+        let weatherSuffix = LilyPad.getWeatherSuffix(for: currentWeather)
+        let finalTextureName = baseTextureName + weatherSuffix
+        
+        print("🏵️ LilyPad texture selection: type=\(type), weather=\(currentWeather), final=\(finalTextureName)")
+        
+        return finalTextureName
+    }
+    
+    /// Get the weather suffix for texture names
+    private static func getWeatherSuffix(for weather: WeatherType) -> String {
+        switch weather {
+        case .day:
+            return "" // No suffix for day (default textures)
+        case .night:
+            return "_night"
+        case .rain:
+            return "_rain"
+        case .winter:
+            return "_winter"
+        case .stormy:
+            return "_storm"
+        // Add additional weather types as needed
+        default:
+            return "" // Fallback to default textures
+        }
+    }
+    
+    /// Update the lily pad's texture based on current weather
+    /// Call this method when weather changes to update existing lily pads
+    func updateTextureForWeather(_ weather: WeatherType) {
+        guard let sprite = padSprite else { return }
+        
+        let newTextureName = LilyPad.getTextureNameForTypeAndWeather(type: type, weather: weather)
+        let newTexture = SKTexture(imageNamed: newTextureName)
+        
+        // Preserve the current size when updating texture
+        let currentSize = sprite.size
+        sprite.texture = newTexture
+        sprite.size = currentSize
+        
+        print("🏵️ Updated lily pad texture to: \(newTextureName)")
+    }
+    
+    /// Update the lily pad's texture based on current weather (string version)
+    /// Call this method when weather changes to update existing lily pads
+    func updateTextureForWeather(_ weatherString: String) {
+        guard let weather = WeatherType(rawValue: weatherString.lowercased()) else {
+            print("⚠️ Invalid weather string: \(weatherString), using default")
+            updateTextureForWeather(.day)
+            return
+        }
+        updateTextureForWeather(weather)
     }
     
     // MARK: - Physics Update

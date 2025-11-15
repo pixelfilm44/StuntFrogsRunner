@@ -255,6 +255,32 @@ class ScoreManager {
         print("🎮 ScoreManager: ALL PROGRESS RESET - starting completely fresh")
     }
     
+    /// Start the game at a specific level (for level selection)
+    func startAtLevel(_ level: Int) {
+        // Calculate the score that should be earned by reaching this level
+        // Each level requires completing the previous level, so calculate cumulative score
+        let baseScore = (level - 1) * GameConfig.levelCompletionBonus
+        
+        score = baseScore
+        currentLevel = level
+        levelsCompletedThisSession = 0
+        sessionStartScore = baseScore
+        
+        // Update max completed level if we're starting at a higher level
+        if level > 1 {
+            maxCompletedLevel = max(maxCompletedLevel, level - 1)
+        }
+        
+        // Clear any existing persistent data since we're starting at a specific level
+        UserDefaults.standard.removeObject(forKey: "CurrentLevel")
+        UserDefaults.standard.removeObject(forKey: "PersistentScore")
+        UserDefaults.standard.set(maxCompletedLevel, forKey: "MaxCompletedLevel")
+        UserDefaults.standard.synchronize()
+        
+        print("🎮 ScoreManager: Starting at Level \(level) with score \(score)")
+        print("🎮 Max completed level updated to: \(maxCompletedLevel)")
+    }
+    
     /// Test method to manually set the max completed level (for testing)
     func debugSetMaxCompletedLevel(_ level: Int) {
         maxCompletedLevel = level

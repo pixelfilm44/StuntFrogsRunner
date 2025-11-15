@@ -253,6 +253,27 @@ class UIManager: NSObject {
     
     deinit {
         print("🔧 UIManager.deinit: UIManager is being deallocated")
+        
+        // Stop all running actions on UI elements
+        scoreLabel?.removeAllActions()
+        healthIcons.forEach { $0.removeAllActions() }
+        superJumpIndicator?.removeAllActions()
+        rocketIndicator?.removeAllActions()
+        glideIndicator?.removeAllActions()
+        
+        // Remove all UI elements from scene
+        menuLayer?.removeFromParent()
+        abilityLayer?.removeFromParent()
+        tutorialModal?.removeFromParent()
+        rocketLandButton?.removeFromParent()
+        
+        // Clear any remaining GameCenter delegate references
+        if let presentedVC = topViewController()?.presentedViewController as? GKGameCenterViewController {
+            presentedVC.gameCenterDelegate = nil
+        }
+        
+        // Clear scene reference
+        scene = nil
     }
     
     // MARK: - Haptics & Button Animations
@@ -628,66 +649,86 @@ class UIManager: NSObject {
         let maxLevel = scoreManager.getMaxCompletedLevel()
         
         if canContinue {
-            // Show both "Continue" and "New Game" options
-            let buttonSize = CGSize(width: sceneSize.width * 0.75, height: 55)
+            // Show both level selector and "New Game" options
+            let levelButtonSize = CGSize(width: sceneSize.width * 0.75, height: 55)
+            let regularButtonSize = CGSize(width: sceneSize.width * 0.6, height: 48)
             
-            // Continue button (primary action)
-            let continueButton = createButton(text: "Continue (Level \(maxLevel + 1))", name: "continueGameButton", size: buttonSize)
-            continueButton.position = CGPoint(x: sceneSize.width/2, y: 260)
-            menu.addChild(continueButton)
+            // Calculate button positions with equal spacing, starting higher up
+            let startY: CGFloat = 350  // Start higher than before
+            let buttonSpacing: CGFloat = 56  // Equal spacing between all buttons
             
-            // Progress indicator text
-            let progressText = SKLabelNode(text: "Progress: Level \(maxLevel) completed")
-            progressText.fontName = "ArialRoundedMT"
-            progressText.fontSize = 16
-            progressText.fontColor = UIColor.systemYellow
-            progressText.position = CGPoint(x: sceneSize.width/2, y: 230)
-            progressText.zPosition = 1
-            menu.addChild(progressText)
+            var currentY = startY
             
-            // New Game button (secondary action, smaller)
-            let newGameSize = CGSize(width: sceneSize.width * 0.6, height: 45)
-            let newGameButton = createButton(text: "New Game", name: "newGameButton", size: newGameSize)
-            newGameButton.position = CGPoint(x: sceneSize.width/2, y: 190)
+            // Level selector button (primary action - largest)
+            let levelSelectorButton = createButton(text: "Select Level to Play", name: "levelSelectorButton", size: levelButtonSize)
+            levelSelectorButton.position = CGPoint(x: sceneSize.width/2, y: currentY)
+            menu.addChild(levelSelectorButton)
+            
+           
+            
+            currentY -= buttonSpacing
+            
+            // New Game button
+            let newGameButton = createButton(text: "New Game", name: "newGameButton", size: regularButtonSize)
+            newGameButton.position = CGPoint(x: sceneSize.width/2, y: currentY)
             menu.addChild(newGameButton)
             
-            // Adjust other buttons lower
-            let leaderboardSize = CGSize(width: sceneSize.width * 0.6, height: 48)
-            let leaderboardButton = createButton(text: "Leaderboard", name: "leaderboardButton", size: leaderboardSize)
-            leaderboardButton.position = CGPoint(x: sceneSize.width/2, y: 130)
+            currentY -= buttonSpacing
+            
+            // Leaderboard button
+            let leaderboardButton = createButton(text: "Leaderboard", name: "leaderboardButton", size: regularButtonSize)
+            leaderboardButton.position = CGPoint(x: sceneSize.width/2, y: currentY)
             menu.addChild(leaderboardButton)
             
-            // Add Tutorial button
-            let tutorialButton = createButton(text: "Tutorial", name: "tutorialButton", size: leaderboardSize)
-            tutorialButton.position = CGPoint(x: sceneSize.width/2, y: 74)
+            currentY -= buttonSpacing
+            
+            // Tutorial button
+            let tutorialButton = createButton(text: "Tutorial", name: "tutorialButton", size: regularButtonSize)
+            tutorialButton.position = CGPoint(x: sceneSize.width/2, y: currentY)
             menu.addChild(tutorialButton)
             
-            // Add Super Powers button
-            let superPowersButton = createButton(text: "Super Powers", name: "superPowersButton", size: leaderboardSize)
-            superPowersButton.position = CGPoint(x: sceneSize.width/2, y: 18)
+            currentY -= buttonSpacing
+            
+            // Super Powers button
+            let superPowersButton = createButton(text: "Super Powers", name: "superPowersButton", size: regularButtonSize)
+            superPowersButton.position = CGPoint(x: sceneSize.width/2, y: currentY)
             menu.addChild(superPowersButton)
             
         } else {
             // Show single Play button for new players
-            let buttonSize = CGSize(width: sceneSize.width * 0.75, height: 60)
-            let playButton = createButton(text: "Play", name: "playGameButton", size: buttonSize)
-            playButton.position = CGPoint(x: sceneSize.width/2, y: 240)
+            let playButtonSize = CGSize(width: sceneSize.width * 0.75, height: 60)
+            let regularButtonSize = CGSize(width: sceneSize.width * 0.6, height: 48)
+            
+            // Calculate button positions with equal spacing, starting higher up
+            let startY: CGFloat = 350  // Start higher than before
+            let buttonSpacing: CGFloat = 56  // Equal spacing between all buttons
+            
+            var currentY = startY
+            
+            // Play button (primary action - largest)
+            let playButton = createButton(text: "Play", name: "playGameButton", size: playButtonSize)
+            playButton.position = CGPoint(x: sceneSize.width/2, y: currentY)
             menu.addChild(playButton)
-
-            // Add other buttons as before
-            let leaderboardSize = CGSize(width: sceneSize.width * 0.6, height: 48)
-            let leaderboardButton = createButton(text: "Leaderboard", name: "leaderboardButton", size: leaderboardSize)
-            leaderboardButton.position = CGPoint(x: sceneSize.width/2, y: 170)
+            
+            currentY -= buttonSpacing
+            
+            // Leaderboard button
+            let leaderboardButton = createButton(text: "Leaderboard", name: "leaderboardButton", size: regularButtonSize)
+            leaderboardButton.position = CGPoint(x: sceneSize.width/2, y: currentY)
             menu.addChild(leaderboardButton)
             
-            // Add Tutorial button under Leaderboard
-            let tutorialButton = createButton(text: "Tutorial", name: "tutorialButton", size: leaderboardSize)
-            tutorialButton.position = CGPoint(x: sceneSize.width/2, y: 114)
+            currentY -= buttonSpacing
+            
+            // Tutorial button
+            let tutorialButton = createButton(text: "Tutorial", name: "tutorialButton", size: regularButtonSize)
+            tutorialButton.position = CGPoint(x: sceneSize.width/2, y: currentY)
             menu.addChild(tutorialButton)
             
-            // Add Super Powers button under Tutorial
-            let superPowersButton = createButton(text: "Super Powers", name: "superPowersButton", size: leaderboardSize)
-            superPowersButton.position = CGPoint(x: sceneSize.width/2, y: 58)
+            currentY -= buttonSpacing
+            
+            // Super Powers button
+            let superPowersButton = createButton(text: "Super Powers", name: "superPowersButton", size: regularButtonSize)
+            superPowersButton.position = CGPoint(x: sceneSize.width/2, y: currentY)
             menu.addChild(superPowersButton)
         }
 
@@ -701,6 +742,8 @@ class UIManager: NSObject {
     
     func showPauseMenu(sceneSize: CGSize) {
         hideMenus()
+        // CRITICAL: Ensure tutorial modal is cleared
+        tutorialModal = nil
         guard let scene = scene else { return }
         setUIVisible(false)
         
@@ -977,7 +1020,7 @@ class UIManager: NSObject {
         }
         
         // Slide up from bottom over 1.0s, with background fading in, and disable taps during animation
-        let duration: TimeInterval = 1.0
+        let duration: TimeInterval = 0.5
         // Replace single slideUp action with bounce sequence:
         let slideUp = SKAction.moveTo(y: 8, duration: duration)
         slideUp.timingMode = .easeOut
@@ -1006,6 +1049,167 @@ class UIManager: NSObject {
         
         abilityLayer = menu
         scene.addChild(menu)
+    }
+    
+    func showLevelSelectionModal(sceneSize: CGSize) {
+        hideMenus()
+        guard let scene = scene else { return }
+        setUIVisible(false)
+        
+        let modal = SKNode()
+        modal.zPosition = 400 // Higher than other menus
+        modal.name = "levelSelectionModal"
+        
+        // Fullscreen dim background
+        let bg = SKShapeNode(rectOf: sceneSize)
+        bg.fillColor = UIColor.black.withAlphaComponent(0.85)
+        bg.strokeColor = .clear
+        bg.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2)
+        bg.name = "levelSelectionBackground"
+        modal.addChild(bg)
+        
+        // Modal panel
+        let panelWidth = sceneSize.width * 0.85
+        let panelHeight = sceneSize.height * 0.7
+        let panel = SKShapeNode(rectOf: CGSize(width: panelWidth, height: panelHeight), cornerRadius: 20)
+        panel.fillColor = UIColor(red: 0.1, green: 0.15, blue: 0.3, alpha: 0.95)
+        panel.strokeColor = UIColor.white.withAlphaComponent(0.5)
+        panel.lineWidth = 2
+        panel.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2)
+        modal.addChild(panel)
+        
+        // Title
+        let title = SKLabelNode(text: "Select Level")
+        title.fontSize = 28
+        title.fontColor = UIColor.white
+        title.fontName = "ArialRoundedMTBold"
+        title.position = CGPoint(x: sceneSize.width / 2, y: panel.frame.maxY - 60)
+        title.zPosition = 1
+        modal.addChild(title)
+        
+        // Get current progress
+        let scoreManager = ScoreManager.shared
+        let maxLevel = scoreManager.getMaxCompletedLevel()
+        
+        // Create level buttons in a 3x3 grid
+        let buttonsPerRow = 3
+        let buttonSize = CGSize(width: 80, height: 80)
+        let spacing: CGFloat = 30
+        let totalWidth = CGFloat(buttonsPerRow) * buttonSize.width + CGFloat(buttonsPerRow - 1) * spacing
+        let startX = sceneSize.width / 2 - totalWidth / 2 + buttonSize.width / 2
+        let startY = panel.frame.midY + 50
+        
+        for level in 1...9 {
+            let row = (level - 1) / buttonsPerRow
+            let col = (level - 1) % buttonsPerRow
+            
+            let x = startX + CGFloat(col) * (buttonSize.width + spacing)
+            let y = startY - CGFloat(row) * (buttonSize.height + spacing)
+            
+            let levelButton = createLevelButton(
+                level: level,
+                maxCompletedLevel: maxLevel,
+                size: buttonSize
+            )
+            levelButton.position = CGPoint(x: x, y: y)
+            modal.addChild(levelButton)
+        }
+        
+        // Close button
+        let closeButton = createButton(text: "Close", name: "closeLevelSelectionButton", size: CGSize(width: 120, height: 50))
+        closeButton.position = CGPoint(x: sceneSize.width / 2, y: panel.frame.minY + 40)
+        closeButton.zPosition = 1
+        modal.addChild(closeButton)
+        
+        // Add fade-in animation
+        modal.alpha = 0.0
+        let fadeIn = SKAction.fadeIn(withDuration: 0.3)
+        modal.run(fadeIn)
+        
+        menuLayer = modal
+        scene.addChild(modal)
+    }
+    
+    private func createLevelButton(level: Int, maxCompletedLevel: Int, size: CGSize) -> SKNode {
+        let button = SKNode()
+        button.name = "levelButton_\(level)"
+        
+        // Determine button state
+        let isCompleted = level <= maxCompletedLevel
+        let isNext = level == maxCompletedLevel + 1
+        let isLocked = level > maxCompletedLevel + 1
+        
+        // Background color based on state
+        let backgroundColor: UIColor
+        let borderColor: UIColor
+        let textColor: UIColor
+        
+        if isCompleted {
+            backgroundColor = UIColor(red: 0.2, green: 0.6, blue: 0.2, alpha: 0.8) // Green for completed
+            borderColor = UIColor.green
+            textColor = UIColor.white
+        } else if isNext {
+            backgroundColor = UIColor(red: 0.3, green: 0.5, blue: 0.8, alpha: 0.8) // Blue for next
+            borderColor = UIColor.systemBlue
+            textColor = UIColor.white
+        } else {
+            backgroundColor = UIColor(red: 0.3, green: 0.3, blue: 0.3, alpha: 0.8) // Gray for locked
+            borderColor = UIColor.gray
+            textColor = UIColor.lightGray
+        }
+        
+        // Button background
+        let bg = SKShapeNode(rectOf: size, cornerRadius: 12)
+        bg.fillColor = backgroundColor
+        bg.strokeColor = borderColor
+        bg.lineWidth = 2
+        bg.name = "background"
+        button.addChild(bg)
+        
+        // Level number
+        let levelLabel = SKLabelNode(text: "\(level)")
+        levelLabel.fontSize = 24
+        levelLabel.fontColor = textColor
+        levelLabel.fontName = "ArialRoundedMTBold"
+        levelLabel.verticalAlignmentMode = .center
+        levelLabel.position = CGPoint(x: 0, y: 8)
+        button.addChild(levelLabel)
+        
+        // Status indicator
+        var statusText = ""
+        if isCompleted {
+            statusText = "✓"
+        } else if isNext {
+            statusText = "▶"
+        } else {
+            statusText = "🔒"
+        }
+        
+        let statusLabel = SKLabelNode(text: statusText)
+        statusLabel.fontSize = 16
+        statusLabel.fontColor = textColor
+        statusLabel.verticalAlignmentMode = .center
+        statusLabel.position = CGPoint(x: 0, y: -15)
+        button.addChild(statusLabel)
+        
+        // Only make completed and next levels tappable
+        if isCompleted || isNext {
+            bg.name = "tapTarget"
+            button.setScale(1.0)
+        } else {
+            button.alpha = 0.6
+        }
+        
+        return button
+    }
+    
+    func hideLevelSelectionModal() {
+        if let modal = menuLayer, modal.name == "levelSelectionModal" {
+            let fadeOut = SKAction.fadeOut(withDuration: 0.2)
+            let remove = SKAction.removeFromParent()
+            modal.run(SKAction.sequence([fadeOut, remove]))
+            menuLayer = nil
+        }
     }
     
     func showTutorialModal(sceneSize: CGSize) {
@@ -1079,6 +1283,7 @@ class UIManager: NSObject {
         abilityLayer?.removeFromParent()
         superPowersMenu?.removeFromParent()
         hideTutorialModal()
+        hideLevelSelectionModal()
         menuLayer = nil
         abilityLayer = nil
         superPowersMenu = nil
@@ -1123,9 +1328,14 @@ class UIManager: NSObject {
         label.zPosition = 2
         button.addChild(label)
 
+        // Add invisible tap target that covers the entire button area
+        let tapTarget = SKSpriteNode(color: .clear, size: CGSize(width: size.width + 20, height: size.height + 20))
+        tapTarget.name = "tapTarget"
+        tapTarget.zPosition = 10 // Highest z-position to catch taps first
+        button.addChild(tapTarget)
+
         // Mark tappable area and default scale for animations
         button.setScale(1.0)
-        bg.name = "tapTarget" // so touch handlers can hit-test the sprite easily
 
         return button
     }
@@ -1320,6 +1530,144 @@ class UIManager: NSObject {
     }
     
     // MARK: - Game Center Leaderboard
+    
+    // MARK: - Level Selection Methods
+    
+    /// Presents an iOS dropdown (UIAlertController) allowing the user to select which level to play (1-9).
+    /// The selected level is stored in UserDefaults with key "selectedStartLevel" and a notification is posted.
+    func presentLevelSelector(maxLevel: Int) {
+        // Ensure we're on the main thread and add safety checks
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.showLevelSelectorAlert(maxLevel: maxLevel)
+        }
+    }
+    
+    private func showLevelSelectorAlert(maxLevel: Int) {
+        guard let rootVC = topViewController() else { 
+            print("❌ Could not find root view controller for level selector")
+            return 
+        }
+        
+        print("🎮 Presenting level selector with maxLevel: \(maxLevel)")
+        
+        let alertController = UIAlertController(
+            title: "Select Level", 
+            message: "Choose which level to play (1-9)", 
+            preferredStyle: .actionSheet
+        )
+        
+        // Add level options (1 through maxLevel + 1, since they can play the next level, but cap at 9)
+        let availableLevels = min(maxLevel + 1, 9)
+        
+        for level in 1...availableLevels {
+            let title: String
+            if level <= maxLevel {
+                title = "Level \(level) ✓"  // Completed levels show checkmark
+            } else {
+                title = "Level \(level) (Next)"  // Next available level
+            }
+            
+            let action = UIAlertAction(title: title, style: .default) { [weak self] _ in
+                print("🎮 Selected level \(level)")
+                self?.startGameAtLevel(level)
+            }
+            alertController.addAction(action)
+        }
+        
+        // Add separator and option to play beyond completed levels if maxLevel < 9
+        if maxLevel < 9 {
+            // Add levels beyond the current progress (locked levels)
+            for level in (maxLevel + 2)...9 {
+                let title = "Level \(level) 🔒"  // Locked levels
+                let action = UIAlertAction(title: title, style: .default) { [weak self] _ in
+                    print("🎮 Selected locked level \(level)")
+                    self?.confirmPlayAheadToLevel(level, from: rootVC)
+                }
+                alertController.addAction(action)
+            }
+        }
+        
+        // Add cancel option
+        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel) { _ in
+            print("🎮 Level selection cancelled")
+        }
+        alertController.addAction(cancelAction)
+        
+        // Configure for iPad popover
+        if let popover = alertController.popoverPresentationController {
+            popover.sourceView = rootVC.view
+            popover.sourceRect = CGRect(x: rootVC.view.bounds.midX, y: rootVC.view.bounds.midY, width: 0, height: 0)
+            popover.permittedArrowDirections = [.up, .down]
+        }
+        
+        rootVC.present(alertController, animated: true) {
+            print("✅ Level selector presented successfully")
+        }
+    }
+    
+    private func confirmPlayAheadToLevel(_ level: Int, from viewController: UIViewController) {
+        let alertController = UIAlertController(
+            title: "Play Ahead?", 
+            message: "This will start you at Level \(level), skipping earlier levels. You won't unlock achievements for skipped levels. Continue?",
+            preferredStyle: .alert
+        )
+        
+        let playAction = UIAlertAction(title: "Play Level \(level)", style: .default) { [weak self] _ in
+            self?.startGameAtLevel(level)
+        }
+        
+        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
+        
+        alertController.addAction(playAction)
+        alertController.addAction(cancelAction)
+        
+        viewController.present(alertController, animated: true)
+    }
+    
+    private func startGameAtLevel(_ level: Int) {
+        print("🎮 Starting game at level \(level)")
+        
+        // Store the selected level for the game to use
+        UserDefaults.standard.set(level, forKey: "selectedStartLevel")
+        UserDefaults.standard.synchronize()
+        
+        // Hide menus and show game UI
+        hideMenus()
+        hideLevelSelectionModal()
+        setUIVisible(true)
+        
+        // Post a notification that the game should start at a specific level
+        NotificationCenter.default.post(name: NSNotification.Name("StartGameAtLevel"), object: level)
+        
+        print("🎮 Level \(level) selection stored and notification posted")
+    }
+    
+    // MARK: - GameScene Integration Helpers
+    
+    /// Call this from GameScene to check if a specific level was selected and retrieve it.
+    /// This method automatically clears the stored selection after reading it.
+    /// - Returns: The selected level (1-9) or nil if no specific level was selected
+    static func getAndClearSelectedStartLevel() -> Int? {
+        let defaults = UserDefaults.standard
+        let selectedLevel = defaults.object(forKey: "selectedStartLevel") as? Int
+        
+        if selectedLevel != nil {
+            // Clear the selection so it doesn't affect future games
+            defaults.removeObject(forKey: "selectedStartLevel")
+            defaults.synchronize()
+            print("🎮 Retrieved selected start level: \(selectedLevel!) (now cleared)")
+        }
+        
+        return selectedLevel
+    }
+    
+    /// Call this from GameScene to check if a specific level was selected without clearing it.
+    /// - Returns: The selected level (1-9) or nil if no specific level was selected
+    static func peekSelectedStartLevel() -> Int? {
+        return UserDefaults.standard.object(forKey: "selectedStartLevel") as? Int
+    }
+    
     func presentLeaderboard(leaderboardID: String) {
         // Authenticate if needed, then present
         if GKLocalPlayer.local.isAuthenticated {
@@ -1351,20 +1699,35 @@ class UIManager: NSObject {
         rootVC.present(viewController, animated: true)
     }
 
-    private func topViewController(base: UIViewController? = UIApplication.shared.connectedScenes
-        .compactMap { ($0 as? UIWindowScene)?.keyWindow }
-        .first?
-        .rootViewController) -> UIViewController? {
-        if let nav = base as? UINavigationController {
+    private func topViewController(base: UIViewController? = nil) -> UIViewController? {
+        let baseViewController: UIViewController?
+        
+        if let base = base {
+            baseViewController = base
+        } else {
+            // Safer way to get the root view controller
+            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                  let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first else {
+                print("⚠️ Could not find key window")
+                return nil
+            }
+            baseViewController = window.rootViewController
+        }
+        
+        guard let rootVC = baseViewController else {
+            return nil
+        }
+        
+        if let nav = rootVC as? UINavigationController {
             return topViewController(base: nav.visibleViewController)
         }
-        if let tab = base as? UITabBarController {
+        if let tab = rootVC as? UITabBarController {
             return topViewController(base: tab.selectedViewController)
         }
-        if let presented = base?.presentedViewController {
+        if let presented = rootVC.presentedViewController {
             return topViewController(base: presented)
         }
-        return base
+        return rootVC
     }
 
     // MARK: - Rocket Land Button
@@ -2163,6 +2526,17 @@ class UIManager: NSObject {
     /// - Parameter nodeName: The `name` of the tapped node (e.g., "leaderboardButton").
     func handleNamedButtonTap(_ nodeName: String) {
         switch nodeName {
+        case "levelSelectorButton":
+            // Present the level selection modal
+            if let scene = scene {
+                showLevelSelectionModal(sceneSize: scene.size)
+            }
+        case "closeLevelSelectionButton":
+            // Close the level selection modal and return to main menu
+            hideLevelSelectionModal()
+            if let scene = scene {
+                showMainMenu(sceneSize: scene.size)
+            }
         case "leaderboardButton":
             // Present the Game Center leaderboard
             presentLeaderboard(leaderboardID: leaderboardID)
@@ -2182,9 +2556,54 @@ class UIManager: NSObject {
             if let scene = scene {
                 showMainMenu(sceneSize: scene.size)
             }
+        case "continueButton":
+            // Resume the game from pause
+            hideMenus()
+            setUIVisible(true)
+            // Notify GameScene to unpause
+            NotificationCenter.default.post(name: NSNotification.Name("ResumeGame"), object: nil)
+        case "quitButton":
+            // Quit to main menu
+            hideMenus()
+            // Notify GameScene to quit to main menu
+            NotificationCenter.default.post(name: NSNotification.Name("QuitToMainMenu"), object: nil)
+        case "playGameButton", "newGameButton":
+            // Start a new game from the main menu
+            hideMenus()
+            setUIVisible(true)
+            // Notify GameScene to start a new game
+            NotificationCenter.default.post(name: NSNotification.Name("StartNewGame"), object: nil)
+        case "tryAgainButton":
+            // Restart the current game from game over menu
+            hideMenus()
+            setUIVisible(true)
+            // Notify GameScene to restart
+            NotificationCenter.default.post(name: NSNotification.Name("RestartGame"), object: nil)
+        case "backToMenuButton":
+            // Return to main menu from game over
+            hideMenus()
+            // Notify GameScene to go back to main menu
+            NotificationCenter.default.post(name: NSNotification.Name("BackToMainMenu"), object: nil)
         default:
+            // Handle level button taps
+            if nodeName.hasPrefix("levelButton_") {
+                let levelString = String(nodeName.dropFirst("levelButton_".count))
+                if let level = Int(levelString) {
+                    startGameAtLevel(level)
+                }
+            }
+            // Handle initial upgrade selection buttons
+            else if nodeName.hasPrefix("initialUpgrade_") {
+                print("🎯 UIManager handling initial upgrade: \(nodeName)")
+                // Forward to GameScene for processing
+                if let gameScene = scene as? GameScene {
+                    gameScene.handleInitialUpgradeSelection(nodeName)
+                } else {
+                    print("❌ Could not forward initial upgrade to GameScene")
+                }
+            }
             // Handle super power upgrade buttons
-            if nodeName.hasPrefix("upgrade_") {
+            else if nodeName.hasPrefix("upgrade_") {
                 let powerName = String(nodeName.dropFirst("upgrade_".count))
                 if let powerType = SuperPowerType.allCases.first(where: { "\($0)" == powerName }) {
                     let success = purchaseSuperPower(powerType)
@@ -2212,6 +2631,71 @@ class UIManager: NSObject {
     func handleButtonRelease(node: SKNode?) {
         guard let node = node else { return }
         animateButtonRelease(node)
+    }
+    
+    /// Handle touch events in menus - call this from GameScene's touch methods
+    func handleTouch(_ touch: UITouch, phase: TouchPhase, in scene: SKScene) {
+        guard let activeMenu = menuLayer ?? abilityLayer ?? superPowersMenu ?? tutorialModal else { return }
+        
+        let location = touch.location(in: activeMenu)
+        let tappedNode = activeMenu.atPoint(location)
+        
+        switch phase {
+        case .began:
+            if let buttonNode = findButtonParent(from: tappedNode) {
+                handleButtonPress(node: buttonNode)
+                print("🎯 Button press detected: \(buttonNode.name ?? "unknown")")
+            }
+            
+        case .ended:
+            if let buttonNode = findButtonParent(from: tappedNode) {
+                handleButtonRelease(node: buttonNode)
+                
+                // Handle the actual button action
+                if let buttonName = buttonNode.name {
+                    print("🎯 Button tap: \(buttonName)")
+                    handleNamedButtonTap(buttonName)
+                } else {
+                    print("⚠️ Button has no name")
+                }
+            }
+            
+        case .cancelled:
+            // Just release any pressed state
+            if let buttonNode = findButtonParent(from: tappedNode) {
+                handleButtonRelease(node: buttonNode)
+            }
+        }
+    }
+    
+    /// Find the button container from a tapped child node
+    private func findButtonParent(from node: SKNode) -> SKNode? {
+        var currentNode: SKNode? = node
+        
+        while let current = currentNode {
+            // Check if this node is a button based on its name or structure
+            if let name = current.name {
+                if name.contains("Button") || name.contains("button") {
+                    return current
+                }
+                
+                // Check if it has button-like children (background, label, tapTarget)
+                if current.childNode(withName: "background") != nil || 
+                   current.childNode(withName: "tapTarget") != nil {
+                    return current
+                }
+            }
+            
+            currentNode = current.parent
+        }
+        
+        return nil // No button parent found
+    }
+    
+    enum TouchPhase {
+        case began
+        case ended  
+        case cancelled
     }
     
     // MARK: - Super Powers Menu Scroll Support (Legacy - now handled by UIKit)

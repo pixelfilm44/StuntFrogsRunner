@@ -17,13 +17,15 @@ struct LevelEnemyConfig {
     let globalSpawnRateMultiplier: CGFloat
     let maxEnemiesPerScreen: Int
     let specialRules: [SpecialSpawnRule]
+    let requiredTravelDistance: CGFloat  // Distance player must travel to spawn finish line
     
     /// Initialize with level number (automatically calculates score range)
     init(level: Int, 
          enemyConfigs: [EnemySpawnConfig],
          globalSpawnRateMultiplier: CGFloat = 1.0,
          maxEnemiesPerScreen: Int = 20,
-         specialRules: [SpecialSpawnRule] = []) {
+         specialRules: [SpecialSpawnRule] = [],
+         requiredTravelDistance: CGFloat = 2000) {  // Default 2000 units travel
         self.level = level
         // Each level spans 25,000 points (Level 1: 0-24999, Level 2: 25000-49999, etc.)
         let startScore = (level - 1) * 25000
@@ -33,6 +35,7 @@ struct LevelEnemyConfig {
         self.globalSpawnRateMultiplier = globalSpawnRateMultiplier
         self.maxEnemiesPerScreen = maxEnemiesPerScreen
         self.specialRules = specialRules
+        self.requiredTravelDistance = requiredTravelDistance
     }
 }
 
@@ -70,6 +73,13 @@ enum SpecialSpawnRule {
     case guaranteedEnemyType(EnemyType, every: Int) // Guarantee spawn every N frames
     case bossWave(enemyType: EnemyType, count: Int, triggerScore: Int)
     case safeZone(radius: CGFloat, duration: TimeInterval) // No enemies in radius for duration
+    
+    // Weather-specific rules
+    case iceZone(radius: CGFloat, freezeDuration: TimeInterval) // Convert water to ice in radius
+    case slipperyZone(radius: CGFloat, slipDuration: TimeInterval) // Make lily pads slippery
+    case windGust(strength: CGFloat, direction: CGFloat, every: Int) // Wind effect every N frames
+    case snowfall(intensity: CGFloat) // Snow particle effects
+    case lightningStrike(every: Int) // Lightning effects every N frames
 }
 
 /// Central manager for level-based enemy spawn configurations
@@ -144,6 +154,12 @@ class LevelEnemyConfigManager {
         return enemyConfig?.canSpawnInWater ?? false
     }
     
+    /// Get the required travel distance for finish line to appear at the given level
+    static func getRequiredTravelDistance(for level: Int) -> CGFloat {
+        let config = getConfig(for: level)
+        return config.requiredTravelDistance
+    }
+    
     
     /// Creates a fallback configuration for levels beyond the predefined ones
     private func createFallbackConfig(for level: Int) -> LevelEnemyConfig {
@@ -159,6 +175,7 @@ extension LevelEnemyConfigManager {
         let config = getConfig(for: level)
         var info = "Level \(level) Enemy Config:\n"
         info += "  Score Range: \(config.scoreRange)\n"
+        info += "  Required Travel Distance: \(Int(config.requiredTravelDistance)) units\n"
         info += "  Global Multiplier: \(String(format: "%.1f", config.globalSpawnRateMultiplier))x\n"
         info += "  Max Enemies: \(config.maxEnemiesPerScreen)\n"
         info += "  Enemy Types:\n"
@@ -180,6 +197,42 @@ extension LevelEnemyConfigManager {
         for level in levels {
             print(getDebugInfo(for: level))
             print("---")
+        }
+    }
+}
+/// Weather-aware level configurations
+extension LevelEnemyConfig {
+    /// Weather configuration for this level
+    var weatherConfig: WeatherConfiguration {
+        // Default weather progression through levels
+        switch level {
+        case 1...2:
+            return WeatherConfiguration(weatherType: .day)
+        case 3...4:
+            return WeatherConfiguration(weatherType: .night)
+        case 5...6:
+            return WeatherConfiguration(
+                weatherType: .rain,
+                slipDuration: 0.6,
+                particleIntensity: 0.7
+            )
+        case 7...8:
+            return WeatherConfiguration(
+                weatherType: .winter,
+                slipDuration: 0.4,
+                iceThickness: 1.2
+            )
+        default:
+            // Advanced levels cycle through stormy weather with increasing intensity
+            let intensity = min(1.0, CGFloat(level - 8) * 0.1)
+            let windAngle = CGFloat(level) * 0.5 // Varies wind direction by level
+            return WeatherConfiguration(
+                weatherType: .stormy,
+                windStrength: 0.3 + intensity * 0.4,
+                windDirection: windAngle,
+                slipDuration: 0.5 + intensity * 0.3,
+                particleIntensity: 0.8 + intensity * 0.2
+            )
         }
     }
 }

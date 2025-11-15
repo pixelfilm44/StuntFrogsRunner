@@ -22,6 +22,9 @@ class SpawnManager {
     // Level-based difficulty scaling - now uses LevelEnemyConfigManager
     var levelSpawnRateMultiplier: CGFloat = 1.0  // Legacy compatibility - will be replaced by level configs
     
+    // Reference to game state manager for level information
+    weak var gameStateManager: GameStateManager?
+    
     // Pads that have already spawned a tadpole; prevents repeat spawns on the same pad
     private var padsThatSpawnedTadpoles = Set<ObjectIdentifier>()
     
@@ -98,6 +101,9 @@ class SpawnManager {
             t.node.removeFromParent()
         }
         tadpoles.removeAll()
+        
+        // Note: Level and weather management is now handled by GameStateManager
+    
         
         // Clear existing big honey pots from scene and detach from pads
         for bhp in bigHoneyPots {
@@ -423,8 +429,8 @@ class SpawnManager {
             }
             
             if let enemyType = allowedTypes.randomElement() {
-                // Use weighted selection if available for this level, otherwise fall back to random
-                let level = (currentScore / 25000) + 1
+                // Use discrete level instead of calculating from score
+                let level = gameStateManager?.currentLevel ?? 1
                 let weightedType = LevelEnemyConfigManager.getWeightedRandomEnemyType(for: level)
                 let finalType = (weightedType != nil && allowedTypes.contains(weightedType!)) ? weightedType! : enemyType
                 spawnEnemyOnPad(type: finalType, pad: pad, enemies: &enemies, worldNode: worldNode, currentScore: currentScore)
@@ -448,9 +454,10 @@ class SpawnManager {
             return [.chaser]
         }
         
-        // Get level-based configuration
-        let level = max(1, (score / 25000) + 1) // Ensure level is at least 1
-        let levelConfig = LevelEnemyConfigManager.getConfig(for: level)
+        // Get weather-aware level configuration using discrete level
+        let level = gameStateManager?.currentLevel ?? 1
+        let weatherManager = WeatherManager.shared
+        let levelConfig = weatherManager.getWeatherLevelConfig(level: level, weather: weatherManager.weather)
         
         // Filter enemy types that can spawn on pads
         let allowedTypes = levelConfig.enemyConfigs.compactMap { enemyConfig -> EnemyType? in
@@ -1166,6 +1173,9 @@ class SpawnManager {
     func spawnObjects(sceneSize: CGSize, lilyPads: inout [LilyPad], enemies: inout [Enemy], tadpoles: inout [Tadpole], bigHoneyPots: inout [BigHoneyPot], lifeVests: inout [LifeVest], worldOffset: CGFloat, frogPosition: CGPoint, superJumpActive: Bool) {
         guard let worldNode = worldNode else { return }
         
+        // Get current score from the game scene
+        let currentScore: Int = (scene as? GameScene)?.score ?? 0
+        
         frameCount += 1
         framesSinceLastTadpole += 1
         
@@ -1334,14 +1344,15 @@ class SpawnManager {
             checkSpecialPadBehavior(lilyPads: lilyPads, enemiesSnapshot: enemies, worldNode: worldNode)
         }
         
-        // Use new level-based enemy configuration system
-        let currentScore: Int = (scene as? GameScene)?.score ?? 0
-        let level = max(1, (currentScore / 25000) + 1) // Ensure level is at least 1
-        let levelConfig = LevelEnemyConfigManager.getConfig(for: level)
+        // Use discrete level from GameStateManager instead of calculating from score
+        let level = gameStateManager?.currentLevel ?? 1
+        
+        // Get weather-aware configuration instead of basic level config
+        let weatherManager = WeatherManager.shared
+        let levelConfig = weatherManager.getWeatherLevelConfig(level: level, weather: weatherManager.weather)
         
         // DEBUG: Log spawn attempt occasionally with new level-based info
         if frameCount % 180 == 0 {  // Every 3 seconds
-            print("🐛 DEBUG Level \(level): Score=\(currentScore), inGrace=\(inGrace), spawningPaused=\(spawningPaused)")
             print("🐛 Level config enemy count: \(levelConfig.enemyConfigs.count)")
             for enemyConfig in levelConfig.enemyConfigs {
                 let finalRate = enemyConfig.spawnRate * levelConfig.globalSpawnRateMultiplier
@@ -1495,8 +1506,11 @@ class SpawnManager {
         private func spawnEnemy(at worldY: CGFloat, sceneSize: CGSize, enemies: inout [Enemy], worldNode: SKNode, lilyPads: [LilyPad]) {
             // Get current score from the game scene
             let currentScore: Int = (scene as? GameScene)?.score ?? 0
-            let level = max(1, (currentScore / 25000) + 1) // Ensure level is at least 1
-            let levelConfig = LevelEnemyConfigManager.getConfig(for: level)
+            // Use discrete level from GameStateManager
+            let level = gameStateManager?.currentLevel ?? 1
+            // Get weather-aware configuration
+            let weatherManager = WeatherManager.shared
+            let levelConfig = weatherManager.getWeatherLevelConfig(level: level, weather: weatherManager.weather)
             
             // Use weighted selection from level configuration
             guard let selectedType = LevelEnemyConfigManager.getWeightedRandomEnemyType(for: level) else {

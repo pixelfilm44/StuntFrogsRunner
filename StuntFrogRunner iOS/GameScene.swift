@@ -52,6 +52,12 @@ class GameScene: SKScene {
     private var currentLevel: Int = 1
     private var baseSpawnRateMultiplier: CGFloat = 1.0
     
+    // MARK: - Level Travel Distance Tracking
+    private var levelStartingFrogY: CGFloat = 0
+    private var levelTravelDistance: CGFloat = 0
+    private var totalSessionTravelDistance: CGFloat = 0
+    private var levelTravelDistances: [Int: CGFloat] = [:]  // Store travel distance per level
+    
     // MARK: - Level Timer
     private var levelStartTime: CFTimeInterval = 0
     private var levelTimeRemaining: Double = 0
@@ -61,6 +67,7 @@ class GameScene: SKScene {
     private var finishLine: FinishLine?
     private var hasSpawnedFinishLine: Bool = false
     private var frogPreviousY: CGFloat = 0
+    private var levelStartingScore: Int = 0  // Track the score when the level started
     
     // MARK: - Parallax Background Elements
     private var rightTree: SKSpriteNode?
@@ -84,6 +91,18 @@ class GameScene: SKScene {
     // MARK: - Deinitializer
     deinit {
         print("🧹 GameScene deinitializing - cleaning up resources")
+        
+        // Clean up weather notifications
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("WeatherChanged"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("WindForceApplied"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("SlipperyPadEffect"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("LightningEffect"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("StartGameAtLevel"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("ResumeGame"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("QuitToMainMenu"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("StartNewGame"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("RestartGame"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("BackToMainMenu"), object: nil)
         
         // Clear all callback closures to break retain cycles
         healthManager?.onHealthChanged = nil
@@ -138,6 +157,19 @@ class GameScene: SKScene {
         scoreManager.highScore
     }
     
+    // Public properties for accessing travel distance data
+    var currentLevelTravelDistance: CGFloat {
+        return levelTravelDistance
+    }
+    
+    var sessionTotalTravelDistance: CGFloat {
+        return totalSessionTravelDistance
+    }
+    
+    var allLevelTravelDistances: [Int: CGFloat] {
+        return levelTravelDistances
+    }
+    
     // Glide tuning constants
     private let glideLerp: CGFloat = 0.08
     private let worldGlideLerp: CGFloat = 0.12
@@ -148,10 +180,9 @@ class GameScene: SKScene {
     // MARK: - Scene Setup
     override func didMove(to view: SKView) {
      
-        
-        backgroundColor = UIColor(red: 0.1, green: 0.3, blue: 0.6, alpha: 1.0)
-        
-        
+        // Set initial background color based on weather (will be updated by weather system)
+        let weatherManager = WeatherManager.shared
+        backgroundColor = weatherManager.getBackgroundColor(for: .day) // Default to day initially
         
         physicsWorld.gravity = .zero
         
@@ -207,6 +238,15 @@ class GameScene: SKScene {
         touchInputController = TouchInputController()
         abilityManager = AbilityManager()
         edgeSpikeBushManager = EdgeSpikeBushManager(worldNode: worldManager.worldNode, scene: self)
+        
+        // WEATHER SYSTEM INITIALIZATION
+        let weatherManager = WeatherManager.shared
+        weatherManager.initializeForGame(gameStateManager: stateManager, effectsManager: effectsManager)
+        
+        // Set initial weather based on current level
+        let initialWeather = weatherManager.suggestWeatherForLevel(currentLevel)
+        weatherManager.setWeather(initialWeather, effectsManager: effectsManager)
+        print("🌤️ Weather system initialized for level \(currentLevel) with \(initialWeather.displayName) weather")
         
         setupManagerCallbacks()
     }
@@ -308,6 +348,10 @@ class GameScene: SKScene {
             )
         }
         
+        // Weather Manager Callbacks
+        setupWeatherNotifications()
+        setupWeatherEffectCallbacks()
+        
         // Landing Controller Callbacks
         landingController.onLandingSuccess = { [weak self] pad in
             guard let self = self else { return }
@@ -350,6 +394,12 @@ class GameScene: SKScene {
             self.effectsManager?.createLandingEffect(at: frogScreenAfter, intensity: intensity, lilyPad: pad)
 
             HapticFeedbackManager.shared.impact(.medium)
+
+            // WEATHER INTEGRATION: Handle slippery pad effects
+            self.handleSlipperyPadLanding(on: pad)
+
+            // Handle Impact Jumps super power effect
+            self.handleImpactJumpLanding(at: pad.position)
 
             // Set hasLandedOnce true after normal landing
             self.stateManager.hasLandedOnce = true
@@ -499,6 +549,348 @@ class GameScene: SKScene {
             self.frogContainer.zPosition = 100
             
             if let bg = self.backgroundNode { bg.zPosition = -1000 }
+        }
+    }
+    
+    // MARK: - Weather Notifications Setup
+    private func setupWeatherNotifications() {
+        // Listen for weather changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(weatherChanged(_:)),
+            name: NSNotification.Name("WeatherChanged"),
+            object: nil
+        )
+    }
+    
+    private func setupWeatherEffectCallbacks() {
+        // Listen for wind force effects
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleWindForce(_:)),
+            name: NSNotification.Name("WindForceApplied"),
+            object: nil
+        )
+        
+        // Listen for slippery pad effects
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSlipperyPadEffect(_:)),
+            name: NSNotification.Name("SlipperyPadEffect"),
+            object: nil
+        )
+        
+        // Listen for lightning effects
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleLightningEffect(_:)),
+            name: NSNotification.Name("LightningEffect"),
+            object: nil
+        )
+        
+        // Listen for level selection from UIManager
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleStartGameAtLevel(_:)),
+            name: NSNotification.Name("StartGameAtLevel"),
+            object: nil
+        )
+        
+        // Listen for pause menu actions
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleResumeGame),
+            name: NSNotification.Name("ResumeGame"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleQuitToMainMenu),
+            name: NSNotification.Name("QuitToMainMenu"),
+            object: nil
+        )
+        
+        // Listen for new game start from UIManager
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleStartNewGame),
+            name: NSNotification.Name("StartNewGame"),
+            object: nil
+        )
+        
+        // Listen for restart game from UIManager
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleRestartGame),
+            name: NSNotification.Name("RestartGame"),
+            object: nil
+        )
+        
+        // Listen for back to main menu from UIManager
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleBackToMainMenu),
+            name: NSNotification.Name("BackToMainMenu"),
+            object: nil
+        )
+    }
+    
+    @objc private func weatherChanged(_ notification: Notification) {
+        guard let newWeather = notification.object as? WeatherType,
+              let userInfo = notification.userInfo,
+              let oldWeather = userInfo["oldWeather"] as? WeatherType else { return }
+        
+        print("🌤️ Weather changed from \(oldWeather.displayName) to \(newWeather.displayName)")
+        
+        // Update background color smoothly
+        let weatherManager = WeatherManager.shared
+        let bgColor = weatherManager.getBackgroundColor(for: newWeather)
+        let colorAction = SKAction.colorize(with: bgColor, colorBlendFactor: 1.0, duration: 2.0)
+        run(colorAction)
+        
+        // Update existing lily pads with weather effects
+        updateExistingLilyPadsForWeather(newWeather)
+        
+        // Apply weather-specific gameplay effects
+        applyWeatherGameplayEffects(newWeather)
+        
+        // Update spawn configuration for new weather
+        updateSpawnConfigurationForWeather(newWeather)
+    }
+    
+    @objc private func handleWindForce(_ notification: Notification) {
+        guard let windForce = notification.object as? CGVector else { return }
+        guard gameState == .playing else { return }
+        
+        // Apply wind force to the frog during jumps
+        if frogController.isJumping {
+            let windEffect = CGPoint(x: windForce.dx * 0.5, y: windForce.dy * 0.3)
+            let adjustedTarget = CGPoint(
+                x: frogController.jumpTargetPos.x + windEffect.x,
+                y: frogController.jumpTargetPos.y + windEffect.y
+            )
+            
+            // Update frog's trajectory
+            frogController.adjustJumpTarget(to: adjustedTarget)
+            
+            // Show visual wind effect
+            showFloatingText("Wind!", color: .systemCyan)
+        }
+    }
+    
+    @objc private func handleSlipperyPadEffect(_ notification: Notification) {
+        guard let slipData = notification.userInfo,
+              let slipFactor = slipData["slipFactor"] as? CGFloat else { return }
+        
+        // Apply slip effect to the frog
+        applySlipEffectToFrog(factor: slipFactor)
+    }
+    
+    @objc private func handleLightningEffect(_ notification: Notification) {
+        // Create lightning flash effect
+        let lightningFlash = SKShapeNode(rect: CGRect(x: 0, y: 0, width: size.width, height: size.height))
+        lightningFlash.fillColor = UIColor.white.withAlphaComponent(0.8)
+        lightningFlash.strokeColor = .clear
+        lightningFlash.zPosition = 2000 // Above everything
+        addChild(lightningFlash)
+        
+        // Flash and remove
+        let fadeOut = SKAction.fadeOut(withDuration: 0.1)
+        let remove = SKAction.removeFromParent()
+        lightningFlash.run(SKAction.sequence([fadeOut, remove]))
+        
+        // Play thunder sound if available
+        soundController.playIceCrack() // Temporary sound effect
+        
+        // Brief screen shake
+        let shake = SKAction.sequence([
+            SKAction.moveBy(x: 5, y: 0, duration: 0.02),
+            SKAction.moveBy(x: -10, y: 0, duration: 0.04),
+            SKAction.moveBy(x: 5, y: 0, duration: 0.02)
+        ])
+        run(shake)
+    }
+    
+    @objc private func handleStartGameAtLevel(_ notification: Notification) {
+        guard let selectedLevel = notification.object as? Int else {
+            print("❌ handleStartGameAtLevel: Invalid level object")
+            return
+        }
+        
+        print("🎮 Received start game notification for level \(selectedLevel)")
+        
+        // Save any pending tadpole coins before starting at specific level
+        uiManager.savePendingTadpoleCoins()
+        
+        // Set the ScoreManager to the selected level
+        scoreManager.startAtLevel(selectedLevel)
+        
+        // Set local level tracking to match
+        currentLevel = selectedLevel
+        
+        // Set level starting score based on the selected level
+        levelStartingScore = scoreManager.score
+        print("🏁 Set level starting score to \(levelStartingScore) for Level \(selectedLevel)")
+        
+        // Start the game
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.startGame()
+        }
+    }
+    
+    @objc private func handleResumeGame() {
+        print("🎮 Resume game notification received")
+        gameState = .playing
+        
+        // Resume any paused systems
+        worldManager.worldNode.isPaused = false
+        
+        // Play resume sound if available
+        soundController.playSoundEffect(.buttonTap)
+        
+        print("🎮 Game resumed successfully")
+    }
+    
+    @objc private func handleQuitToMainMenu() {
+        print("🎮 Quit to main menu notification received")
+        
+        // Play button sound
+        soundController.playSoundEffect(.buttonTap)
+        
+        // Return to main menu
+        showMainMenu()
+        
+        print("🎮 Returned to main menu successfully")
+    }
+    
+    @objc private func handleStartNewGame() {
+        print("🎮 Start new game notification received")
+        
+        // Play button sound
+        soundController.playSoundEffect(.buttonTap)
+        
+        // Start a completely new game
+        startNewGame()
+        
+        print("🎮 New game started successfully")
+    }
+    
+    @objc private func handleRestartGame() {
+        print("🎮 Restart game notification received")
+        
+        // Play button sound
+        soundController.playSoundEffect(.buttonTap)
+        
+        // Start a new game (same as start new game)
+        startNewGame()
+        
+        print("🎮 Game restarted successfully")
+    }
+    
+    @objc private func handleBackToMainMenu() {
+        print("🎮 Back to main menu notification received")
+        
+        // Play button sound
+        soundController.playSoundEffect(.buttonTap)
+        
+        // Return to main menu
+        showMainMenu()
+        
+        print("🎮 Returned to main menu successfully")
+    }
+    
+    private func updateExistingLilyPadsForWeather(_ weather: WeatherType) {
+        // Apply weather effects to all existing lily pads
+        enumerateChildNodes(withName: "lilypad") { node, _ in
+            WeatherManager.shared.applyWeatherEffectsToLilyPad(node, weather: weather)
+        }
+        
+        // Also update lily pads in the game objects array
+        for lilyPad in lilyPads {
+            WeatherManager.shared.applyWeatherEffectsToLilyPad(lilyPad.node, weather: weather)
+        }
+    }
+    
+    // MARK: - Weather Gameplay Effects
+    
+    private func applyWeatherGameplayEffects(_ weather: WeatherType) {
+        let weatherManager = WeatherManager.shared
+        
+        // Handle water to ice conversion
+        if weatherManager.shouldConvertWaterToIce() {
+            stateManager.setWaterState(.ice)
+            showFloatingText("Water freezes to ice!", color: .systemCyan)
+        } else {
+            stateManager.setWaterState(.water)
+        }
+        
+        // Handle slippery pads effect
+        if weatherManager.shouldPadsBeSlippery() {
+            showFloatingText("Lily pads are slippery!", color: .systemYellow)
+        }
+        
+        // Handle wind effects
+        if weatherManager.isWindActive() {
+            showFloatingText("Strong winds ahead!", color: .systemGray)
+        }
+        
+        // Apply weather-specific visual effects through EffectsManager
+        effectsManager?.updateWeatherEffects(for: weather)
+    }
+    
+    private func updateSpawnConfigurationForWeather(_ weather: WeatherType) {
+        // Get weather-specific level configuration
+        let weatherManager = WeatherManager.shared
+        let weatherConfig = weatherManager.getWeatherLevelConfig(level: currentLevel, weather: weather)
+        
+        // TODO: Update spawn manager with new configuration when method is implemented
+        // spawnManager.updateWeatherConfiguration(weatherConfig)
+        
+        print("🌤️ Updated spawn configuration for \(weather.displayName) weather")
+        print("🌤️ Global spawn multiplier: \(weatherConfig.globalSpawnRateMultiplier)")
+        print("🌤️ Weather-adjusted enemy configs: \(weatherConfig.enemyConfigs.count) types")
+    }
+    
+    private func applySlipEffectToFrog(factor: CGFloat) {
+        guard frogController.isGrounded else { return }
+        
+        // Calculate slip velocity based on slip factor
+        let baseSlideSpeed: CGFloat = 30.0 * factor // Scale by slip factor
+        let slipDirection = CGFloat.random(in: 0...(2 * .pi))
+        
+        let slipVelocity = CGVector(
+            dx: cos(slipDirection) * baseSlideSpeed,
+            dy: sin(slipDirection) * baseSlideSpeed
+        )
+        
+        // Delegate to FrogController's ice sliding functionality
+        frogController.startSlidingOnIce(initialVelocity: slipVelocity)
+        
+        // Visual feedback
+        showFloatingText("Slippery!", color: .systemBlue)
+        effectsManager?.createSlipEffect(at: frogContainer.position)
+        
+        // Light haptic feedback
+        HapticFeedbackManager.shared.impact(.light)
+        
+        print("🧊 GameScene applied slip effect - delegated to FrogController.startSlidingOnIce with velocity: \(slipVelocity)")
+    }
+    
+    private func handleSlipperyPadLanding(on pad: LilyPad) {
+        let weatherManager = WeatherManager.shared
+        
+        // Check if pads should be slippery in current weather
+        if weatherManager.shouldPadsBeSlippery() {
+            let slipFactor = weatherManager.getSlipFactor()
+            
+            // Apply slip effect with a small delay to let the landing complete
+            let delay = SKAction.wait(forDuration: 0.2)
+            let slipAction = SKAction.run { [weak self] in
+                self?.applySlipEffectToFrog(factor: slipFactor)
+            }
+            run(SKAction.sequence([delay, slipAction]))
         }
     }
     
@@ -814,10 +1206,12 @@ class GameScene: SKScene {
             menuBackdrop?.run(SKAction.fadeAlpha(to: 1.0, duration: 0.2))
             worldManager.worldNode.isPaused = true
         case .initialUpgradeSelection:
+            print("🎮 State transition: Setting UI invisible for initial upgrade selection")
             uiManager.setUIVisible(false)
             menuBackdrop?.run(SKAction.fadeAlpha(to: 0.9, duration: 0.2))
             worldManager.worldNode.isPaused = true
         case .playing:
+            print("🎮 State transition: Setting UI visible and unpausing for playing state")
             uiManager.setUIVisible(true)
             menuBackdrop?.run(SKAction.fadeAlpha(to: 0.0, duration: 0.2))
             worldManager.worldNode.isPaused = false
@@ -884,6 +1278,15 @@ class GameScene: SKScene {
         // Force reset all progress for a brand new game
         scoreManager.startFreshGame()
         
+        // CRITICAL FIX: Reset level starting score for completely new games
+        levelStartingScore = 0
+        print("🏁 Reset level starting score to 0 for new game")
+        
+        // Reset travel distance tracking for new session
+        totalSessionTravelDistance = 0
+        levelTravelDistances.removeAll()
+        print("📏 Reset travel distance tracking for new session")
+        
         // TEST: Verify level configuration system is working
         testLevelConfigSystem()
         
@@ -897,6 +1300,10 @@ class GameScene: SKScene {
         
         // Continue from the last completed level
         scoreManager.continueFromLastLevel()
+        
+        // CRITICAL FIX: Set level starting score based on the current score when continuing
+        levelStartingScore = scoreManager.score
+        print("🏁 Set level starting score to \(levelStartingScore) for continuing game")
         
         // TEST: Verify level configuration system is working
         testLevelConfigSystem()
@@ -916,8 +1323,33 @@ class GameScene: SKScene {
             print("🎮 Starting game at Level \(currentLevel) (from ScoreManager)")
             print("🎮 Base spawn rate multiplier: \(String(format: "%.2f", baseSpawnRateMultiplier))x")
             print("🎮 This should show initial upgrade selection")
+            
+            // CRITICAL FIX: Set the starting score for finish line calculations
+            levelStartingScore = scoreManager.score
+            print("🏁 Level starting score set to: \(levelStartingScore)")
+            
+            // Initialize travel distance tracking for new level
+            levelStartingFrogY = 0  // Will be set when frog is positioned
+            levelTravelDistance = 0
+            print("📏 Travel distance tracking initialized for Level \(currentLevel)")
+            
+            // WEATHER INTEGRATION: Set appropriate weather for the starting level
+            let weatherManager = WeatherManager.shared
+            let levelWeather = weatherManager.suggestWeatherForLevel(currentLevel)
+            weatherManager.setWeather(levelWeather, effectsManager: effectsManager)
+            print("🌤️ Set weather for Level \(currentLevel): \(levelWeather.displayName)")
         } else {
             print("🎮 Continuing from state \(gameState) - no level reset")
+            
+            // Still ensure weather is appropriate for current level
+            let weatherManager = WeatherManager.shared
+            let currentWeather = weatherManager.weather
+            let expectedWeather = weatherManager.suggestWeatherForLevel(currentLevel)
+            
+            if currentWeather != expectedWeather {
+                print("🌤️ Adjusting weather from \(currentWeather.displayName) to \(expectedWeather.displayName) for Level \(currentLevel)")
+                weatherManager.setWeather(expectedWeather, effectsManager: effectsManager)
+            }
         }
         
         // CRITICAL FIX: Apply super power bonuses to starting health
@@ -1118,7 +1550,7 @@ class GameScene: SKScene {
         
         // Show floating text with remaining count
         let newRemainingEscapes = uiManager.getGhostEscapesRemaining()
-        showFloatingText("👻 Ghost Escape! (\(newRemainingEscapes) left)", color: .systemPurple)
+        showFloatingText("👻 Ghost Bust! (\(newRemainingEscapes) left)", color: .systemPurple)
         
         print("👻 Ghost Escape used! Remaining escapes: \(newRemainingEscapes)")
         return true
@@ -1129,6 +1561,7 @@ class GameScene: SKScene {
     // This method is called after the player selects their initial upgrade
     func proceedToGameplay() {
         print("GameScene.proceedToGameplay() ENTERED")
+        print("🎯 Current game state before transition: \(gameState)")
         
         print("After hideMenus()")
         uiManager.hideSuperJumpIndicator()
@@ -1154,10 +1587,13 @@ class GameScene: SKScene {
             bg.position = CGPoint(x: size.width/2, y: size.height/2)
         }
         
-       
-        
+        // Transition to playing state
         gameState = .playing
+        print("🎯 Game state set to playing: \(gameState)")
+        
+        // Lock input briefly to allow for smooth transition
         stateManager.lockInput(for: 0.2)
+        print("🔒 Input locked for 0.2 seconds during transition")
         
         // Show current level indicator
         showLevelIndicator()
@@ -1242,6 +1678,11 @@ class GameScene: SKScene {
         
         frogController.resetToStartPad(startPad: startPad, sceneSize: size)
         
+        // Initialize travel distance tracking
+        levelStartingFrogY = frogController.position.y
+        levelTravelDistance = 0
+        print("📏 Travel distance tracking started - starting Y: \(levelStartingFrogY)")
+        
         facingDirectionController.resetFacing()
         
         frogContainer.alpha = 1.0
@@ -1270,7 +1711,11 @@ class GameScene: SKScene {
         
         //updateHUD()
         
-        print("Game started! Frog world position: \(frogController.position)")
+        print("✅ Game started! Frog world position: \(frogController.position)")
+        print("✅ Final game state: \(gameState)")
+        print("✅ Input locked: \(stateManager.inputLocked)")
+        print("✅ Frog grounded: \(frogController.isGrounded)")
+        print("✅ proceedToGameplay() completed successfully")
     }
     
     // MARK: - Game Over
@@ -1325,6 +1770,10 @@ class GameScene: SKScene {
     // MARK: - Ability Selection
     func selectAbility(_ abilityStr: String) {
         print("🎯 Selecting ability: \(abilityStr)")
+        
+        // Debug: Show what ability manager is receiving
+        print("🎯 Calling abilityManager.selectAbility with: '\(abilityStr)'")
+        
         abilityManager.selectAbility(abilityStr)
         healthManager.pendingAbilitySelection = false
         
@@ -1347,6 +1796,9 @@ class GameScene: SKScene {
             showFloatingText("Axe!", color: .systemBrown)
         } else if abilityStr.contains("rocket") {
             showFloatingText("Rocket Boost!", color: .systemPurple)
+        } else {
+            print("🚨 Unknown ability type: \(abilityStr)")
+            showFloatingText("Unknown Ability", color: .systemGray)
         }
         
         // Update HUD to reflect the new ability/upgrade
@@ -1384,6 +1836,7 @@ class GameScene: SKScene {
             showFloatingText("Extra Heart Added!", color: .systemRed)
         default:
             print("Unknown initial upgrade: \(upgradeString)")
+            // Still proceed to gameplay even if upgrade is unknown
         }
         
         // Update HUD to reflect the new upgrade (same as selectAbility)
@@ -1393,9 +1846,12 @@ class GameScene: SKScene {
         // Hide the upgrade selection and proceed to gameplay
         uiManager.hideMenus()
         
-        
-
-        proceedToGameplay()
+        // Add a small delay to ensure UI transition completes smoothly
+        let delay = SKAction.wait(forDuration: 0.1)
+        let proceedAction = SKAction.run { [weak self] in
+            self?.proceedToGameplay()
+        }
+        run(SKAction.sequence([delay, proceedAction]))
     }
     
     // MARK: - Performance Tracking
@@ -1604,6 +2060,18 @@ class GameScene: SKScene {
             let deltaWorldY = prev - curr // positive when world moved down
             if deltaWorldY > 0 {
                 hudController?.updateScoreForVerticalScroll(deltaY: deltaWorldY)
+                
+                // Track travel distance - positive deltaWorldY means frog moved upward
+                levelTravelDistance += deltaWorldY
+                totalSessionTravelDistance += deltaWorldY
+                
+                // Store the travel distance for this level
+                levelTravelDistances[currentLevel] = levelTravelDistance
+                
+                // Debug output every ~100 units of travel to avoid spam
+                if Int(levelTravelDistance) % 100 < Int(levelTravelDistance - deltaWorldY) % 100 {
+                    print("📏 Level \(currentLevel) travel: \(Int(levelTravelDistance)) units (session: \(Int(totalSessionTravelDistance)))")
+                }
             }
             lastWorldYForScore = curr
         } else {
@@ -1818,11 +2286,12 @@ class GameScene: SKScene {
         }
         
         // MARK: - Finish Line Logic
-        // Check if score has reached threshold and spawn finish line if not already spawned
-        // Level-based finish line scoring: each level requires 25,000 points
-        let finishLineThreshold = currentLevel * 25000 // Level 1: 25,000, Level 2: 50,000, Level 3: 75,000, etc.
-        if score >= finishLineThreshold && !hasSpawnedFinishLine {
-            print("🏁 Spawning finish line at score \(score) (threshold: \(finishLineThreshold)) for Level \(currentLevel)")
+        // Check if travel distance has reached threshold and spawn finish line if not already spawned
+        // UPDATED: Use travel distance instead of score for finish line spawning
+        let requiredDistance = LevelEnemyConfigManager.getRequiredTravelDistance(for: currentLevel)
+        
+        if levelTravelDistance >= requiredDistance && !hasSpawnedFinishLine {
+            print("🏁 Spawning finish line after \(Int(levelTravelDistance)) units travel (required: \(Int(requiredDistance))) for Level \(currentLevel)")
             spawnFinishLine()
         }
         
@@ -2425,7 +2894,13 @@ class GameScene: SKScene {
     // MARK: - Lily Pad Creation (for special cases only)
     private func makeLilyPad(position: CGPoint, radius: CGFloat) -> LilyPad {
         // For start pad and rescue pad, always create normal pads
-        return LilyPad(position: position, radius: radius, type: .normal)
+        let lilyPad = LilyPad(position: position, radius: radius, type: .normal)
+        
+        // Apply current weather effects to the newly created lily pad
+        let weatherManager = WeatherManager.shared
+        WeatherManager.shared.applyWeatherEffectsToLilyPad(lilyPad.node, weather: weatherManager.weather)
+        
+        return lilyPad
     }
     
     // MARK: - UI Helpers
@@ -2553,6 +3028,7 @@ class GameScene: SKScene {
         
         print("🏁 Frog crossed the finish line! Level \(currentLevel) complete!")
         print("🏁 Current score: \(score)")
+        print("📏 Level \(currentLevel) travel distance: \(Int(levelTravelDistance)) units")
         
         // Calculate and award time bonus
         let timeBonus = calculateTimeBonus()
@@ -2609,6 +3085,18 @@ class GameScene: SKScene {
         print("🎮 New Level Configuration:")
         print(LevelEnemyConfigManager.getDebugInfo(for: currentLevel))
         
+        // WEATHER INTEGRATION: Update weather for new level
+        let weatherManager = WeatherManager.shared
+        let newWeather = weatherManager.suggestWeatherForLevel(currentLevel)
+        let currentWeather = weatherManager.weather
+        
+        if newWeather != currentWeather {
+            print("🌤️ Level \(currentLevel): Transitioning weather from \(currentWeather.displayName) to \(newWeather.displayName)")
+            weatherManager.transitionToWeather(newWeather, duration: 3.0, effectsManager: effectsManager)
+        } else {
+            print("🌤️ Level \(currentLevel): Weather remains \(currentWeather.displayName)")
+        }
+        
         // Remove finish line
         finishLine?.node.removeFromParent()
         finishLine = nil
@@ -2640,7 +3128,7 @@ class GameScene: SKScene {
         difficultyLabel.fontName = "ArialRoundedMTBold"
         difficultyLabel.fontSize = 24
         difficultyLabel.fontColor = .systemOrange
-        difficultyLabel.position = CGPoint(x: size.width/2, y: size.height/2 - 20 + 70)
+        difficultyLabel.position = CGPoint(x: size.width/2, y: size.height/2 + 100)
         difficultyLabel.zPosition = 1000
         difficultyLabel.name = "difficultyLabel" // Add name for easy removal
         addChild(difficultyLabel)
@@ -2661,6 +3149,13 @@ class GameScene: SKScene {
         
         // Update spawn manager with new level's spawn rate multiplier
         spawnManager.updateSpawnRateMultiplier(baseSpawnRateMultiplier)
+        
+        // WEATHER INTEGRATION: Update spawn manager with weather configuration 
+        // This will apply weather-specific enemy spawn rates and rules
+        let weatherConfig = weatherManager.getWeatherLevelConfig(level: currentLevel)
+        // TODO: Implement weather configuration in SpawnManager
+        // spawnManager.updateWeatherConfiguration(weatherConfig)
+        print("🌤️ Weather config loaded for Level \(currentLevel): \(weatherManager.weather.displayName)")
         
         // Update the level indicator in the corner
         showLevelIndicator()
@@ -2714,6 +3209,15 @@ class GameScene: SKScene {
         hasSpawnedFinishLine = false
         frogPreviousY = 0
         isRocketFinalApproach = false
+        
+        // CRITICAL FIX: Set new level starting score for finish line calculations
+        levelStartingScore = scoreManager.score
+        print("🏁 New level starting score set to: \(levelStartingScore)")
+        
+        // Reset travel distance tracking for new level
+        levelStartingFrogY = frogController.position.y
+        levelTravelDistance = 0
+        print("📏 Travel distance tracking reset for Level \(currentLevel) - starting Y: \(levelStartingFrogY)")
         
         // STEP 6: Reset spawn manager state for new level
         print("🧹 Resetting spawn manager state...")
@@ -3109,12 +3613,27 @@ class GameScene: SKScene {
         spawnFinishLine()
     }
     
+    /// Test method to simulate starting at different travel distances (for testing finish line logic)
+    func testFinishLineAtTravelDistance(_ startingDistance: CGFloat) {
+        print("🧪 TESTING: Setting level travel distance to \(Int(startingDistance))")
+        levelTravelDistance = startingDistance
+        hasSpawnedFinishLine = false // Reset so finish line can spawn again
+        
+        let requiredDistance = LevelEnemyConfigManager.getRequiredTravelDistance(for: currentLevel)
+        print("🧪 Finish line should appear when travel distance reaches: \(Int(requiredDistance)) units")
+        debugFinishLineState()
+    }
+    
     /// Debug finish line state
     func debugFinishLineState() {
         print("🏁 FINISH LINE DEBUG:")
         print("   - Score: \(score)")
         print("   - Current Level: \(currentLevel)")
-        print("   - Threshold: \(currentLevel * 25000)")
+        print("   - Level Travel Distance: \(Int(levelTravelDistance)) units")
+        let requiredDistance = LevelEnemyConfigManager.getRequiredTravelDistance(for: currentLevel)
+        print("   - Required Travel Distance: \(Int(requiredDistance)) units")
+        print("   - Distance Progress: \(Int(levelTravelDistance))/\(Int(requiredDistance)) (\(String(format: "%.1f", (levelTravelDistance / requiredDistance) * 100))%)")
+        print("   - Distance Remaining: \(Int(max(0, requiredDistance - levelTravelDistance))) units")
         print("   - Has spawned: \(hasSpawnedFinishLine)")
         print("   - Finish line exists: \(finishLine != nil)")
         print("   - Frog position Y: \(Int(frogController.position.y))")
@@ -3164,6 +3683,83 @@ class GameScene: SKScene {
         print("")
         print("🎮 Level Configuration Details:")
         print(LevelEnemyConfigManager.getDebugInfo(for: currentLevel))
+    }
+    
+    // MARK: - Travel Distance Debug Methods
+    
+    /// Get the travel distance for the current level
+    func getCurrentLevelTravelDistance() -> CGFloat {
+        return levelTravelDistance
+    }
+    
+    /// Get the total travel distance for the current session
+    func getTotalSessionTravelDistance() -> CGFloat {
+        return totalSessionTravelDistance
+    }
+    
+    /// Get travel distance for a specific level
+    func getTravelDistanceForLevel(_ level: Int) -> CGFloat {
+        return levelTravelDistances[level] ?? 0
+    }
+    
+    /// Get all level travel distances
+    func getAllLevelTravelDistances() -> [Int: CGFloat] {
+        return levelTravelDistances
+    }
+    
+    /// Debug method to show travel distance information
+    func debugTravelDistances() {
+        print("📏 TRAVEL DISTANCE DEBUG:")
+        print("  - Current Level: \(currentLevel)")
+        print("  - Current Level Distance: \(Int(levelTravelDistance)) units")
+        print("  - Session Total Distance: \(Int(totalSessionTravelDistance)) units")
+        print("  - Starting Frog Y: \(Int(levelStartingFrogY))")
+        print("  - Current Frog Y: \(Int(frogController.position.y))")
+        print("  - Frog Y Change: \(Int(frogController.position.y - levelStartingFrogY))")
+        
+        // Show required distance for current level
+        let requiredDistance = LevelEnemyConfigManager.getRequiredTravelDistance(for: currentLevel)
+        print("  - Required Distance (Level \(currentLevel)): \(Int(requiredDistance)) units")
+        print("  - Progress: \(String(format: "%.1f", (levelTravelDistance / requiredDistance) * 100))%")
+        
+        print("")
+        print("  📊 All Level Distances:")
+        let sortedLevels = levelTravelDistances.keys.sorted()
+        for level in sortedLevels {
+            let distance = levelTravelDistances[level] ?? 0
+            let required = LevelEnemyConfigManager.getRequiredTravelDistance(for: level)
+            print("    Level \(level): \(Int(distance))/\(Int(required)) units (\(String(format: "%.1f", (distance / required) * 100))%)")
+        }
+        
+        if levelTravelDistances.isEmpty {
+            print("    (No completed levels)")
+        }
+        
+        // Calculate average distance per level (excluding current incomplete level)
+        let completedDistances = levelTravelDistances.filter { $0.key < currentLevel }
+        if !completedDistances.isEmpty {
+            let totalCompleted = completedDistances.values.reduce(0, +)
+            let averageDistance = totalCompleted / CGFloat(completedDistances.count)
+            print("  📈 Average distance per completed level: \(Int(averageDistance)) units")
+        }
+        
+        // Show upcoming level requirements
+        print("")
+        print("  🔮 Upcoming Level Requirements:")
+        for level in (currentLevel + 1)...(currentLevel + 3) {
+            let required = LevelEnemyConfigManager.getRequiredTravelDistance(for: level)
+            print("    Level \(level): \(Int(required)) units required")
+        }
+    }
+    
+    /// Reset travel distance tracking (for testing)
+    func debugResetTravelDistances() {
+        print("📏 RESETTING all travel distance data")
+        totalSessionTravelDistance = 0
+        levelTravelDistance = 0
+        levelTravelDistances.removeAll()
+        levelStartingFrogY = frogController.position.y
+        print("📏 Travel distances reset - new starting Y: \(levelStartingFrogY)")
     }
     
     /// Test method to preview configurations for upcoming levels
@@ -3276,12 +3872,92 @@ class GameScene: SKScene {
         
         let nodesAtPoint = nodes(at: location)
         
+        // DEBUG: Print touch information when in menu state with tutorial potentially open
+        if gameState == .menu {
+            print("🔍 MENU TOUCH DEBUG:")
+            print("   - Touch location: \(location)")
+            print("   - Game state: \(gameState)")
+            print("   - Nodes at point: \(nodesAtPoint.count)")
+            for (index, node) in nodesAtPoint.enumerated() {
+                print("     \(index): \(type(of: node)) - name: '\(node.name ?? "nil")' - zPos: \(node.zPosition)")
+            }
+            
+            // Check if tutorial modal exists
+            if let tutorialModal = uiManager.tutorialModal {
+                print("   - Tutorial modal exists: ✅")
+                print("   - Tutorial modal position: \(tutorialModal.position)")
+                print("   - Tutorial modal zPosition: \(tutorialModal.zPosition)")
+                print("   - Tutorial modal children: \(tutorialModal.children.count)")
+                for child in tutorialModal.children {
+                    if let name = child.name {
+                        print("     - Child: \(name) at \(child.position)")
+                    }
+                }
+            } else {
+                print("   - Tutorial modal exists: ❌")
+            }
+        }
+        
+        // DEBUG: Print touch information for troubleshooting
+        if gameState == .initialUpgradeSelection {
+            print("🔍 INITIAL UPGRADE TOUCH DEBUG:")
+            print("   - Touch location: \(location)")
+            print("   - Game state: \(gameState)")
+            print("   - Nodes at point: \(nodesAtPoint.count)")
+            for (index, node) in nodesAtPoint.enumerated() {
+                print("     \(index): \(type(of: node)) - name: '\(node.name ?? "nil")' - frame: \(node.frame)")
+            }
+        }
+        
+        // DEBUG: Print all nodes at touch point when ability menu is showing
+        if gameState == .abilitySelection {
+            print("🔍 TOUCH DEBUG: Touch at \(location) in gameState: \(gameState)")
+            print("🔍 TOUCH DEBUG: Found \(nodesAtPoint.count) nodes at touch point:")
+            for (index, node) in nodesAtPoint.enumerated() {
+                print("  \(index): \(type(of: node)) - name: '\(node.name ?? "nil")' - zPos: \(node.zPosition) - frame: \(node.frame)")
+            }
+            
+            // Also check if ability layer exists and is accessible
+            if let abilityLayer = uiManager.abilityLayer {
+                print("🔍 ABILITY LAYER DEBUG:")
+                print("  - Ability layer exists: ✅")
+                print("  - Position: \(abilityLayer.position)")
+                print("  - zPosition: \(abilityLayer.zPosition)")
+                print("  - Alpha: \(abilityLayer.alpha)")
+                print("  - isUserInteractionEnabled: \(abilityLayer.isUserInteractionEnabled)")
+                print("  - Children count: \(abilityLayer.children.count)")
+                
+                // List ability buttons
+                for child in abilityLayer.children {
+                    if let name = child.name, name.hasPrefix("ability_") {
+                        print("    - Button: \(name) at \(child.position), frame: \(child.frame)")
+                    }
+                }
+            } else {
+                print("🔍 ABILITY LAYER DEBUG: ❌ No ability layer found!")
+            }
+        }
+        
+        // Use UIManager's enhanced touch handling for menu and paused states
+        if gameState == .menu || gameState == .paused {
+            print("🔍 Delegating touch to UIManager for state: \(gameState)")
+            uiManager.handleTouch(touch, phase: .began, in: self)
+            
+            // IMPORTANT: Don't return early - we need to check for tutorial modal buttons
+            // The tutorial modal might be open even when game state is .menu
+        } else if gameState == .abilitySelection || gameState == .initialUpgradeSelection {
+            // IMPORTANT: Notify UIManager but allow GameScene to continue handling ability/upgrade taps
+            print("🔍 Notifying UIManager for ability/upgrade selection state: \(gameState)")
+            uiManager.handleTouch(touch, phase: .began, in: self)
+        }
+        
         // Press feedback for UI buttons (nodes named with known button names or ability_ prefix)
         if let tapped = nodesAtPoint.first(where: { node in
             guard let name = node.name else { return false }
             return name == "playGameButton" ||
                    name == "continueGameButton" ||
                    name == "newGameButton" ||
+                   name == "levelSelectorButton" ||
                    name == "leaderboardButton" ||
                    name == "tutorialButton" ||
                    name == "closeTutorialButton" ||
@@ -3295,7 +3971,9 @@ class GameScene: SKScene {
                    name == "restartButton" ||
                    name == "backToMenuButton" ||
                    name == "rocketLandButton" ||
-                   name.hasPrefix("ability_")
+                   name.hasPrefix("ability_") ||
+                   name.hasPrefix("levelButton_") ||
+                   name.hasPrefix("initialUpgrade_")
         }) {
             // Animate press on the button's root node (use parent if label/sprite was hit)
             let buttonRoot = tapped.name == "tapTarget" ? tapped.parent ?? tapped : tapped
@@ -3306,48 +3984,43 @@ class GameScene: SKScene {
         // Check for UI button taps FIRST
         for node in nodesAtPoint {
             if let nodeName = node.name {
-                // Main Menu Buttons
-                if nodeName == "playGameButton" {
+                print("🔍 Found node with name: \(nodeName)")
+                
+                // Handle New Game button DIRECTLY (bypass level selection system)
+                if nodeName == "newGameButton" {
                     soundController.playSoundEffect(.buttonTap)
                     startNewGame()
                     return
                 }
                 
-                // Continue from last completed level
+                // Handle Continue Game button DIRECTLY
                 if nodeName == "continueGameButton" {
                     soundController.playSoundEffect(.buttonTap)
                     startGameFromLastLevel()
                     return
                 }
                 
-                // Start completely new game (Level 1)
-                if nodeName == "newGameButton" {
+                // Route other menu buttons through UIManager for consistent handling
+                if ["playGameButton", "levelSelectorButton", 
+                    "leaderboardButton", "tutorialButton", "closeTutorialButton", "superPowersButton",
+                    "closeLevelSelectionButton"].contains(nodeName) {
+                    print("🔍 Routing \(nodeName) to UIManager")
+                    soundController.playSoundEffect(.buttonTap)
+                    uiManager.handleNamedButtonTap(nodeName)
+                    return
+                }
+                
+                // Handle level selection buttons (these go through level selection system)
+                if nodeName.hasPrefix("levelButton_") {
+                    soundController.playSoundEffect(.buttonTap)
+                    uiManager.handleNamedButtonTap(nodeName)
+                    return
+                }
+                
+                // Legacy handler for playGameButton (fallback)
+                if nodeName == "playGameButton" {
                     soundController.playSoundEffect(.buttonTap)
                     startNewGame()
-                    return
-                }
-                if nodeName == "leaderboardButton" {
-                    soundController.playSoundEffect(.buttonTap)
-                    // Present Game Center leaderboard via UIManager
-                    uiManager.presentLeaderboard(leaderboardID: uiManager.leaderboardID)
-                    return
-                }
-                if nodeName == "tutorialButton" {
-                    soundController.playSoundEffect(.buttonTap)
-                    // Show tutorial modal via UIManager
-                    uiManager.showTutorialModal(sceneSize: size)
-                    return
-                }
-                if nodeName == "superPowersButton" {
-                    soundController.playSoundEffect(.buttonTap)
-                    // Show super powers modal via UIManager
-                    uiManager.handleNamedButtonTap("superPowersButton")
-                    return
-                }
-                if nodeName == "closeTutorialButton" {
-                    soundController.playSoundEffect(.buttonTap)
-                    // Close tutorial modal via UIManager
-                    uiManager.hideTutorialModal()
                     return
                 }
                 if nodeName == "profileButton" || nodeName == "settingsButton" || nodeName == "audioButton" {
@@ -3367,16 +4040,22 @@ class GameScene: SKScene {
                     return
                 }
                 
-                // Ability selection buttons
-                if nodeName.contains("ability") {
+                // Ability selection buttons - HANDLE REGARDLESS OF GAME STATE
+                if nodeName.hasPrefix("ability_") {
                     soundController.playSoundEffect(.buttonTap)
                     print("🎯 Ability button tapped: \(nodeName)")
-                    selectAbility(nodeName)
+                    
+                    // Extract the ability type from the button name (remove "ability_" prefix)
+                    let abilityTypeString = String(nodeName.dropFirst("ability_".count))
+                    print("🎯 Extracted ability type: \(abilityTypeString)")
+                    
+                    selectAbility(abilityTypeString)
                     return
                 }
                 
                 // Initial upgrade selection buttons
                 if nodeName.hasPrefix("initialUpgrade_") {
+                    print("🎯 Initial upgrade button detected: \(nodeName)")
                     soundController.playSoundEffect(.buttonTap)
                     handleInitialUpgradeSelection(nodeName)
                     return
@@ -3388,19 +4067,6 @@ class GameScene: SKScene {
                                uiManager.showPauseMenu(sceneSize: size)
                                return
                            }
-                // Pause menu buttons
-                           if nodeName == "continueButton" || nodeName == "resumeButton" {
-                               soundController.playSoundEffect(.buttonTap)
-                               gameState = .playing
-                               uiManager.hideMenus()
-                               return
-                           }
-                           
-                           if nodeName == "quitButton" || nodeName == "quitToMenuButton" {
-                               soundController.playSoundEffect(.buttonTap)
-                               showMainMenu()
-                               return
-                           }
                 
                 // Rocket land button handler
                 if nodeName == "rocketLandButton" {
@@ -3408,6 +4074,30 @@ class GameScene: SKScene {
                     handleRocketLandButtonTap()
                     return
                 }
+            }
+        }
+        
+        // BACKUP: Manually check ability layer if we're in ability selection and no nodes were found
+        if gameState == .abilitySelection && nodesAtPoint.isEmpty {
+            print("🔍 BACKUP CHECK: No nodes found at touch point, manually checking ability layer")
+            if let abilityLayer = uiManager.abilityLayer {
+                // Convert touch location to ability layer's coordinate space
+                let layerLocation = convert(location, to: abilityLayer)
+                print("🔍 BACKUP CHECK: Touch at \(location) converts to \(layerLocation) in ability layer space")
+                
+                // Check each ability button manually
+                for child in abilityLayer.children {
+                    if let nodeName = child.name, nodeName.hasPrefix("ability_") {
+                        if child.contains(layerLocation) {
+                            print("🔍 BACKUP CHECK: Found ability button \(nodeName) contains touch point")
+                            soundController.playSoundEffect(.buttonTap)
+                            let abilityTypeString = String(nodeName.dropFirst("ability_".count))
+                            selectAbility(abilityTypeString)
+                            return
+                        }
+                    }
+                }
+                print("🔍 BACKUP CHECK: No ability buttons contain the touch point")
             }
         }
         
@@ -3443,6 +4133,8 @@ class GameScene: SKScene {
         if !(frogController.isGrounded || frogController.inWater) {
             print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch ignored: not grounded/inWater (isGrounded=\(frogController.isGrounded), isJumping=\(frogController.isJumping))")
             return
+        
+       
         }
         
         // Slingshot handling - only if grounded or in water
@@ -3510,6 +4202,32 @@ class GameScene: SKScene {
             currentlyPressedButton = nil
         }
         
+        // Use UIManager's enhanced touch handling for menu and paused states
+        if gameState == .menu || gameState == .paused {
+            uiManager.handleTouch(touch, phase: .ended, in: self)
+            // IMPORTANT: Don't return early - we need to continue processing for tutorial modal buttons
+        } else if gameState == .abilitySelection || gameState == .initialUpgradeSelection {
+            // IMPORTANT: Notify UIManager but allow GameScene to continue handling ability/upgrade taps
+            uiManager.handleTouch(touch, phase: .ended, in: self)
+        }
+        
+        // TUTORIAL MODAL BUTTON FIX: Check for tutorial close button in menu state
+        if gameState == .menu || gameState == .paused {
+            let nodesAtPoint = nodes(at: location)
+            for node in nodesAtPoint {
+                if let nodeName = node.name {
+                    print("🔍 TouchesEnded - Found node: \(nodeName)")
+                    
+                    if nodeName == "closeTutorialButton" {
+                        print("🔍 TouchesEnded - Handling closeTutorialButton")
+                        soundController.playSoundEffect(.buttonTap)
+                        uiManager.handleNamedButtonTap(nodeName)
+                        return
+                    }
+                }
+            }
+        }
+        
         if gameState == .playing && frogController.rocketActive {
             print("ÃƒÂ¢Ã¢â‚¬ÂºÃ¢â‚¬ÂÃƒÂ¯Ã‚Â¸Ã‚Â Touch routed to rocket steering")
             _ = touchInputController.handleTouchEnded(touch, in: self.view, sceneSize: size, rocketActive: frogController.rocketActive, hudBarHeight: hudBarHeight)
@@ -3558,6 +4276,17 @@ class GameScene: SKScene {
         if let pressed = currentlyPressedButton {
             uiManager.handleButtonRelease(node: pressed)
             currentlyPressedButton = nil
+        }
+        
+        // Use UIManager's enhanced touch handling for menu and paused states
+        if let touch = touches.first {
+            if gameState == .menu || gameState == .paused {
+                uiManager.handleTouch(touch, phase: .cancelled, in: self)
+                return
+            } else if gameState == .abilitySelection || gameState == .initialUpgradeSelection {
+                // IMPORTANT: Notify UIManager but allow GameScene to continue handling ability/upgrade taps
+                uiManager.handleTouch(touch, phase: .cancelled, in: self)
+            }
         }
         
         // IMPORTANT: Cancel any active slingshot aiming when touches are cancelled
@@ -3653,6 +4382,138 @@ class GameScene: SKScene {
         
         // Force refresh the main menu to see the changes
         showMainMenu()
+    }
+    
+    // MARK: - Weather Debug Methods
+    
+    /// Debug current weather system state
+    func debugWeatherSystem() {
+        let weatherManager = WeatherManager.shared
+        print("🌤️ WEATHER SYSTEM DEBUG:")
+        print("  - Current Level: \(currentLevel)")
+        print("  - Current Weather: \(weatherManager.weather.displayName)")
+        print("  - Suggested Weather for Level: \(weatherManager.suggestWeatherForLevel(currentLevel).displayName)")
+        print("  - Slippery Pads: \(weatherManager.shouldPadsBeSlippery())")
+        
+        if weatherManager.shouldPadsBeSlippery() {
+            print("    - Slip Factor: \(weatherManager.getSlipFactor())")
+        }
+        
+        print("  - Wind Active: \(weatherManager.isWindActive())")
+        print("  - Ice Conversion: \(weatherManager.shouldConvertWaterToIce())")
+        print("  - Water State: \(stateManager.waterState)")
+        
+        // Show weather-specific level configuration
+        let weatherConfig = weatherManager.getWeatherLevelConfig(level: currentLevel)
+        print("  - Weather Level Config:")
+        print("    - Global Spawn Multiplier: \(weatherConfig.globalSpawnRateMultiplier)")
+        print("    - Max Enemies: \(weatherConfig.maxEnemiesPerScreen)")
+        print("    - Enemy Configs: \(weatherConfig.enemyConfigs.count)")
+        
+        weatherManager.printDebugInfo()
+    }
+    
+    /// Test method to cycle through different weather types
+    func testWeatherCycling() {
+        let weatherManager = WeatherManager.shared
+        print("🌤️ TESTING: Cycling to next weather type")
+        weatherManager.cycleToNextWeather()
+        debugWeatherSystem()
+    }
+    
+    /// Test method to set specific weather
+    func testSetWeather(_ weather: WeatherType) {
+        let weatherManager = WeatherManager.shared
+        print("🌤️ TESTING: Setting weather to \(weather.displayName)")
+        weatherManager.setWeather(weather, effectsManager: effectsManager)
+        debugWeatherSystem()
+        
+        // Apply weather effects to current scene
+        updateExistingLilyPadsForWeather(weather)
+        applyWeatherGameplayEffects(weather)
+    }
+    
+    /// Test method to trigger weather transition
+    func testWeatherTransition(to weather: WeatherType) {
+        let weatherManager = WeatherManager.shared
+        print("🌤️ TESTING: Transitioning weather to \(weather.displayName)")
+        weatherManager.transitionToWeather(weather, duration: 1.0, effectsManager: effectsManager)
+    }
+    
+    /// Test method to show weather suggestions for different levels
+    func testWeatherSuggestions(levels: Range<Int>) {
+        let weatherManager = WeatherManager.shared
+        print("🌤️ WEATHER SUGGESTIONS:")
+        
+        for level in levels {
+            let suggestedWeather = weatherManager.suggestWeatherForLevel(level)
+            let weatherConfig = weatherManager.getWeatherLevelConfig(level: level, weather: suggestedWeather)
+            print("  Level \(level): \(suggestedWeather.displayName) (multiplier: \(weatherConfig.globalSpawnRateMultiplier))")
+        }
+    }
+    
+    /// Test method to simulate weather effects
+    func testWeatherEffects() {
+        let weatherManager = WeatherManager.shared
+        let currentWeather = weatherManager.weather
+        
+        print("🌤️ TESTING: Weather effects for \(currentWeather.displayName)")
+        
+        // Test slippery pad effect
+        if weatherManager.shouldPadsBeSlippery() {
+            print("  - Testing slippery pad effect...")
+            let slipFactor = weatherManager.getSlipFactor()
+            applySlipEffectToFrog(factor: slipFactor)
+        }
+        
+        // Test wind effect
+        if weatherManager.isWindActive() {
+            print("  - Testing wind effect...")
+            let windForce = CGVector(dx: CGFloat.random(in: -50...50), dy: CGFloat.random(in: -30...30))
+            NotificationCenter.default.post(name: NSNotification.Name("WindForceApplied"), object: windForce)
+        }
+        
+        // Test lightning effect
+        if currentWeather.gameplayEffects.contains(where: { effect in
+            if case .lightning = effect { return true }
+            return false
+        }) {
+            print("  - Testing lightning effect...")
+            NotificationCenter.default.post(name: NSNotification.Name("LightningEffect"), object: nil)
+        }
+    }
+    
+    /// Debug method to show weather progression through levels
+    func debugWeatherProgression() {
+        print("🌤️ WEATHER PROGRESSION THROUGH LEVELS:")
+        let weatherManager = WeatherManager.shared
+        
+        for level in 1...20 {
+            let weather = weatherManager.suggestWeatherForLevel(level)
+            let config = weatherManager.getWeatherLevelConfig(level: level, weather: weather)
+            let effects = weather.gameplayEffects
+            
+            print("Level \(level): \(weather.displayName)")
+            print("  - Spawn Multiplier: \(String(format: "%.2f", config.globalSpawnRateMultiplier))x")
+            print("  - Effects: \(effects.count) active")
+            
+            for effect in effects {
+                switch effect {
+                case .slipperyPads(let factor):
+                    print("    • Slippery Pads (factor: \(factor))")
+                case .windForce:
+                    print("    • Wind Force")
+                case .iceConversion:
+                    print("    • Ice Conversion")
+                case .rainParticles:
+                    print("    • Rain Particles")
+                case .lightning:
+                    print("    • Lightning")
+                case .reducedVisibility(let amount):
+                    print("    • Reduced Visibility (\(Int(amount * 100))%)")
+                }
+            }
+        }
     }
 }
 
