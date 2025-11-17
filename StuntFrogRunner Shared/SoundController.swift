@@ -14,6 +14,9 @@ class SoundController: ObservableObject {
     private var currentBackgroundTrack: BackgroundMusic? = nil
     private var isPlayingSpecialTrack: Bool = false
 
+    private var loopingPlayers: [SoundEffect: AVAudioPlayer] = [:]
+
+    
     
     // MARK: - Singleton
     static let shared = SoundController()
@@ -63,10 +66,10 @@ class SoundController: ObservableObject {
         case backgroundNature = "nature_ambience"
         
         // Weather Effects
-        case rain = "rain_ambient"
+        case rain = "rain"
         case thunder = "thunder"
-        case windStorm = "wind_storm"
-        case nightAmbience = "night_ambience"
+        case windStorm = "wind"
+        case night = "night"
         
         // UI & Feedback
         case buttonTap = "button_tap"
@@ -187,6 +190,29 @@ class SoundController: ObservableObject {
         backgroundMusicPlayer?.play()
     }
     
+    func playLooping(_ effect: SoundEffect, volume: Float = 1.0) {
+        // If already looping, just update volume and return
+        if let player = loopingPlayers[effect] {
+            player.volume = volume
+            if !player.isPlaying { player.play() }
+            return
+        }
+    }
+
+        
+
+    func stopLooping(_ effect: SoundEffect) {
+        loopingPlayers[effect]?.stop()
+        loopingPlayers[effect] = nil
+    }
+
+    // Optionally: stop all loops
+    func stopAllLoops() {
+        loopingPlayers.values.forEach { $0.stop() }
+        loopingPlayers.removeAll()
+    }
+    
+    
     // MARK: - Sound Effects Management
     func playSoundEffect(_ effect: SoundEffect, volume: Float? = nil, pitch: Float = 1.0) {
         print("🔊 Attempting to play sound effect: \(effect.rawValue)")
@@ -197,6 +223,11 @@ class SoundController: ObservableObject {
         
         guard let url = Bundle.main.url(forResource: effect.rawValue, withExtension: "mp3") else {
             print("❌ Could not find sound effect: \(effect.rawValue).mp3")
+            // For missing frog_slide, use a fallback sound
+            if effect == .frogSlide {
+                print("🔄 Using fallback sound for frog_slide")
+                playSoundEffect(.frogLand, volume: volume, pitch: max(0.7, (pitch ?? 1.0) - 0.2))
+            }
             return
         }
         
@@ -216,10 +247,11 @@ class SoundController: ObservableObject {
             // Store reference to prevent deallocation
             soundEffectPlayers[uniqueKey] = player
             
-            // Remove reference after playback with safety check
-            let duration = player.duration > 0 ? player.duration : 1.0
-            DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.1) { [weak self] in
-                self?.soundEffectPlayers.removeValue(forKey: uniqueKey)
+            // Remove reference after playbook with safety check and stronger weak reference handling
+            let duration = max(player.duration, 1.0) // Ensure minimum duration
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.2) { [weak self] in
+                guard let self = self else { return }
+                self.soundEffectPlayers.removeValue(forKey: uniqueKey)
             }
             
         } catch {
@@ -362,10 +394,13 @@ class SoundController: ObservableObject {
         case .menu:
             playBackgroundMusic(.mainMenu)
         case .initialUpgradeSelection:
+            let currentWeather = WeatherManager.shared.weather
+            playWeatherMusic(for: currentWeather)
             // Keep menu music playing during initial upgrade selection
-            playBackgroundMusic(.mainMenu)
         case .playing:
-            playBackgroundMusic(.gameplay)
+            // Use weather-appropriate music instead of hardcoded gameplay music
+            let currentWeather = WeatherManager.shared.weather
+            playWeatherMusic(for: currentWeather)
         case .paused:
             pauseBackgroundMusic()
         case .abilitySelection:
@@ -402,7 +437,9 @@ class SoundController: ObservableObject {
     func returnToGameplayMusic() {
         print("🎮 Returning to normal gameplay music")
         isPlayingSpecialTrack = false
-        playBackgroundMusic(.gameplay, fadeIn: true)
+        // Use weather-appropriate music instead of hardcoded gameplay music
+        let currentWeather = WeatherManager.shared.weather
+        playWeatherMusic(for: currentWeather)
     }
     
     // MARK: - Explicit Starters (for callers that don't want to rely on state changes)
@@ -410,7 +447,9 @@ class SoundController: ObservableObject {
     func startGameplayMusic() {
         print("🎮 startGameplayMusic() called explicitly")
         isPlayingSpecialTrack = false
-        playBackgroundMusic(.gameplay, fadeIn: true)
+        let currentWeather = WeatherManager.shared.weather
+        
+        playWeatherMusic(for: currentWeather)
     }
     
     /// Call this when the frog activates rocket ability
@@ -432,7 +471,11 @@ class SoundController: ObservableObject {
     
     // MARK: - Weather Audio Management
     func playWeatherMusic(for weather: WeatherType) {
-        guard isMusicEnabled else { return }
+        print("🎵 playWeatherMusic called for weather: \(weather), isMusicEnabled: \(isMusicEnabled)")
+        guard isMusicEnabled else { 
+            print("🎵 Music is disabled, skipping weather music")
+            return 
+        }
         
         let musicTrack: BackgroundMusic
         switch weather {
@@ -452,8 +495,29 @@ class SoundController: ObservableObject {
             musicTrack = .stormMusic
         }
         
-        playBackgroundMusic(musicTrack)
-        print("🎵 Playing weather-specific music for \(weather): \(musicTrack.rawValue)")
+        print("🎵 Selected music track: \(musicTrack.rawValue) for weather: \(weather)")
+        print("🎵 Current background track before change: \(currentBackgroundTrack?.rawValue ?? "nil")")
+        
+        // Check if the music file exists before attempting to play
+        guard Bundle.main.url(forResource: musicTrack.rawValue, withExtension: "mp3") != nil else {
+            print("❌ Music file not found: \(musicTrack.rawValue).mp3")
+            // Fallback to gameplay music if weather-specific music doesn't exist
+            if musicTrack != .gameplay {
+                print("🎵 Falling back to gameplay music")
+                playBackgroundMusic(.gameplay, fadeIn: false)
+            }
+            return
+        }
+        
+        // Don't call stopAllAudio() as it interferes with immediate playback
+        // Instead, just stop background music and let playBackgroundMusic handle the transition
+        stopBackgroundMusic(fadeOut: false)
+        
+        // Force play the weather-specific music by temporarily clearing the current track
+        currentBackgroundTrack = nil
+        print("🎵 About to call playBackgroundMusic with: \(musicTrack.rawValue)")
+        playBackgroundMusic(musicTrack, fadeIn: false)
+        print("🎵 Called playBackgroundMusic, current track should now be: \(currentBackgroundTrack?.rawValue ?? "nil")")
     }
     
     func playWeatherAmbience(for weather: WeatherType) {
@@ -462,7 +526,7 @@ class SoundController: ObservableObject {
             playSoundEffect(.backgroundNature, volume: 0.3)
             
         case .night:
-            playSoundEffect(.nightAmbience, volume: 0.4)
+            playSoundEffect(.night, volume: 0.4)
             
         case .rain:
             playSoundEffect(.rain, volume: 0.5)
@@ -507,6 +571,15 @@ class SoundController: ObservableObject {
     
     deinit {
         stopAllAudio()
+    }
+    
+    // MARK: - Wind Effects Sound
+    
+    /// Play wind interaction sound when wind affects the frog
+    func playWindInteraction(intensity: Float) {
+        // You can implement this with an appropriate wind sound effect
+        // For now, we'll use an existing sound as a placeholder
+        playSoundEffect(.windStorm, volume: min(intensity * 0.3, 0.2))
     }
 }
 

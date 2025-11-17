@@ -6,6 +6,7 @@
 //
 
 import UIKit
+import GameKit
 
 // MARK: - Game Lifecycle Notifications
 extension Notification.Name {
@@ -25,7 +26,26 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Prevent device from sleeping during gameplay
         UIApplication.shared.isIdleTimerDisabled = true
         
+        // Authenticate with Game Center
+        authenticateGameCenter()
+        
         return true
+    }
+    
+    // MARK: - Game Center Authentication
+    
+    private func authenticateGameCenter() {
+        ScoreManager.shared.authenticateGameCenter { [weak self] in
+            return self?.getCurrentViewController()
+        }
+    }
+    
+    private func getCurrentViewController() -> UIViewController? {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first else {
+            return nil
+        }
+        return window.rootViewController
     }
     
     // MARK: - UISceneSession Lifecycle

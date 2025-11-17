@@ -182,7 +182,7 @@ class Enemy {
             spikeBushSprite.size = CGSize(width: GameConfig.spikeBushSize, height: GameConfig.spikeBushSize)
             self.node = spikeBushSprite
         } else if type == .edgeSpikeBush {
-            let edgeSpikeBushTexture = SKTexture(imageNamed: "spikeBush") // Reuse same texture
+            let edgeSpikeBushTexture = SKTexture(imageNamed: "winterSpikeBush") // Reuse same texture
             let edgeSpikeBushSprite = SKSpriteNode(texture: edgeSpikeBushTexture)
             edgeSpikeBushSprite.size = CGSize(width: GameConfig.edgeSpikeBushSize, height: GameConfig.edgeSpikeBushSize)
             self.node = edgeSpikeBushSprite
@@ -384,7 +384,7 @@ class LilyPad {
     
     // Spawn probabilities
     static let graveSpawnChance: CGFloat = 0.75 // 75% chance to spawn a grave lily pad
-    static let chaserOnGraveSpawnChance: CGFloat = 0.75 // 75% chance to spawn a chaser on a grave pad
+    static let chaserOnGraveSpawnChance: CGFloat = 1.0 // 100% chance to spawn a chaser on a grave pad
     
     /// Returns true with the configured probability to spawn a grave lily pad
     static func shouldSpawnGravePad() -> Bool {

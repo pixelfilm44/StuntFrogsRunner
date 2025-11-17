@@ -6,6 +6,7 @@
 import SpriteKit
 import UIKit
 import GameKit
+import QuartzCore
 
 // Minimal definition to satisfy UI usage in this file
 enum AbilityType: CaseIterable {
@@ -193,6 +194,9 @@ class UIManager: NSObject {
 
     // Set this to your App Store Connect leaderboard identifier
     var leaderboardID: String = "com.yourcompany.yourapp.leaderboard"
+    
+    // Touch interaction delay mechanism
+    private var menuInteractionEnabledTime: TimeInterval = 0
 
     // UI Elements
     var scoreLabel: SKLabelNode?
@@ -598,6 +602,10 @@ class UIManager: NSObject {
         // Remove any existing menus to prevent stacking
         hideMenus()
         setUIVisible(false)
+        
+        // Reset interaction delay for main menu (it should be immediately interactive)
+        menuInteractionEnabledTime = 0
+        
         guard let scene = scene else { return }
 
         let menu = SKNode()
@@ -922,6 +930,9 @@ class UIManager: NSObject {
         menu.alpha = 1.0
         menu.position = CGPoint(x: 0, y: -menuHeight)
         
+        // Add interaction delay to prevent touch carry-over from play button
+        menuInteractionEnabledTime = CACurrentMediaTime() + 0.5
+        
         // Create a smaller background that doesn't cover the bottom HUD
         let bg = SKShapeNode(rectOf: CGSize(width: sceneSize.width, height: menuHeight))
         bg.fillColor = UIColor.black.withAlphaComponent(0.0) // Start invisible
@@ -1019,8 +1030,13 @@ class UIManager: NSObject {
             menu.addChild(button)
         }
         
-        // Slide up from bottom over 1.0s, with background fading in, and disable taps during animation
+        // Slide up from bottom with background fading in, with touch protection during animation
         let duration: TimeInterval = 0.5
+        let totalAnimationDuration = duration + 0.08 + 0.12 // slideUp + dip + settle
+        
+        // Update interaction delay to cover the full animation plus the initial delay
+        menuInteractionEnabledTime = max(menuInteractionEnabledTime, CACurrentMediaTime() + totalAnimationDuration + 0.1)
+        
         // Replace single slideUp action with bounce sequence:
         let slideUp = SKAction.moveTo(y: 8, duration: duration)
         slideUp.timingMode = .easeOut
@@ -1043,8 +1059,6 @@ class UIManager: NSObject {
             background.run(bgFade)
         }
   
-        // Removed: menu.isUserInteractionEnabled = false
-        // Removed: menu.run(slideUp) { [weak self] in menu.isUserInteractionEnabled = true }
         menu.run(sequence)
         
         abilityLayer = menu
@@ -1121,8 +1135,12 @@ class UIManager: NSObject {
         closeButton.zPosition = 1
         modal.addChild(closeButton)
         
-        // Add fade-in animation
+        // Add fade-in animation with touch delay
         modal.alpha = 0.0
+        
+        // Set interaction delay (500ms from now)
+        menuInteractionEnabledTime = CACurrentMediaTime() + 0.5
+        
         let fadeIn = SKAction.fadeIn(withDuration: 0.3)
         modal.run(fadeIn)
         
@@ -1260,8 +1278,12 @@ class UIManager: NSObject {
         closeButton.zPosition = 2
         modal.addChild(closeButton)
         
-        // Add fade-in animation
+        // Add fade-in animation with touch delay
         modal.alpha = 0.0
+        
+        // Set interaction delay (500ms from now)
+        menuInteractionEnabledTime = CACurrentMediaTime() + 0.5
+        
         let fadeIn = SKAction.fadeIn(withDuration: 0.3)
         modal.run(fadeIn)
         
@@ -1287,6 +1309,9 @@ class UIManager: NSObject {
         menuLayer = nil
         abilityLayer = nil
         superPowersMenu = nil
+        
+        // Reset interaction delay when menus are hidden
+        menuInteractionEnabledTime = 0
         
         // Restore all UI elements to visible
         pauseButton?.isHidden = false
@@ -2637,6 +2662,12 @@ class UIManager: NSObject {
     func handleTouch(_ touch: UITouch, phase: TouchPhase, in scene: SKScene) {
         guard let activeMenu = menuLayer ?? abilityLayer ?? superPowersMenu ?? tutorialModal else { return }
         
+        // Check if enough time has passed since menu appeared to prevent touch propagation
+        if CACurrentMediaTime() < menuInteractionEnabledTime {
+            print("🚫 Menu interaction blocked - too soon after opening")
+            return
+        }
+        
         let location = touch.location(in: activeMenu)
         let tappedNode = activeMenu.atPoint(location)
         
@@ -2720,6 +2751,9 @@ class UIManager: NSObject {
     func showInitialUpgradeSelection(sceneSize: CGSize) {
         hideMenus()
         guard let scene = scene else { return }
+        
+        // CRITICAL FIX: Add interaction delay to prevent touch carry-over from play button
+        menuInteractionEnabledTime = CACurrentMediaTime() + 0.5
         
         let menu = SKNode()
         menu.zPosition = 350 // Higher than normal menus

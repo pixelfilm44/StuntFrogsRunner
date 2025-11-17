@@ -79,7 +79,11 @@ class FrogController {
     var onIce: Bool = false
     var slideVelocity: CGVector = .zero
     var slideDeceleration: CGFloat = 0.95  // How quickly sliding slows down
-    var minSlideSpeed: CGFloat = 0.5  // Below this speed, stop sliding
+    var minSlideSpeed: CGFloat = 1.2  // Below this speed, stop sliding (increased to prevent endless slow slides)
+    
+    // Safety mechanism to prevent infinite sliding
+    private var slideFrameCount: Int = 0
+    private let maxSlideFrames: Int = 600  // 10 seconds at 60 FPS - emergency timeout
     
     // Super jump visuals
     var superJumpGlow: SKShapeNode?
@@ -430,6 +434,12 @@ class FrogController {
     }
     
     func startJump(to targetPos: CGPoint) {
+        // If sliding on ice, stop sliding first and allow the jump
+        if onIce {
+            print("🧊 Stopping slide to allow jump")
+            forceStopSliding()
+        }
+        
         jumpStartPos = position
         
         // Note: Jump range multiplier is now applied in SlingshotController for consistent targeting
@@ -1081,6 +1091,7 @@ class FrogController {
         inWater = false
         isGrounded = true
         isJumping = false
+        slideFrameCount = 0  // Reset slide timeout counter
         
         // Use the frog's current facing direction for sliding
         // The frog's zRotation includes the art correction (π/2), so subtract it to get world direction
@@ -1095,7 +1106,16 @@ class FrogController {
         slideVelocity = CGVector(dx: facingDirection.dx * slideSpeed, dy: facingDirection.dy * slideSpeed)
         
         // Play sliding sound
-        soundController.playFrogSlide(intensity: Float(min(slideSpeed / 10.0, 1.0)))
+        let slideIntensity = Float(min(slideSpeed / 10.0, 1.0))
+        
+        // Guard against NaN or invalid values
+        guard slideIntensity.isFinite && slideIntensity >= 0 else {
+            print("⚠️ Invalid intensity for frog slide sound: \(slideIntensity)")
+            soundController.playIceSlide(velocity: Float(min(slideSpeed / 8.0, 1.0)))
+            return
+        }
+        
+        soundController.playFrogSlide(intensity: slideIntensity)
         soundController.playIceSlide(velocity: Float(min(slideSpeed / 8.0, 1.0)))
         
         // Remove any lily pad association while sliding
@@ -1104,21 +1124,113 @@ class FrogController {
         print("🧊 Frog started sliding on ice with velocity: (\(slideVelocity.dx), \(slideVelocity.dy)), facing angle: \(frogFacingAngle * 180 / .pi)°")
     }
     
+    /// Start natural slip effect (for slippery lily pads) with more organic movement
+    func startNaturalSlip(initialVelocity: CGVector, slipFactor: CGFloat) {
+        onIce = true
+        inWater = false
+        isGrounded = true
+        isJumping = false
+        slideFrameCount = 0  // Reset slide timeout counter
+        
+        // Use the provided velocity directly for more natural slip direction
+        slideVelocity = initialVelocity
+        
+        // Adjust deceleration based on slip factor - more slippery = slower deceleration
+        let originalDeceleration = slideDeceleration
+        slideDeceleration = max(0.92, originalDeceleration - (slipFactor * 0.03))
+        
+        // Store original values to restore later
+        let originalMinSlideSpeed = minSlideSpeed
+        minSlideSpeed = max(0.3, minSlideSpeed - (slipFactor * 0.2))
+        
+        // Play appropriate sliding sounds with slip-specific parameters
+        let velocityMagnitude = sqrt(initialVelocity.dx*initialVelocity.dx + initialVelocity.dy*initialVelocity.dy)
+        let intensity = Float(min(velocityMagnitude / 8.0, 1.0))
+        
+        // Guard against NaN or invalid values
+        guard intensity.isFinite && intensity >= 0 else {
+            print("⚠️ Invalid intensity for frog slide sound: \(intensity)")
+            return
+        }
+        
+        soundController.playFrogSlide(intensity: intensity)
+        
+        // Remove any lily pad association while sliding
+        currentLilyPad = nil
+        
+        // Add slight wobble animation to the frog sprite for slip effect
+        let wobbleAngle: CGFloat = 0.1 * slipFactor
+        let wobbleAction = SKAction.sequence([
+            SKAction.rotate(byAngle: wobbleAngle, duration: 0.15),
+            SKAction.rotate(byAngle: -wobbleAngle * 2, duration: 0.3),
+            SKAction.rotate(byAngle: wobbleAngle, duration: 0.15)
+        ])
+        frogSprite.run(wobbleAction)
+        
+        // Schedule restoration of original sliding parameters after slip ends
+        let restoreAction = SKAction.sequence([
+            SKAction.wait(forDuration: 2.0),
+            SKAction.run { [weak self] in
+                self?.slideDeceleration = originalDeceleration
+                self?.minSlideSpeed = originalMinSlideSpeed
+            }
+        ])
+        frogSprite.run(restoreAction, withKey: "restoreSlipParams")
+        
+        print("🧊 Frog started natural slip with velocity: (\(slideVelocity.dx), \(slideVelocity.dy)), factor: \(slipFactor)")
+    }
+    
+    
     /// Update sliding physics each frame
     func updateSliding() {
-        guard onIce else { return }
+        guard onIce else { 
+            slideFrameCount = 0  // Reset counter when not sliding
+            return 
+        }
         
-        // Apply slide velocity to position
-        position.x += slideVelocity.dx
-        position.y += slideVelocity.dy
+        // Increment slide frame counter and check for timeout
+        slideFrameCount += 1
+        if slideFrameCount > maxSlideFrames {
+            print("🚨 EMERGENCY: Slide timeout after \(slideFrameCount) frames - force stopping slide")
+            stopSliding()
+            return
+        }
         
-        // Apply deceleration
-        slideVelocity.dx *= slideDeceleration
-        slideVelocity.dy *= slideDeceleration
+        // Calculate current speed for smooth motion adjustments
+        let currentSpeed = sqrt(slideVelocity.dx * slideVelocity.dx + slideVelocity.dy * slideVelocity.dy)
         
-        // Stop sliding when velocity is very low
-        let speed = sqrt(slideVelocity.dx * slideVelocity.dx + slideVelocity.dy * slideVelocity.dy)
-        if speed < minSlideSpeed {
+        // Apply slide velocity to position with slight randomness for organic feel
+        // Reduce randomness when moving slowly to prevent infinite sliding
+        let organicVariation: CGFloat = currentSpeed > 2.0 ? 0.05 : 0.01
+        let randomFactorX = CGFloat.random(in: (1.0 - organicVariation)...(1.0 + organicVariation))
+        let randomFactorY = CGFloat.random(in: (1.0 - organicVariation)...(1.0 + organicVariation))
+        
+        position.x += slideVelocity.dx * randomFactorX
+        position.y += slideVelocity.dy * randomFactorY
+        
+        // Apply deceleration with easing curve for more natural feel
+        let easingFactor: CGFloat
+        if currentSpeed > 15.0 {
+            // Fast sliding: gradual deceleration
+            easingFactor = slideDeceleration
+        } else if currentSpeed > 5.0 {
+            // Medium sliding: slightly more deceleration
+            easingFactor = slideDeceleration * 0.98
+        } else if currentSpeed > 2.0 {
+            // Slow sliding: more rapid deceleration to stop naturally
+            easingFactor = slideDeceleration * 0.95
+        } else {
+            // Very slow sliding: aggressive deceleration to prevent endless crawling
+            easingFactor = slideDeceleration * 0.85
+        }
+        
+        slideVelocity.dx *= easingFactor
+        slideVelocity.dy *= easingFactor
+        
+        // Stop sliding when velocity is very low (check speed AFTER deceleration)
+        let newSpeed = sqrt(slideVelocity.dx * slideVelocity.dx + slideVelocity.dy * slideVelocity.dy)
+        if newSpeed < minSlideSpeed {
+            print("🧊 Stopping slide: newSpeed=\(newSpeed), minSlideSpeed=\(minSlideSpeed)")
             stopSliding()
         }
     }
@@ -1129,6 +1241,10 @@ class FrogController {
         
         onIce = false
         slideVelocity = .zero
+        slideFrameCount = 0  // Reset slide counter
+        
+        // Clean up any running slip parameter restoration actions
+        frogSprite.removeAction(forKey: "restoreSlipParams")
         
         // Try to find a nearby lily pad to land on
         // This will be handled by GameScene collision detection
@@ -1139,6 +1255,12 @@ class FrogController {
     func forceStopSliding() {
         onIce = false
         slideVelocity = .zero
+        slideFrameCount = 0  // Reset slide counter
+        
+        // Clean up any running slip parameter restoration actions
+        frogSprite.removeAction(forKey: "restoreSlipParams")
+        
+        print("🧊 Frog force stopped sliding")
     }
 }
 

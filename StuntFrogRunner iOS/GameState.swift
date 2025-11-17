@@ -103,6 +103,7 @@ class GameStateManager {
     var onWeatherChanged: ((WeatherType, WeatherType) -> Void)?
     var onGameOver: ((GameOverReason) -> Void)?
     var onInputLocked: (() -> Void)?  // New callback for when input gets locked
+    var onEdgeWallSpawnRequested: (() -> Void)?  // Callback for when edge walls should be spawned
     
     // MARK: - State Management
     func transitionToMenu() {
@@ -169,7 +170,7 @@ class GameStateManager {
         case 4:
             createRainyLevel()    // 🌧️ Add rain effects and difficulty
         case 5:
-            createIcyLevel()      // ❄️ Winter effects with ice behavior
+            createIcyLevel()      // ❄️ Ice effects with ice behavior
         case 6:
             createStormyLevel()   // ⛈️ Lightning and storm effects
         case 7:
@@ -263,9 +264,16 @@ class GameStateManager {
     }
     
     func createIcyLevel() {
-        currentWeather = .winter
+        currentWeather = .ice
         waterState = .ice  // Automatically set water to ice behavior
-        print("❄️ Level configured for WINTER - icy effects with ice water behavior")
+        
+        // Update WeatherManager to ensure spawning systems are synchronized
+        WeatherManager.shared.setWeather(.ice)
+        
+        // Trigger edge spike bush spawning callback if available
+        onEdgeWallSpawnRequested?()
+        
+        print("❄️ Level configured for ICE - icy effects with ice water behavior and edge spike bushes")
     }
     
     func createStormyLevel() {

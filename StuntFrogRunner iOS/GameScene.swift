@@ -179,7 +179,7 @@ class GameScene: SKScene {
     
     // MARK: - Scene Setup
     override func didMove(to view: SKView) {
-     
+        
         // Set initial background color based on weather (will be updated by weather system)
         let weatherManager = WeatherManager.shared
         backgroundColor = weatherManager.getBackgroundColor(for: .day) // Default to day initially
@@ -198,7 +198,8 @@ class GameScene: SKScene {
             shape.position = CGPoint(x: size.width/2, y: size.height/2 + 20)
         }
         
-        
+        // Set up wind force notifications
+        setupWindForceNotifications()
         
         // Pre-warm all haptic types
         HapticFeedbackManager.shared.impact(.light)
@@ -563,6 +564,22 @@ class GameScene: SKScene {
         )
     }
     
+    /// Set up wind force notifications
+    private func setupWindForceNotifications() {
+        // Remove any existing observers to prevent duplicates
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("WindForceApplied"), object: nil)
+        
+        // Add observer for wind force notifications
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleWindForce(_:)),
+            name: NSNotification.Name("WindForceApplied"),
+            object: nil
+        )
+        
+        print("🌬️ Wind force notifications set up")
+    }
+    
     private func setupWeatherEffectCallbacks() {
         // Listen for wind force effects
         NotificationCenter.default.addObserver(
@@ -641,13 +658,16 @@ class GameScene: SKScene {
               let userInfo = notification.userInfo,
               let oldWeather = userInfo["oldWeather"] as? WeatherType else { return }
         
-        print("🌤️ Weather changed from \(oldWeather.displayName) to \(newWeather.displayName)")
+        print("🌤️ WEATHER NOTIFICATION RECEIVED: \(oldWeather.displayName) → \(newWeather.displayName)")
         
         // Update background color smoothly
         let weatherManager = WeatherManager.shared
         let bgColor = weatherManager.getBackgroundColor(for: newWeather)
         let colorAction = SKAction.colorize(with: bgColor, colorBlendFactor: 1.0, duration: 2.0)
         run(colorAction)
+        
+        // Show weather change notification to player
+        showFloatingText("Weather: \(newWeather.displayName.capitalized)", color: .systemCyan)
         
         // Update existing lily pads with weather effects
         updateExistingLilyPadsForWeather(newWeather)
@@ -657,25 +677,214 @@ class GameScene: SKScene {
         
         // Update spawn configuration for new weather
         updateSpawnConfigurationForWeather(newWeather)
+        
+        print("🌤️ Weather change processing complete")
+        updateSpawnConfigurationForWeather(newWeather)
     }
     
     @objc private func handleWindForce(_ notification: Notification) {
-        guard let windForce = notification.object as? CGVector else { return }
+        guard let windForce = notification.object as? CGVector else {
+            print("⚠️ Wind force notification received but no valid CGVector found")
+            return
+        }
+        
+        print("🌬️ Wind force received: dx=\(windForce.dx), dy=\(windForce.dy)")
+        applyWindToFrog(force: windForce)
+    }
+    
+    /// Apply wind force to the frog based on current state
+    private func applyWindToFrog(force: CGVector) {
         guard gameState == .playing else { return }
         
-        // Apply wind force to the frog during jumps
+        let windStrength = sqrt(force.dx * force.dx + force.dy * force.dy)
+        
+        // Different wind effects based on frog's current state
         if frogController.isJumping {
-            let windEffect = CGPoint(x: windForce.dx * 0.5, y: windForce.dy * 0.3)
-            let adjustedTarget = CGPoint(
-                x: frogController.jumpTargetPos.x + windEffect.x,
-                y: frogController.jumpTargetPos.y + windEffect.y
-            )
+            // Frog is in mid-jump - adjust trajectory
+            applyWindToJumpingFrog(force: force)
             
-            // Update frog's trajectory
-            frogController.adjustJumpTarget(to: adjustedTarget)
+        } else if frogController.onIce {
+            // Frog is sliding on ice - add to slide velocity
+            applyWindToSlidingFrog(force: force)
             
-            // Show visual wind effect
-            showFloatingText("Wind!", color: .systemCyan)
+        } else if frogController.inWater && !frogController.isDrowning {
+            // Frog is floating in water - gentle drift
+            applyWindToFloatingFrog(force: force)
+            
+        } else if frogController.isGrounded {
+            // Frog is on a lily pad - subtle visual effect only
+            applyWindToGroundedFrog(force: force)
+        }
+        
+        // Create visual wind effect at frog's position
+        createWindVisualEffect(at: frogController.position, strength: Float(windStrength / 100.0))
+    }
+    
+    /// Apply wind to a jumping frog by adjusting trajectory
+    private func applyWindToJumpingFrog(force: CGVector) {
+        let windImpact: CGFloat = 0.3 // How much wind affects jump trajectory
+        
+        // Calculate wind-adjusted target position
+        let currentTarget = frogController.jumpTargetPos
+        let windOffset = CGVector(dx: force.dx * windImpact, dy: force.dy * windImpact)
+        let newTarget = CGPoint(
+            x: currentTarget.x + windOffset.dx,
+            y: currentTarget.y + windOffset.dy
+        )
+        
+        // Adjust the jump target
+        frogController.adjustJumpTarget(to: newTarget)
+        
+        // Play wind interaction sound
+        soundController.playWindInteraction(intensity: Float(min(sqrt(force.dx*force.dx + force.dy*force.dy) / 150.0, 1.0)))
+        
+        print("🌬️🐸 Wind adjusted jump target by (\(windOffset.dx), \(windOffset.dy))")
+    }
+    
+    /// Apply wind to a sliding frog by adding to slide velocity
+    private func applyWindToSlidingFrog(force: CGVector) {
+        let windImpact: CGFloat = 0.2 // How much wind affects sliding
+        
+        // Add wind force to current slide velocity
+        let windBoost = CGVector(dx: force.dx * windImpact, dy: force.dy * windImpact)
+        frogController.slideVelocity.dx += windBoost.dx
+        frogController.slideVelocity.dy += windBoost.dy
+        
+        // Cap maximum slide speed to prevent uncontrollable sliding
+        let maxSlideSpeed: CGFloat = 15.0
+        let currentSpeed = sqrt(frogController.slideVelocity.dx * frogController.slideVelocity.dx + 
+                               frogController.slideVelocity.dy * frogController.slideVelocity.dy)
+        
+        if currentSpeed > maxSlideSpeed {
+            let scale = maxSlideSpeed / currentSpeed
+            frogController.slideVelocity.dx *= scale
+            frogController.slideVelocity.dy *= scale
+        }
+        
+        print("🌬️🧊 Wind boosted slide velocity by (\(windBoost.dx), \(windBoost.dy))")
+    }
+    
+    /// Apply wind to a floating frog (gentle drift)
+    private func applyWindToFloatingFrog(force: CGVector) {
+        let windImpact: CGFloat = 0.1 // Gentle effect for floating
+        let maxDrift: CGFloat = 2.0 // Maximum drift per wind gust
+        
+        // Apply gentle drift
+        let driftX = min(max(-maxDrift, force.dx * windImpact), maxDrift)
+        let driftY = min(max(-maxDrift, force.dy * windImpact), maxDrift)
+        
+        frogController.position.x += driftX
+        frogController.position.y += driftY
+        
+        // Create extra ripples for wind on water effect
+        worldManager?.addRipple(at: frogController.position, amplitude: 0.008, frequency: 25.0)
+        
+        print("🌬️💧 Wind drifted floating frog by (\(driftX), \(driftY))")
+    }
+    
+    /// Apply wind to a grounded frog (visual effects only)
+    private func applyWindToGroundedFrog(force: CGVector) {
+        // Create visual wobble effect to show wind influence
+        let windStrength = sqrt(force.dx * force.dx + force.dy * force.dy)
+        let wobbleIntensity = min(windStrength / 200.0, 0.1) // Cap at 0.1 radians
+        
+        // Calculate wobble direction based on wind direction
+        let windAngle = atan2(force.dy, force.dx)
+        let wobbleAngle = sin(windAngle) * wobbleIntensity
+        
+        // Apply wobble animation
+        let wobbleAction = SKAction.sequence([
+            SKAction.rotate(byAngle: wobbleAngle, duration: 0.2),
+            SKAction.rotate(toAngle: frogController.frogSprite.zRotation, duration: 0.3)
+        ])
+        
+        frogController.frogSprite.run(wobbleAction, withKey: "windWobble")
+        
+        print("🌬️🏝️ Wind wobbled grounded frog by \(wobbleAngle) radians")
+    }
+    
+    /// Create visual wind effect at the specified position
+    private func createWindVisualEffect(at position: CGPoint, strength: Float) {
+        // Create wind streak particles
+        let particleCount = max(2, Int(strength * 12))
+        
+        for i in 0..<particleCount {
+            let windStreak = SKShapeNode(rectOf: CGSize(width: CGFloat.random(in: 15...25), height: CGFloat.random(in: 1...3)))
+            windStreak.fillColor = UIColor.white.withAlphaComponent(0.4 + CGFloat(strength * 0.3))
+            windStreak.strokeColor = UIColor.cyan.withAlphaComponent(0.2)
+            windStreak.lineWidth = 0.5
+            
+            // Position near the frog with some randomness
+            let offsetX = CGFloat.random(in: -50...50)
+            let offsetY = CGFloat.random(in: -50...50)
+            let streakPosition = CGPoint(x: position.x + offsetX, y: position.y + offsetY)
+            windStreak.position = streakPosition
+            windStreak.zPosition = 120
+            
+            // Random rotation for natural wind effect
+            windStreak.zRotation = CGFloat.random(in: 0...(CGFloat.pi * 2))
+            
+            // Add to appropriate parent node
+            if let worldNode = worldManager.worldNode {
+                // Convert position to world coordinates
+                let worldPos = convert(streakPosition, to: worldNode)
+                windStreak.position = worldPos
+                worldNode.addChild(windStreak)
+            } else {
+                addChild(windStreak)
+            }
+            
+            // Animate wind streak with more dynamic movement
+            let moveDistance: CGFloat = 80 * CGFloat(strength) + CGFloat.random(in: 20...40)
+            let moveDirection = CGFloat.random(in: 0...(CGFloat.pi * 2))
+            let duration = Double.random(in: 0.4...0.8)
+            
+            let moveAction = SKAction.sequence([
+                SKAction.wait(forDuration: Double(i) * 0.03), // Quick stagger
+                SKAction.group([
+                    SKAction.moveBy(
+                        x: cos(moveDirection) * moveDistance,
+                        y: sin(moveDirection) * moveDistance,
+                        duration: duration
+                    ),
+                    SKAction.fadeOut(withDuration: duration),
+                    SKAction.scale(to: 0.2, duration: duration),
+                    SKAction.rotate(byAngle: CGFloat.random(in: -1...1), duration: duration)
+                ]),
+                SKAction.removeFromParent()
+            ])
+            
+            windStreak.run(moveAction)
+        }
+        
+        // Add a central wind burst for stronger winds
+        if strength > 0.4 {
+            let windBurst = SKShapeNode(circleOfRadius: 15)
+            windBurst.fillColor = UIColor.cyan.withAlphaComponent(0.15)
+            windBurst.strokeColor = UIColor.white.withAlphaComponent(0.3)
+            windBurst.lineWidth = 2
+            windBurst.position = position
+            windBurst.zPosition = 119
+            
+            // Add to appropriate parent
+            if let worldNode = worldManager.worldNode {
+                let worldPos = convert(position, to: worldNode)
+                windBurst.position = worldPos
+                worldNode.addChild(windBurst)
+            } else {
+                addChild(windBurst)
+            }
+            
+            // Animate the burst
+            let burstAction = SKAction.sequence([
+                SKAction.group([
+                    SKAction.scale(to: 3.0, duration: 0.5),
+                    SKAction.fadeOut(withDuration: 0.5)
+                ]),
+                SKAction.removeFromParent()
+            ])
+            
+            windBurst.run(burstAction)
         }
     }
     
@@ -701,7 +910,7 @@ class GameScene: SKScene {
         lightningFlash.run(SKAction.sequence([fadeOut, remove]))
         
         // Play thunder sound if available
-        soundController.playIceCrack() // Temporary sound effect
+        soundController.playThunder() // Temporary sound effect
         
         // Brief screen shake
         let shake = SKAction.sequence([
@@ -773,6 +982,8 @@ class GameScene: SKScene {
         
         // Start a completely new game
         startNewGame()
+                
+      
         
         print("🎮 New game started successfully")
     }
@@ -856,26 +1067,61 @@ class GameScene: SKScene {
     private func applySlipEffectToFrog(factor: CGFloat) {
         guard frogController.isGrounded else { return }
         
-        // Calculate slip velocity based on slip factor
-        let baseSlideSpeed: CGFloat = 30.0 * factor // Scale by slip factor
-        let slipDirection = CGFloat.random(in: 0...(2 * .pi))
+        // Create a more natural slip effect based on the frog's landing momentum and pad characteristics
         
+        // Get the frog's recent landing velocity or facing direction for more natural slip direction
+        let landingVelocity = frogController.velocity
+        let hasLandingMomentum = (landingVelocity.dx * landingVelocity.dx + landingVelocity.dy * landingVelocity.dy) > 1.0
+        
+        var slipDirection: CGFloat
+        var baseSlideSpeed: CGFloat
+        
+        if hasLandingMomentum {
+            // Use landing momentum direction with some randomness for natural variation
+            slipDirection = atan2(landingVelocity.dy, landingVelocity.dx)
+            // Add slight random variation (±30 degrees) to make it feel organic
+            let variation = CGFloat.random(in: -(.pi/6)...(.pi/6))
+            slipDirection += variation
+            baseSlideSpeed = 25.0 + (15.0 * factor) // More momentum-based speed
+        } else {
+            // If no momentum, use frog's facing direction with slight random bias
+            let frogFacingAngle = frogController.frogSprite.zRotation + (.pi / 2)
+            slipDirection = frogFacingAngle
+            // Add more variation when there's no momentum
+            let variation = CGFloat.random(in: -(.pi/4)...(.pi/4))
+            slipDirection += variation
+            baseSlideSpeed = 15.0 + (10.0 * factor) // Gentler slip without momentum
+        }
+        
+        // Create slip velocity with easing curves for more natural movement
         let slipVelocity = CGVector(
             dx: cos(slipDirection) * baseSlideSpeed,
             dy: sin(slipDirection) * baseSlideSpeed
         )
         
-        // Delegate to FrogController's ice sliding functionality
-        frogController.startSlidingOnIce(initialVelocity: slipVelocity)
+        // Start the slip with a more natural sliding animation
+        frogController.startNaturalSlip(initialVelocity: slipVelocity, slipFactor: factor)
         
-        // Visual feedback
-        showFloatingText("Slippery!", color: .systemBlue)
+        // Enhanced visual feedback based on slip intensity
+        let slipIntensity = baseSlideSpeed / 40.0 // Normalize to 0-1 range
+        if slipIntensity > 0.7 {
+            showFloatingText("Whoa! Very slippery!", color: .systemRed)
+        } else if slipIntensity > 0.4 {
+            showFloatingText("Slippery pad!", color: .systemOrange)
+        } else {
+            showFloatingText("Slippery", color: .systemBlue)
+        }
+        
         effectsManager?.createSlipEffect(at: frogContainer.position)
         
-        // Light haptic feedback
-        HapticFeedbackManager.shared.impact(.light)
+        // Haptic feedback intensity matches slip intensity
+        if slipIntensity > 0.6 {
+            HapticFeedbackManager.shared.impact(.medium)
+        } else {
+            HapticFeedbackManager.shared.impact(.light)
+        }
         
-        print("🧊 GameScene applied slip effect - delegated to FrogController.startSlidingOnIce with velocity: \(slipVelocity)")
+        print("🧊 GameScene applied natural slip effect - velocity: \(slipVelocity), intensity: \(slipIntensity)")
     }
     
     private func handleSlipperyPadLanding(on pad: LilyPad) {
@@ -885,8 +1131,9 @@ class GameScene: SKScene {
         if weatherManager.shouldPadsBeSlippery() {
             let slipFactor = weatherManager.getSlipFactor()
             
-            // Apply slip effect with a small delay to let the landing complete
-            let delay = SKAction.wait(forDuration: 0.2)
+            // Apply slip effect with a very brief delay for more immediate, natural feel
+            // The delay allows the landing animation to start but doesn't wait for it to complete
+            let delay = SKAction.wait(forDuration: 0.05)
             let slipAction = SKAction.run { [weak self] in
                 self?.applySlipEffectToFrog(factor: slipFactor)
             }
@@ -903,8 +1150,19 @@ class GameScene: SKScene {
                 addChild(bg)
             }
             
-            let world = worldManager.setupWorld(sceneSize: size)
+            // Ensure weather is set correctly for current level before creating world
+            let weatherManager = WeatherManager.shared
+            let expectedWeather = weatherManager.suggestWeatherForLevel(currentLevel)
+            if weatherManager.weather != expectedWeather {
+                print("🌤️ SetupGame: Adjusting weather from \(weatherManager.weather.displayName) to \(expectedWeather.displayName) for level \(currentLevel)")
+                weatherManager.setWeather(expectedWeather, effectsManager: effectsManager)
+            }
+            
+            let currentWeather = WeatherManager.shared.weather
+            let world = worldManager.setupWorld(sceneSize: size, weather: currentWeather)
             addChild(world)
+            
+            print("🌊 SetupGame: Created world with \(currentWeather.displayName) weather for level \(currentLevel)")
             
             // Setup parallax background tree
             setupBackgroundTree()
@@ -1311,6 +1569,22 @@ class GameScene: SKScene {
         startGame()
     }
     
+    func restartCurrentLevel() {
+        print("🎮 Restarting current level \(currentLevel)")
+        // Save any pending tadpole coins before restarting level
+        uiManager.savePendingTadpoleCoins()
+        
+        // Start at the current level (preserving progress up to this level)
+        scoreManager.startAtLevel(currentLevel)
+        
+        // Set level starting score based on the current level
+        levelStartingScore = scoreManager.score
+        print("🏁 Set level starting score to \(levelStartingScore) for Level \(currentLevel) restart")
+        
+        // Start the game
+        startGame()
+    }
+    
     func startGame() {
         print("GameScene.startGame() ENTERED")
         print("🔍 Current gameState: \(gameState)")
@@ -1398,7 +1672,10 @@ class GameScene: SKScene {
         hasSpawnedFinishLine = false
         frogPreviousY = 0
         
-        worldManager.reset()
+        // Reset world manager with correct weather
+        let currentWeather = WeatherManager.shared.weather
+        worldManager.reset(weather: currentWeather)
+        print("🌊 World reset with weather: \(currentWeather.displayName)")
         
         // Reset background tree position
         resetBackgroundTree()
@@ -1562,7 +1839,9 @@ class GameScene: SKScene {
     func proceedToGameplay() {
         print("GameScene.proceedToGameplay() ENTERED")
         print("🎯 Current game state before transition: \(gameState)")
-        
+        let currentWeather = WeatherManager.shared.weather
+
+        print ("Weather is \(currentWeather)")
         print("After hideMenus()")
         uiManager.hideSuperJumpIndicator()
         uiManager.hideRocketIndicator()
@@ -2119,11 +2398,39 @@ class GameScene: SKScene {
         if frogController.onIce {
             frogController.updateSliding()
             
+            // Check for water collision during slide - frog may slip off pad and into water
+            let currentSpeed = sqrt(frogController.slideVelocity.dx * frogController.slideVelocity.dx + 
+                                   frogController.slideVelocity.dy * frogController.slideVelocity.dy)
+            
+            // Higher chance of falling in water with faster slides and if far from any lily pad
+            if currentSpeed > 2.0 {
+                let nearestPadDistance = lilyPads.map { pad in
+                    let dx = frogController.position.x - pad.position.x
+                    let dy = frogController.position.y - pad.position.y
+                    return sqrt(dx*dx + dy*dy)
+                }.min() ?? CGFloat.infinity
+                
+                // If sliding fast and far from any pad, risk falling in water
+                if nearestPadDistance > 80.0 && CGFloat.random(in: 0...1) < 0.02 { // 2% chance per frame when sliding fast
+                    frogController.forceStopSliding()
+                    
+                    // Check water state for appropriate splash behavior
+                    switch stateManager.waterState {
+                    case .ice:
+                        handleIceLanding()
+                    case .water:
+                        handleWaterSplash()
+                    }
+                    return // Exit early to avoid lily pad collision checks
+                }
+            }
+            
             // OPTIMIZED: Only check lily pad collision every 3 frames during sliding to reduce overhead
             if frameCount % 3 == 0 {
                 let slideCollisionDistance: CGFloat = 60
                 let slideCollisionDistanceSq = slideCollisionDistance * slideCollisionDistance // Avoid sqrt
                 
+                var landedOnPad = false
                 for pad in lilyPads {
                     let dx = frogController.position.x - pad.position.x
                     let dy = frogController.position.y - pad.position.y
@@ -2134,14 +2441,38 @@ class GameScene: SKScene {
                         frogController.forceStopSliding()
                         frogController.landOnPad(pad)
                         
-                        // Play landing sound and effect
+                        // Play landing sound and effect with intensity based on slide speed
+                        let landingIntensity = min(currentSpeed / 20.0, 1.0)
                         SoundController.shared.playFrogLand()
-                        effectsManager?.createLandingEffect(at: convert(frogController.position, from: worldManager.worldNode), intensity: 0.5, lilyPad: pad)
+                        effectsManager?.createLandingEffect(at: convert(frogController.position, from: worldManager.worldNode), 
+                                                          intensity: landingIntensity, lilyPad: pad)
                         HapticFeedbackManager.shared.impact(.light)
                         
                         showFloatingText("Landed!", color: .systemGreen)
-                        print("🧊 Frog slid into lily pad and stopped")
+                        print("🧊 Frog slid into lily pad and stopped (speed: \(currentSpeed))")
+                        landedOnPad = true
                         break
+                    }
+                }
+                
+                // After checking all pads, if still sliding but moving very slowly near water, small chance to slip in
+                if !landedOnPad && currentSpeed > 0.5 && currentSpeed < 3.0 {
+                    let nearestPadDistance = lilyPads.map { pad in
+                        let dx = frogController.position.x - pad.position.x
+                        let dy = frogController.position.y - pad.position.y
+                        return sqrt(dx*dx + dy*dy)
+                    }.min() ?? CGFloat.infinity
+                    
+                    if nearestPadDistance > 100.0 && CGFloat.random(in: 0...1) < 0.005 { // 0.5% chance when sliding slowly far from pads
+                        frogController.forceStopSliding()
+                        showFloatingText("Slipped into water!", color: .systemRed)
+                        
+                        switch stateManager.waterState {
+                        case .ice:
+                            handleIceLanding()
+                        case .water:
+                            handleWaterSplash()
+                        }
                     }
                 }
             }
@@ -2731,7 +3062,7 @@ class GameScene: SKScene {
         
         if frogController.suppressWaterCollisionUntilNextJump {
             print("🌊 Suppressing water collision until next jump")
-            healthManager.pendingAbilitySelection = false
+            // BUGFIX: Don't clear pendingAbilitySelection here - this isn't a fatal event
             return
         }
         
@@ -2755,7 +3086,7 @@ class GameScene: SKScene {
             frogController.lifeVestCharges -= 1
             updateHUD()
             stateManager.cancelPendingGameOver()
-            healthManager.pendingAbilitySelection = false
+            // BUGFIX: Don't clear pendingAbilitySelection when using life vest - player survived!
             // CRITICAL FIX: Don't suppress water collision when the frog should be floating
             // This allows the frog to continue floating with proper physics
             frogController.suppressWaterCollisionUntilNextJump = false
@@ -2768,6 +3099,7 @@ class GameScene: SKScene {
             frogController.isJumping = false
             print("🦎 Life vest rescue: Frog continues floating (can jump from water)")
         } else {
+            // Only clear pendingAbilitySelection when the player actually dies
             healthManager.pendingAbilitySelection = false
             self.playScaredSpinDropAndGameOver(reason: .splash)
         }
@@ -2779,7 +3111,7 @@ class GameScene: SKScene {
         
         if frogController.suppressWaterCollisionUntilNextJump {
             print("🌊 Suppressing water collision until next jump")
-            healthManager.pendingAbilitySelection = false
+            // BUGFIX: Don't clear pendingAbilitySelection here - this isn't a fatal event
             return
         }
         
@@ -2807,7 +3139,7 @@ class GameScene: SKScene {
                 frogController.lifeVestCharges -= 1
                 updateHUD()
                 stateManager.cancelPendingGameOver()
-                healthManager.pendingAbilitySelection = false
+                // BUGFIX: Don't clear pendingAbilitySelection when using life vest - player survived!
                 // CRITICAL FIX: Don't suppress water collision when the frog should be floating
                 // This allows the frog to continue floating with proper physics
                 frogController.suppressWaterCollisionUntilNextJump = false
@@ -2824,11 +3156,13 @@ class GameScene: SKScene {
                 frogController.inWater = false
                 frogController.isGrounded = false
                 frogController.isJumping = false
+                // Only clear pendingAbilitySelection when the player actually dies
                 healthManager.pendingAbilitySelection = false
                 self.playScaredSpinDropAndGameOver(reason: .splash)
             }
         } else {
             // Frog not in water state - this means no life vest was available
+            // Only clear pendingAbilitySelection when the player actually dies
             healthManager.pendingAbilitySelection = false
             self.playScaredSpinDropAndGameOver(reason: .splash)
         }
@@ -2887,6 +3221,7 @@ class GameScene: SKScene {
         HapticFeedbackManager.shared.notification(.error)
         effectsManager?.createSplashEffect(at: frogContainer.position)
         
+        // Only clear pendingAbilitySelection when the player actually dies
         healthManager.pendingAbilitySelection = false
         self.playScaredSpinDropAndGameOver(reason: .splash)
     }
@@ -2894,7 +3229,7 @@ class GameScene: SKScene {
     // MARK: - Lily Pad Creation (for special cases only)
     private func makeLilyPad(position: CGPoint, radius: CGFloat) -> LilyPad {
         // For start pad and rescue pad, always create normal pads
-        let lilyPad = LilyPad(position: position, radius: radius, type: .normal)
+        let lilyPad = LilyPad(position: position, radius: radius, type: .normal, weather: WeatherManager.shared.weather)
         
         // Apply current weather effects to the newly created lily pad
         let weatherManager = WeatherManager.shared
@@ -3030,6 +3365,21 @@ class GameScene: SKScene {
         print("🏁 Current score: \(score)")
         print("📏 Level \(currentLevel) travel distance: \(Int(levelTravelDistance)) units")
         
+        // IMMEDIATELY remove rocket from frog if active
+        if frogController.rocketActive {
+            print("🚀 Removing rocket from frog upon finish line crossing")
+            frogController.rocketActive = false
+            uiManager.hideRocketIndicator()
+            uiManager.hideRocketLandButton()
+            isRocketFinalApproach = false
+            
+            // Reset frog container z-position if it was elevated during rocket flight
+            frogContainer.zPosition = 50
+            
+            // Show feedback that rocket was removed
+            showFloatingText("Rocket Complete!", color: .systemPurple)
+        }
+        
         // Calculate and award time bonus
         let timeBonus = calculateTimeBonus()
         if timeBonus > 0 {
@@ -3090,9 +3440,18 @@ class GameScene: SKScene {
         let newWeather = weatherManager.suggestWeatherForLevel(currentLevel)
         let currentWeather = weatherManager.weather
         
+        print("🌤️ WEATHER DEBUG - Level \(currentLevel):")
+        print("   - Current weather: \(currentWeather.displayName)")
+        print("   - Suggested weather: \(newWeather.displayName)")
+        print("   - Should change: \(newWeather != currentWeather)")
+        
         if newWeather != currentWeather {
             print("🌤️ Level \(currentLevel): Transitioning weather from \(currentWeather.displayName) to \(newWeather.displayName)")
             weatherManager.transitionToWeather(newWeather, duration: 3.0, effectsManager: effectsManager)
+            
+            // Verify the weather was actually changed
+            let verifyWeather = weatherManager.weather
+            print("🌤️ VERIFICATION: Weather is now \(verifyWeather.displayName)")
         } else {
             print("🌤️ Level \(currentLevel): Weather remains \(currentWeather.displayName)")
         }
@@ -3153,8 +3512,10 @@ class GameScene: SKScene {
         // WEATHER INTEGRATION: Update spawn manager with weather configuration 
         // This will apply weather-specific enemy spawn rates and rules
         let weatherConfig = weatherManager.getWeatherLevelConfig(level: currentLevel)
-        // TODO: Implement weather configuration in SpawnManager
-        // spawnManager.updateWeatherConfiguration(weatherConfig)
+        print("🌤️ SPAWN MANAGER WEATHER CONFIG DEBUG:")
+        print("   - Getting config for level \(currentLevel)")
+        print("   - Current weather for config: \(weatherManager.weather.displayName)")
+        spawnManager.updateWeatherConfiguration(weatherConfig)
         print("🌤️ Weather config loaded for Level \(currentLevel): \(weatherManager.weather.displayName)")
         
         // Update the level indicator in the corner
@@ -3202,7 +3563,9 @@ class GameScene: SKScene {
         
         // STEP 4: Reset world manager completely
         print("🧹 Resetting world manager...")
-        worldManager.reset()
+        let currentWeather = WeatherManager.shared.weather
+        worldManager.reset(weather: currentWeather)
+        print("🌊 World reset with weather: \(currentWeather.displayName)")
         
         // STEP 5: Reset all level-specific state
         print("🧹 Resetting level state...")
@@ -3442,11 +3805,7 @@ class GameScene: SKScene {
     }
     
     // MARK: - Ice Testing Methods
-    func testIceMode() {
-        print("🧊 TESTING ICE MODE")
-        stateManager.createIceLevel()
-        debugWaterStateAndTouch()
-    }
+   
     
     func forceIceSliding() {
         print("🧊 FORCING ICE SLIDING")
@@ -4034,7 +4393,12 @@ class GameScene: SKScene {
                     showMainMenu()
                     return
                 }
-                if nodeName == "tryAgainButton" || nodeName == "restartButton" {
+                if nodeName == "tryAgainButton" {
+                    soundController.playSoundEffect(.buttonTap)
+                    restartCurrentLevel()
+                    return
+                }
+                if nodeName == "restartButton" {
                     soundController.playSoundEffect(.buttonTap)
                     startNewGame()
                     return
@@ -4440,15 +4804,26 @@ class GameScene: SKScene {
         weatherManager.transitionToWeather(weather, duration: 1.0, effectsManager: effectsManager)
     }
     
-    /// Test method to show weather suggestions for different levels
-    func testWeatherSuggestions(levels: Range<Int>) {
+    /// Test method to force weather change for debugging weather progression issues
+    func debugForceWeatherChange() {
         let weatherManager = WeatherManager.shared
-        print("🌤️ WEATHER SUGGESTIONS:")
+        let currentWeather = weatherManager.weather
+        let newWeather = weatherManager.suggestWeatherForLevel(currentLevel)
         
-        for level in levels {
-            let suggestedWeather = weatherManager.suggestWeatherForLevel(level)
-            let weatherConfig = weatherManager.getWeatherLevelConfig(level: level, weather: suggestedWeather)
-            print("  Level \(level): \(suggestedWeather.displayName) (multiplier: \(weatherConfig.globalSpawnRateMultiplier))")
+        print("🌤️ FORCE WEATHER CHANGE DEBUG:")
+        print("  - Current level: \(currentLevel)")
+        print("  - Current weather: \(currentWeather.displayName)")
+        print("  - Suggested weather: \(newWeather.displayName)")
+        
+        if newWeather != currentWeather {
+            print("🌤️ Forcing weather change to \(newWeather.displayName)")
+            weatherManager.forceWeatherChange(newWeather, effectsManager: effectsManager)
+            
+            // Also update spawn manager configuration
+            let weatherConfig = weatherManager.getWeatherLevelConfig(level: currentLevel)
+            spawnManager.updateWeatherConfiguration(weatherConfig)
+        } else {
+            print("🌤️ Weather is already correct for this level")
         }
     }
     

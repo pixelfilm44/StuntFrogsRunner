@@ -19,9 +19,11 @@
 				Sounds/Music/gameplay_music.mp3,
 				Sounds/Music/menu_music.mp3,
 				Sounds/Music/night_music.mp3,
+				Sounds/Music/rainy_music.mp3,
 				Sounds/Music/rocket_flight_music.mp3,
 				Sounds/Music/storm_music.mp3,
 				Sounds/Music/super_jump_music.mp3,
+				Sounds/Music/winter_music.mp3,
 				Sounds/SFX/button_tap.mp3,
 				Sounds/SFX/collect_powerup.mp3,
 				Sounds/SFX/danger_zone.mp3,
@@ -31,7 +33,11 @@
 				Sounds/SFX/game_over.mp3,
 				Sounds/SFX/ghostly.mp3,
 				Sounds/SFX/ice_crack.mp3,
+				Sounds/SFX/night.mp3,
+				Sounds/SFX/rain.mp3,
 				Sounds/SFX/special_collect.mp3,
+				Sounds/SFX/thunder.mp3,
+				Sounds/SFX/wind.mp3,
 				SoundSettingsView.swift,
 			);
 			target = 1C1539E42E9C29C900797DF6 /* StuntFrogRunner iOS */;

@@ -100,7 +100,7 @@ struct LevelConfigurations {
             globalSpawnRateMultiplier: 0.8, // 20% slower spawn rate for beginners
             maxEnemiesPerScreen: 15,
             specialRules: [.safeZone(radius: 200, duration: 5.0)], // 5-second safe zone at start
-            requiredTravelDistance: 4500 // Shorter distance for first level
+            requiredTravelDistance: 5500 // Shorter distance for first level
         )
         
         // LEVEL 2 - Add Variety (25,000-49,999 points)  
@@ -112,7 +112,7 @@ struct LevelConfigurations {
             ],
             globalSpawnRateMultiplier: 1.0, // Normal spawn rate
             maxEnemiesPerScreen: 16,
-            requiredTravelDistance: 5800
+            requiredTravelDistance: 6800
         )
         
         // LEVEL 3 - Ground Threats (50,000-74,999 points)
@@ -125,7 +125,7 @@ struct LevelConfigurations {
             ],
             globalSpawnRateMultiplier: 1.1, // 10% faster spawn rate
             maxEnemiesPerScreen: 18,
-            requiredTravelDistance: 7100
+            requiredTravelDistance: 7500
         )
         
         // LEVEL 4 - Spike Bushes (75,000-99,999 points)
@@ -139,7 +139,7 @@ struct LevelConfigurations {
             ],
             globalSpawnRateMultiplier: 1.2, // 20% faster spawn rate
             maxEnemiesPerScreen: 20,
-            requiredTravelDistance: 7400
+            requiredTravelDistance: 8400
         )
         
         // LEVEL 5 - Edge Danger (100,000-124,999 points)
@@ -154,7 +154,7 @@ struct LevelConfigurations {
             ],
             globalSpawnRateMultiplier: 1.3, // 30% faster spawn rate
             maxEnemiesPerScreen: 22,
-            requiredTravelDistance: 8700
+            requiredTravelDistance: 9700
         )
         
         // LEVEL 6 - Floating Logs (125,000-149,999 points)
@@ -170,7 +170,7 @@ struct LevelConfigurations {
             ],
             globalSpawnRateMultiplier: 1.4, // 40% faster spawn rate
             maxEnemiesPerScreen: 24,
-            requiredTravelDistance: 9000
+            requiredTravelDistance: 10000
         )
         
         // LEVEL 7 - Chasers Introduced (150,000-174,999 points)
@@ -181,7 +181,7 @@ struct LevelConfigurations {
                 EnemySpawnConfig(enemyType: .dragonfly, spawnRate: 0.25, maxCount: 4, weight: 0.22), // 22% chance
                 EnemySpawnConfig(enemyType: .snake, spawnRate: 0.3, maxCount: 4, canSpawnOnPads: false, weight: 0.2), // 20% chance
                 EnemySpawnConfig(enemyType: .spikeBush, spawnRate: 0.25, maxCount: 4, canSpawnInWater: false, weight: 0.15), // 15% chance
-                EnemySpawnConfig(enemyType: .edgeSpikeBush, spawnRate: 0.1, maxCount: 3, canSpawnOnPads: false, weight: 0.08), // 8% chance
+                EnemySpawnConfig(enemyType: .edgeSpikeBush, spawnRate: 0.8, maxCount: 3, canSpawnOnPads: false, weight: 0.08), // 8% chance
                 EnemySpawnConfig(enemyType: .log, spawnRate: 0.15, maxCount: 4, canSpawnOnPads: false, weight: 0.08), // 8% chance
                 EnemySpawnConfig(enemyType: .chaser, spawnRate: 0.02, maxCount: 1, weight: 0.02)   // 2% chance - very rare!
             ],
@@ -190,7 +190,7 @@ struct LevelConfigurations {
             specialRules: [
                 .guaranteedEnemyType(.chaser, every: 600) // Guaranteed chaser every 10 seconds
             ],
-            requiredTravelDistance: 9500
+            requiredTravelDistance: 10500
         )
         
         // LEVEL 8 - Maximum Challenge (175,000-199,999 points)
@@ -201,7 +201,7 @@ struct LevelConfigurations {
                 EnemySpawnConfig(enemyType: .dragonfly, spawnRate: 0.25, maxCount: 5, weight: 0.2), // 20% chance
                 EnemySpawnConfig(enemyType: .snake, spawnRate: 0.35, maxCount: 5, canSpawnOnPads: false, weight: 0.22), // 22% chance
                 EnemySpawnConfig(enemyType: .spikeBush, spawnRate: 0.3, maxCount: 5, canSpawnInWater: false, weight: 0.18), // 18% chance
-                EnemySpawnConfig(enemyType: .edgeSpikeBush, spawnRate: 0.12, maxCount: 4, canSpawnOnPads: false, weight: 0.1), // 10% chance
+                EnemySpawnConfig(enemyType: .edgeSpikeBush, spawnRate: 0.9, maxCount: 4, canSpawnOnPads: false, weight: 0.1), // 10% chance
                 EnemySpawnConfig(enemyType: .log, spawnRate: 0.2, maxCount: 5, canSpawnOnPads: false, weight: 0.08), // 8% chance
                 EnemySpawnConfig(enemyType: .chaser, spawnRate: 0.04, maxCount: 2, weight: 0.02)   // 2% chance
             ],
@@ -210,7 +210,7 @@ struct LevelConfigurations {
             specialRules: [
                 .guaranteedEnemyType(.chaser, every: 480) // Guaranteed chaser every 8 seconds
             ],
-            requiredTravelDistance: 10000
+            requiredTravelDistance: 12000
         )
         
         // Return all configured levels
@@ -239,7 +239,7 @@ struct LevelConfigurations {
                 EnemySpawnConfig(enemyType: .dragonfly, spawnRate: 0.2 + scalingFactor * 0.1, maxCount: 5, weight: 0.18),
                 EnemySpawnConfig(enemyType: .snake, spawnRate: 0.3 + scalingFactor * 0.1, maxCount: 6, canSpawnOnPads: false, weight: 0.22),
                 EnemySpawnConfig(enemyType: .spikeBush, spawnRate: 0.25 + scalingFactor * 0.1, maxCount: 6, canSpawnInWater: false, weight: 0.2),
-                EnemySpawnConfig(enemyType: .edgeSpikeBush, spawnRate: 0.1 + scalingFactor * 0.05, maxCount: 5, canSpawnOnPads: false, weight: 0.12),
+                EnemySpawnConfig(enemyType: .edgeSpikeBush, spawnRate: 0.8 + scalingFactor * 0.05, maxCount: 5, canSpawnOnPads: false, weight: 0.12),
                 EnemySpawnConfig(enemyType: .log, spawnRate: 0.15 + scalingFactor * 0.08, maxCount: 6, canSpawnOnPads: false, weight: 0.08),
                 EnemySpawnConfig(enemyType: .chaser, spawnRate: 0.03 + scalingFactor * 0.02, maxCount: min(3, level - 6), weight: 0.02)
             ],

@@ -73,6 +73,8 @@ class HealthManager {
         }
     }
     
+    private var healthDepletedAlreadyCalled: Bool = false
+    
     var pendingAbilitySelection: Bool = false {
         didSet {
             if GameConfig.enableAbilitySelectionDebug {
@@ -113,8 +115,13 @@ class HealthManager {
     
     // MARK: - Health Management
     func damageHealth(amount: Int = 1) {
+        let previousHealth = health
         health -= amount
-        if health <= 0 {
+        
+        // Only call onHealthDepleted if we just crossed from positive to zero/negative
+        // and we haven't already called it
+        if previousHealth > 0 && health <= 0 && !healthDepletedAlreadyCalled {
+            healthDepletedAlreadyCalled = true
             onHealthDepleted?()
         }
     }
@@ -269,6 +276,7 @@ class HealthManager {
         axeCharges = 0
         ghostEscapesUsed = 0
         pendingAbilitySelection = false
+        healthDepletedAlreadyCalled = false  // Reset the flag
         
         print("💚 HealthManager reset complete:")
         print("  - health: \(health)")

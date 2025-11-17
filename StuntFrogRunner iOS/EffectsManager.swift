@@ -14,6 +14,7 @@ class EffectsManager {
     private var snowNode: SKNode?
     private var windNode: SKNode?
     private var nightOverlayNode: SKNode?
+    private var windParticlePool: [SKSpriteNode] = []
     
     private var isRainActive = false
     private var isLightningActive = false
@@ -29,6 +30,7 @@ class EffectsManager {
     private var cachedHitTextActions: [EnemyType: SKAction] = [:]
     private var cachedHitParticleAction: SKAction?
     private var cachedImpactParticleAction: SKAction?
+    private var cachedWindParticleAction: SKAction?
     
     init(scene: SKScene) {
         self.scene = scene
@@ -757,13 +759,16 @@ class EffectsManager {
         let wait = SKAction.wait(forDuration: 0.1)
         let rainSequence = SKAction.sequence([createRainDrop, wait])
         let rainForever = SKAction.repeatForever(rainSequence)
+        // Play rain sound looping
+        SoundController.shared.playLooping(.rain, volume: 0.3)
         
         rainNode?.run(rainForever)
     }
     
     func stopRainEffect() {
         guard isRainActive, let rain = rainNode else { return }
-        
+        // Stop rain sound when rain stops
+        SoundController.shared.stopLooping(.rain)
         print("🌧️ Stopping rain effect")
         isRainActive = false
         
@@ -887,12 +892,9 @@ class EffectsManager {
             boltRemove
         ]))
         
-        // Play thunder sound if SoundController is available
-        if let soundController = try? SoundController.shared {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                // Thunder sound would go here - for now we'll use an existing sound
-                soundController.playSoundEffect(.dangerZone, volume: 0.3)
-            }
+        // Play thunder sound after lightning flash
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            SoundController.shared.playSoundEffect(.thunder, volume: 0.3)
         }
     }
     
@@ -964,13 +966,23 @@ class EffectsManager {
     }
     
     // MARK: - Wind Effects
+    private let maxWindParticles = 8  // Reduced from potentially 20+ particles
+    
     func startWindEffect(strength: CGFloat, direction: CGFloat) {
         guard let scene = scene else { return }
         
         isWindActive = true
-        print("💨 Starting wind effect - strength: \(strength), direction: \(direction)")
+        windNode = SKNode()
+        windNode?.zPosition = 190
+        scene.addChild(windNode!)
         
-        // Schedule random wind gusts
+        // Pre-cache wind particle action
+        cacheWindParticleAction(strength: strength, direction: direction)
+        
+        // Pre-populate particle pool
+        prepareWindParticlePool()
+        
+        // Schedule random wind gusts with longer intervals for performance
         scheduleNextWindGust(strength: strength, direction: direction)
     }
     
@@ -980,12 +992,100 @@ class EffectsManager {
         windNode?.removeAllActions()
         windNode?.removeFromParent()
         windNode = nil
+        
+        // Clean up particle pool
+        windParticlePool.removeAll()
+        cachedWindParticleAction = nil
+    }
+    
+    private func prepareWindParticlePool() {
+        windParticlePool.removeAll()
+        
+        // Create a pool of reusable wind particles
+        for _ in 0..<maxWindParticles {
+            let particle = createWindParticle()
+            particle.alpha = 0
+            particle.position = CGPoint(x: -1000, y: -1000) // Off-screen
+            windParticlePool.append(particle)
+        }
+    }
+    
+    private func createWindParticle() -> SKSpriteNode {
+        // Randomize aspect ratio (length vs width) to vary leaf shapes
+        let baseWidth: CGFloat = 34
+        let aspect: CGFloat = CGFloat.random(in: 0.5...1.6) // <1 = rounder, >1 = longer
+        let leafSize = CGSize(width: baseWidth * aspect, height: 18)
+
+        // Randomize color using HSB for natural greens/yellows
+        // Base around green hue with slight drift toward yellow or teal
+        let baseHue: CGFloat = 0.28 // ~green
+        let hue = max(0, min(1, baseHue + CGFloat.random(in: -0.06...0.07)))
+        let baseSat: CGFloat = 0.65
+        let sat = max(0, min(1, baseSat + CGFloat.random(in: -0.2...0.2)))
+        let baseBright: CGFloat = 0.8
+        let bri = max(0, min(1, baseBright + CGFloat.random(in: -0.1...0.1)))
+        let fillColor = UIColor(hue: hue, saturation: sat, brightness: bri, alpha: 0.6)
+        let strokeColor = UIColor(hue: hue, saturation: min(1, sat + 0.15), brightness: max(0, bri - 0.1), alpha: 0.9)
+
+        // Build a simple almond-shaped leaf using two quadratic curves
+        let path = UIBezierPath()
+        // Start at left tip
+        path.move(to: CGPoint(x: 0, y: leafSize.height / 2))
+        // Top curve to right tip
+        path.addQuadCurve(to: CGPoint(x: leafSize.width, y: leafSize.height / 2), controlPoint: CGPoint(x: leafSize.width * 0.5, y: leafSize.height))
+        // Bottom curve back to left tip
+        path.addQuadCurve(to: CGPoint(x: 0, y: leafSize.height / 2), controlPoint: CGPoint(x: leafSize.width * 0.5, y: 0))
+
+        let leafShape = SKShapeNode(path: path.cgPath)
+        leafShape.fillColor = fillColor
+        leafShape.strokeColor = strokeColor
+        leafShape.lineWidth = 1.2
+
+        // Add a subtle central vein
+        let veinPath = UIBezierPath()
+        veinPath.move(to: CGPoint(x: leafSize.width * 0.08, y: leafSize.height / 2))
+        veinPath.addLine(to: CGPoint(x: leafSize.width * 0.92, y: leafSize.height / 2))
+        let vein = SKShapeNode(path: veinPath.cgPath)
+        vein.strokeColor = UIColor(white: 1.0, alpha: 0.45)
+        vein.lineWidth = 0.7
+        leafShape.addChild(vein)
+
+        // Slight random rotation and tiny scale variance to avoid uniformity
+        leafShape.zRotation = CGFloat.random(in: -0.6...0.6)
+        leafShape.setScale(CGFloat.random(in: 0.9...1.15))
+
+        // Try to render the shape to a texture for performance
+        if let scene = self.scene, let view = scene.view, let texture = view.texture(from: leafShape) {
+            let sprite = SKSpriteNode(texture: texture)
+            sprite.alpha = CGFloat.random(in: 0.25...0.55)
+            sprite.colorBlendFactor = 0.0
+            return sprite
+        }
+
+        // Fallback: simple rounded rectangle approximating a leaf
+        let fallbackColor = UIColor(hue: hue, saturation: sat, brightness: bri, alpha: 0.35)
+        let fallback = SKSpriteNode(color: fallbackColor, size: CGSize(width: 30 * aspect, height: 18))
+        fallback.colorBlendFactor = 1.0
+        fallback.alpha = 0.4
+        fallback.zRotation = CGFloat.random(in: -0.6...0.6)
+        return fallback
+    }
+    
+    private func cacheWindParticleAction(strength: CGFloat, direction: CGFloat) {
+        let windDistance = strength * 200  // Reduced from 300 for shorter travel
+        let moveX = cos(direction) * windDistance
+        let moveY = sin(direction) * windDistance
+        
+        let move = SKAction.moveBy(x: moveX, y: moveY, duration: 0.8) // Reduced duration
+        let fade = SKAction.fadeOut(withDuration: 0.8)
+        
+        cachedWindParticleAction = SKAction.group([move, fade])
     }
     
     private func scheduleNextWindGust(strength: CGFloat, direction: CGFloat) {
         guard isWindActive, let scene = scene else { return }
         
-        let delay = TimeInterval.random(in: 2.0...6.0)  // Random wind gusts
+        let delay = TimeInterval.random(in: 3.0...7.0)  // Slightly longer intervals
         
         let wait = SKAction.wait(forDuration: delay)
         let gust = SKAction.run { [weak self] in
@@ -1000,37 +1100,69 @@ class EffectsManager {
     }
     
     private func createWindGust(strength: CGFloat, direction: CGFloat) {
-        guard let scene = scene else { return }
+        guard let scene = scene, let windNode = windNode else { return }
         
-        print("💨 Wind gust! Strength: \(strength)")
+        // Limit the number of active particles based on performance
+        let particleCount = min(maxWindParticles, max(3, Int(strength * 8))) // Reduced multiplier
         
-        // Create visual wind effect with particles
-        for i in 0..<Int(strength * 20) {
-            let particle = SKShapeNode(circleOfRadius: CGFloat.random(in: 1...3))
-            particle.fillColor = UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.3)
-            particle.strokeColor = .clear
+        var activeParticles = 0
+        
+        // Use pooled particles for better performance
+        for i in 0..<particleCount {
+            guard i < windParticlePool.count else { break }
+            
+            let particle = windParticlePool[i]
+            
+            // Skip if particle is already animating
+            guard particle.hasActions() == false else { continue }
+            
+            // Reset particle properties
+            let diameter = CGFloat.random(in: 20...40) // Smaller range
+            particle.size = CGSize(width: diameter, height: diameter)
+            particle.alpha = CGFloat.random(in: 0.8...1) // Lower opacity
             
             let startX = CGFloat.random(in: -50...scene.size.width + 50)
             let startY = CGFloat.random(in: 0...scene.size.height)
             particle.position = CGPoint(x: startX, y: startY)
-            particle.zPosition = 190
             
-            scene.addChild(particle)
+            // Add to wind node if not already a child
+            if particle.parent == nil {
+                windNode.addChild(particle)
+            }
             
-            let windDistance = strength * 300
-            let moveX = cos(direction) * windDistance
-            let moveY = sin(direction) * windDistance
-            
-            let move = SKAction.moveBy(x: moveX, y: moveY, duration: 1.0)
-            let fade = SKAction.fadeOut(withDuration: 1.0)
-            let remove = SKAction.removeFromParent()
-            
-            let particleAction = SKAction.sequence([
-                SKAction.group([move, fade]),
-                remove
-            ])
-            
-            particle.run(particleAction)
+            if let cachedAction = cachedWindParticleAction {
+                let resetAction = SKAction.run {
+                    particle.alpha = 0
+                    particle.removeAction(forKey: "wobble")
+                    particle.zRotation = 0
+                }
+
+                // Add a slight wobble rotation for realism while the particle moves
+                let wobbleAmplitude = CGFloat.random(in: 0.08...0.22)
+                let wobbleDuration = TimeInterval.random(in: 0.18...0.32)
+                let wobble = SKAction.sequence([
+                    SKAction.rotate(byAngle: wobbleAmplitude, duration: wobbleDuration),
+                    SKAction.rotate(byAngle: -wobbleAmplitude * 2.0, duration: wobbleDuration * 2.0),
+                    SKAction.rotate(byAngle: wobbleAmplitude, duration: wobbleDuration)
+                ])
+                let wobbleForever = SKAction.repeatForever(wobble)
+                particle.run(wobbleForever, withKey: "wobble")
+
+                let fullAction = SKAction.sequence([
+                    cachedAction,
+                    resetAction
+                ])
+
+                particle.run(fullAction)
+                activeParticles += 1
+            }
+        }
+        
+        // Play wind sound less frequently to reduce audio processing load
+        if activeParticles > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                SoundController.shared.playSoundEffect(.windStorm, volume: 0.2) // Reduced volume
+            }
         }
         
         // Apply wind force to frog if accessible
@@ -1040,44 +1172,70 @@ class EffectsManager {
     }
     
     private func applyWindForce(to gameScene: GameScene, strength: CGFloat, direction: CGFloat) {
-        // This would need to be implemented in your GameScene
-        // For now, we'll post a notification that wind should affect the frog
+        // Calculate wind force vector with improved scaling
+        let baseForce: CGFloat = 150 // Base force multiplier for wind effects
         let windForce = CGVector(
-            dx: cos(direction) * strength * 100,
-            dy: sin(direction) * strength * 100
+            dx: cos(direction) * strength * baseForce,
+            dy: sin(direction) * strength * baseForce
         )
         
+        // Create additional info dictionary for more detailed wind data
+        let windInfo: [String: Any] = [
+            "force": windForce,
+            "strength": strength,
+            "direction": direction,
+            "timestamp": Date().timeIntervalSince1970
+        ]
+        
+        // Post notification with enhanced wind data
         NotificationCenter.default.post(
             name: NSNotification.Name("WindForceApplied"),
-            object: windForce
+            object: windForce,
+            userInfo: windInfo
         )
+        
+        print("🌬️ Wind force applied - strength: \(strength), direction: \(direction * 180 / .pi)°, force: (\(windForce.dx), \(windForce.dy))")
     }
     
     // MARK: - Night Overlay Effects
     func startNightOverlay() {
-        guard let scene = scene, !isNightOverlayActive else { return }
+        guard let scene = scene else { 
+            print("❌ Night overlay failed: No scene")
+            return 
+        }
         
+        guard !isNightOverlayActive else { 
+            print("⚠️ Night overlay already active")
+            return 
+        }
+        // Play night ambience
+        SoundController.shared.playLooping(.night, volume: 0.3)
         isNightOverlayActive = true
         nightOverlayNode = SKNode()
         nightOverlayNode?.zPosition = 180  // Below weather but above game elements
         scene.addChild(nightOverlayNode!)
         
-        print("🌙 Starting night overlay effect")
+        print("🌙 Starting night overlay effect - scene size: \(scene.size)")
         
         // Dark semi-transparent overlay
         let overlay = SKShapeNode(rect: CGRect(x: 0, y: 0, width: scene.size.width, height: scene.size.height))
         overlay.fillColor = UIColor(red: 0.0, green: 0.0, blue: 0.2, alpha: 0.4)
         overlay.strokeColor = .clear
         overlay.zPosition = 0
+        overlay.name = "nightOverlay"
         nightOverlayNode?.addChild(overlay)
         
-        // Create twinkling stars
-        createStarField()
+        print("🌙 Added dark overlay: \(overlay.frame)")
+        
+        
         
         // Animate in the overlay
         nightOverlayNode?.alpha = 0
         let fadeIn = SKAction.fadeIn(withDuration: 2.0)
-        nightOverlayNode?.run(fadeIn)
+        nightOverlayNode?.run(fadeIn) { [weak self] in
+            print("🌙 Night overlay fade-in complete")
+            self?.debugNightEffects()
+        }
     }
     
     func stopNightOverlay() {
@@ -1086,8 +1244,8 @@ class EffectsManager {
         print("🌙 Stopping night overlay effect")
         isNightOverlayActive = false
         
-        // Clean up fireflies when stopping night overlay
-        removeAllFireflies()
+        // Stop night ambience
+        SoundController.shared.stopLooping(.night)
         
         // Fade out and remove
         let fadeOut = SKAction.fadeOut(withDuration: 2.0)
@@ -1096,309 +1254,68 @@ class EffectsManager {
         nightOverlayNode = nil
     }
     
-    private func createStarField() {
-        guard let scene = scene else { return }
+  
+    // MARK: - Public Testing Methods
+    
+    /// Force start night effects for testing (call this from your GameScene or debug menu)
+    public func testNightEffects() {
+        print("🧪 TESTING: Force starting night effects...")
         
-        // Determine where to place star reflections - prefer world coordinates for proper movement
-        let starParent: SKNode
-        let starZPosition: CGFloat
-        let worldBounds: CGRect
+        // Stop any existing weather effects
+        stopRainEffect()
+        stopLightningEffect()
+        stopSnowEffect()
+        stopWindEffect()
+        stopNightOverlay()
         
-        if let gameScene = scene as? GameScene, let worldNode = gameScene.worldManager.worldNode {
-            // Place stars in the world coordinate system so they move with the background
-            starParent = worldNode
-            starZPosition = 1 // Below lily pads but above background
-            
-            // Use a larger area than just the screen to create stars across the world
-            // This ensures stars are visible as the player moves around
-            let screenSize = scene.size
-            worldBounds = CGRect(
-                x: -screenSize.width * 2,
-                y: -screenSize.height * 2,
-                width: screenSize.width * 4,
-                height: screenSize.height * 4
-            )
-        } else {
-            // Fallback to night overlay node for non-GameScene contexts
-            guard let nightOverlay = nightOverlayNode else { return }
-            starParent = nightOverlay
-            starZPosition = 1
-            worldBounds = CGRect(x: 20, y: 20, width: scene.size.width - 40, height: scene.size.height - 40)
+        // Start night overlay
+        startNightOverlay()
+        
+        // Debug after a delay to let things settle
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.debugNightEffects()
+        }
+    }
+    
+    /// Test individual star creation
+    public func testStarCreation() {
+        guard let scene = scene else { 
+            print("❌ No scene for star testing")
+            return 
         }
         
-        // Create a manageable number of star reflections for performance
-        let starCount = 140 // Increased slightly since we're covering a larger area
+        print("🧪 TESTING: Creating test stars...")
         
-        for i in 0..<starCount {
-            let star = SKShapeNode(circleOfRadius: CGFloat.random(in: 1...2.5))
-            star.fillColor = UIColor(red: 1.0, green: 1.0, blue: CGFloat.random(in: 0.8...1.0), alpha: 0.6)
-            star.strokeColor = UIColor(red: 0.8, green: 0.9, blue: 1.0, alpha: 0.3)
-            star.lineWidth = 0.5
+        // Create a few test stars directly in the scene for visibility
+        for i in 0..<10 {
+            let star = SKShapeNode(circleOfRadius: 8)
+            star.name = "testStar"
+            star.fillColor = .yellow
+            star.strokeColor = .white
+            star.lineWidth = 2
             
-            // Create a subtle ripple effect for water reflections
-            let rippleRadius = CGFloat.random(in: 8...15)
-            let ripple = SKShapeNode(circleOfRadius: rippleRadius)
-            ripple.fillColor = .clear
-            ripple.strokeColor = UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.1)
-            ripple.lineWidth = 1
-            
-            // Random position across the world bounds
-            let x = CGFloat.random(in: worldBounds.minX...worldBounds.maxX)
-            let y = CGFloat.random(in: worldBounds.minY...worldBounds.maxY)
+            let x = 100 + CGFloat(i * 50)
+            let y = scene.size.height / 2
             star.position = CGPoint(x: x, y: y)
-            star.zPosition = starZPosition
+            star.zPosition = 200 // Very high z-position to ensure visibility
             
-            ripple.position = star.position
-            ripple.zPosition = starZPosition - 0.1
+            scene.addChild(star)
             
-            starParent.addChild(ripple)
-            starParent.addChild(star)
-            
-            // Create twinkling effect with staggered timing for performance
-            let twinkleDuration = TimeInterval.random(in: 1.5...3.5)
-            let delay = TimeInterval(i) * 0.15 // Stagger star animations
-            
-            let fadeOut = SKAction.fadeOut(withDuration: twinkleDuration * 0.3)
-            let fadeIn = SKAction.fadeIn(withDuration: twinkleDuration * 0.3)
-            let wait = SKAction.wait(forDuration: twinkleDuration * 0.4)
-            
-            let twinkleSequence = SKAction.sequence([fadeOut, fadeIn, wait])
-            let twinkleForever = SKAction.repeatForever(twinkleSequence)
-            
-            // Add subtle ripple animation for water reflection effect
-            let rippleScale = SKAction.sequence([
-                SKAction.scale(to: 1.2, duration: twinkleDuration * 0.5),
-                SKAction.scale(to: 1.0, duration: twinkleDuration * 0.5)
+            // Simple twinkling
+            let twinkle = SKAction.sequence([
+                SKAction.fadeOut(withDuration: 0.5),
+                SKAction.fadeIn(withDuration: 0.5)
             ])
-            let rippleForever = SKAction.repeatForever(rippleScale)
-            
-            star.run(SKAction.sequence([
-                SKAction.wait(forDuration: delay),
-                twinkleForever
-            ]))
-            
-            ripple.run(SKAction.sequence([
-                SKAction.wait(forDuration: delay + 0.5),
-                rippleForever
-            ]))
+            star.run(SKAction.repeatForever(twinkle))
         }
         
-        // Add fireflies for extra ambiance in world space
-        // Generate initial fireflies around the starting area
-        if let gameScene = scene as? GameScene {
-            // Start with fireflies around the initial camera/world position
-            let initialWorldCenter = CGPoint.zero // Adjust based on your game's starting position
-            generateFirefliesInWorldArea(centerWorldPosition: initialWorldCenter, areaRadius: 400)
-        }
+        print("🧪 Created 10 test stars across the screen")
     }
     
-    private func createFireflies() {
-        // Fireflies are now created in world space when night overlay starts
-        // This method is kept for compatibility but the actual creation happens in generateFirefliesInWorldArea
-    }
-    
-    /// Creates fireflies at static world positions that persist as the frog moves past them
-    /// Call this periodically to populate new areas as the frog explores
-    func generateFirefliesInWorldArea(centerWorldPosition: CGPoint, areaRadius: CGFloat) {
-        guard let scene = scene, isNightOverlayActive else { return }
-        
-        // Determine the parent node - prefer world coordinates
-        let fireflyParent: SKNode
-        let fireflyZPosition: CGFloat
-        
-        if let gameScene = scene as? GameScene, let worldNode = gameScene.worldManager.worldNode {
-            fireflyParent = worldNode
-            fireflyZPosition = 15 // Above lily pads and water, below most effects
-        } else {
-            // Fallback if not in GameScene
-            fireflyParent = scene
-            fireflyZPosition = 85
-        }
-        
-        // Create fireflies scattered around the specified world area
-        let fireflyCount = Int(areaRadius / 150) + 2 // Scale count with area size, minimum 2
-        let maxFireflies = 8 // Cap to avoid performance issues
-        let actualCount = min(fireflyCount, maxFireflies)
-        
-        for i in 0..<actualCount {
-            let firefly = createSingleFirefly()
-            
-            // Position randomly within the specified world area
-            let angle = CGFloat.random(in: 0...(CGFloat.pi * 2))
-            let distance = CGFloat.random(in: 0...areaRadius)
-            let offsetX = cos(angle) * distance
-            let offsetY = sin(angle) * distance
-            
-            firefly.position = CGPoint(
-                x: centerWorldPosition.x + offsetX,
-                y: centerWorldPosition.y + offsetY
-            )
-            firefly.zPosition = fireflyZPosition
-            
-            fireflyParent.addChild(firefly)
-            
-            // Start the firefly behavior with a staggered delay
-            let delay = TimeInterval(i) * 0.3
-            startFireflyBehavior(firefly, delay: delay)
-        }
-    }
-    
-    /// Creates a single firefly node with proper visual setup
-    private func createSingleFirefly() -> SKShapeNode {
-        let firefly = SKShapeNode(circleOfRadius: CGFloat.random(in: 2...3))
-        firefly.name = "firefly" // For easy identification and cleanup
-        firefly.fillColor = UIColor(red: 1.0, green: 1.0, blue: 0.3, alpha: 0.9)
-        firefly.strokeColor = UIColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 0.6)
-        firefly.lineWidth = 0.5
-        
-        // Add a subtle glow effect
-        let glow = SKShapeNode(circleOfRadius: 6)
-        glow.fillColor = UIColor(red: 1.0, green: 1.0, blue: 0.3, alpha: 0.2)
-        glow.strokeColor = .clear
-        glow.zPosition = -1
-        firefly.addChild(glow)
-        
-        return firefly
-    }
-    
-    /// Starts the floating and blinking behavior for a firefly
-    private func startFireflyBehavior(_ firefly: SKShapeNode, delay: TimeInterval) {
-        // Gentle floating movement in a constrained area around the firefly's position
-        let floatDistance: CGFloat = 30
-        let baseDuration: TimeInterval = 4.0
-        
-        // Create random floating pattern
-        func createRandomFloatAction() -> SKAction {
-            let duration = TimeInterval.random(in: baseDuration * 0.8...baseDuration * 1.2)
-            let deltaX = CGFloat.random(in: -floatDistance...floatDistance)
-            let deltaY = CGFloat.random(in: -floatDistance...floatDistance)
-            
-            let moveAction = SKAction.moveBy(x: deltaX, y: deltaY, duration: duration)
-            moveAction.timingMode = .easeInEaseOut
-            return moveAction
-        }
-        
-        // Create infinite floating sequence
-        let floatSequence = SKAction.sequence([
-            createRandomFloatAction(),
-            createRandomFloatAction(),
-            createRandomFloatAction(),
-            createRandomFloatAction()
-        ])
-        let floatForever = SKAction.repeatForever(floatSequence)
-        
-        // Create blinking effect
-        let blinkDuration = TimeInterval.random(in: 0.3...0.7)
-        let blinkWait = TimeInterval.random(in: 1.5...3.5)
-        
-        let blink = SKAction.sequence([
-            SKAction.fadeOut(withDuration: blinkDuration * 0.5),
-            SKAction.fadeIn(withDuration: blinkDuration * 0.5),
-            SKAction.wait(forDuration: blinkWait)
-        ])
-        let blinkForever = SKAction.repeatForever(blink)
-        
-        // Start both behaviors after the specified delay
-        firefly.run(SKAction.sequence([
-            SKAction.wait(forDuration: delay),
-            SKAction.group([floatForever, blinkForever])
-        ]))
-    }
-    
-    /// Remove fireflies that are far from the specified position to manage memory
-    func cleanupDistantFireflies(from centerPosition: CGPoint, maxDistance: CGFloat) {
-        guard let scene = scene else { return }
-        
-        let fireflyParent: SKNode
-        if let gameScene = scene as? GameScene, let worldNode = gameScene.worldManager.worldNode {
-            fireflyParent = worldNode
-        } else {
-            fireflyParent = scene
-        }
-        
-        // Find and remove distant fireflies
-        fireflyParent.enumerateChildNodes(withName: "firefly") { node, _ in
-            let distance = sqrt(pow(node.position.x - centerPosition.x, 2) + pow(node.position.y - centerPosition.y, 2))
-            if distance > maxDistance {
-                node.removeFromParent()
-            }
-        }
-    }
-    
-    // MARK: - Public Firefly Management Methods
-    
-    /// Call this from GameScene when the frog moves to populate new areas with fireflies
-    /// This should be called periodically as the frog explores new areas during night weather
-    /// 
-    /// Usage in GameScene:
-    /// ```
-    /// // In your update loop or when frog position changes significantly:
-    /// if effectsManager.isNightOverlayActive {
-    ///     effectsManager.updateFirefliesForPosition(frog.position)
-    /// }
-    /// ```
-    public func updateFirefliesForPosition(_ frogWorldPosition: CGPoint) {
-        guard isNightOverlayActive else { return }
-        
-        // Clean up distant fireflies first to manage memory
-        cleanupDistantFireflies(from: frogWorldPosition, maxDistance: 600)
-        
-        // Generate new fireflies ahead of the frog's movement direction
-        // You might want to adjust this based on the frog's movement direction
-        let generationRadius: CGFloat = 300
-        let areasToPopulate = [
-            CGPoint(x: frogWorldPosition.x, y: frogWorldPosition.y + 200), // Ahead
-            CGPoint(x: frogWorldPosition.x - 150, y: frogWorldPosition.y + 100), // Left-ahead
-            CGPoint(x: frogWorldPosition.x + 150, y: frogWorldPosition.y + 100), // Right-ahead
-        ]
-        
-        for area in areasToPopulate {
-            // Check if we already have fireflies in this area before generating more
-            if !hasFirefliesNear(area, radius: generationRadius) {
-                generateFirefliesInWorldArea(centerWorldPosition: area, areaRadius: generationRadius)
-            }
-        }
-    }
-    
-    /// Check if there are already fireflies in the specified area
-    private func hasFirefliesNear(_ position: CGPoint, radius: CGFloat) -> Bool {
-        guard let scene = scene else { return false }
-        
-        let fireflyParent: SKNode
-        if let gameScene = scene as? GameScene, let worldNode = gameScene.worldManager.worldNode {
-            fireflyParent = worldNode
-        } else {
-            fireflyParent = scene
-        }
-        
-        var hasFireflies = false
-        fireflyParent.enumerateChildNodes(withName: "firefly") { node, stop in
-            let distance = sqrt(pow(node.position.x - position.x, 2) + pow(node.position.y - position.y, 2))
-            if distance < radius {
-                hasFireflies = true
-                stop.pointee = true
-            }
-        }
-        
-        return hasFireflies
-    }
-    
-    /// Remove all fireflies from the world (useful when switching weather or resetting)
-    public func removeAllFireflies() {
-        guard let scene = scene else { return }
-        
-        let fireflyParent: SKNode
-        if let gameScene = scene as? GameScene, let worldNode = gameScene.worldManager.worldNode {
-            fireflyParent = worldNode
-        } else {
-            fireflyParent = scene
-        }
-        
-        fireflyParent.enumerateChildNodes(withName: "firefly") { node, _ in
-            node.removeFromParent()
-        }
-    }
+    /// Test individual firefly creation
     func updateWeatherEffects(for weather: WeatherType) {
+        print("🌟 EffectsManager.updateWeatherEffects called with weather: \(weather)")
+        
         // Stop all current weather effects
         stopRainEffect()
         stopLightningEffect()
@@ -1406,35 +1323,103 @@ class EffectsManager {
         stopWindEffect()
         stopNightOverlay()
         
-        // Clean up any existing fireflies when changing weather
-        removeAllFireflies()
+       
         
         // Start appropriate effects for new weather
         switch weather {
         case .day:
             // No additional weather effects needed
+            print("🌞 Day weather - no special effects")
             break
         case .night:
+            print("🌙 Starting night effects - overlay and stars")
             startNightOverlay()
             
         case .winter:
+            print("❄️ Starting winter effects")
             startSnowEffect()
             
         case .ice:
+            print("🧊 Starting ice effects")
             startSnowEffect()
             
         case .rain:
+            print("🌧️ Starting rain effects")
             startRainEffect()
+            startWindEffect(strength: 0.3, direction: 2) // Light wind with rain
             
         case .stormy:
+            print("⛈️ Starting stormy effects")
             startRainEffect()
             startLightningEffect()
-            startWindEffect(strength: 0.5, direction: 0)
+            startWindEffect(strength: 0.5, direction: 4)
             
         case .storm:
+            print("🌩️ Starting storm effects")
             startRainEffect()
             startLightningEffect()
-            startWindEffect(strength: 0.5, direction: 0)
+            startWindEffect(strength: 0.5, direction: 4)
+        }
+    }
+    
+    // Debug method to check if night effects are active
+    func debugNightEffects() {
+        print("🌟 NIGHT EFFECTS DEBUG:")
+        print("  - isNightOverlayActive: \(isNightOverlayActive)")
+        print("  - nightOverlayNode exists: \(nightOverlayNode != nil)")
+        print("  - scene exists: \(scene != nil)")
+        
+        if let scene = scene {
+            print("  - scene size: \(scene.size)")
+            print("  - scene children count: \(scene.children.count)")
+        }
+        
+        // Check for stars and fireflies in the scene
+        if let scene = scene {
+            var starCount = 0
+            var fireflyCount = 0
+            
+            func countNodes(in node: SKNode, depth: Int = 0) {
+                let indent = String(repeating: "  ", count: depth)
+                
+                for child in node.children {
+                    if child is SKShapeNode && child.name != "firefly" {
+                        // Could be a star
+                        if let shape = child as? SKShapeNode, shape.fillColor.description.contains("1.0") {
+                            starCount += 1
+                        }
+                    }
+                    if child.name == "firefly" {
+                        fireflyCount += 1
+                    }
+                    
+                    // Recursively check children
+                    countNodes(in: child, depth: depth + 1)
+                }
+            }
+            
+            countNodes(in: scene)
+            print("  - Star-like shapes found: \(starCount)")
+            print("  - Fireflies found: \(fireflyCount)")
+            
+            // Check if we have a GameScene with world manager
+            if let gameScene = scene as? GameScene {
+                print("  - Is GameScene: true")
+                if let worldNode = gameScene.worldManager?.worldNode {
+                    print("  - World node exists: true")
+                    print("  - World node children: \(worldNode.children.count)")
+                    
+                    var worldFireflies = 0
+                    worldNode.enumerateChildNodes(withName: "firefly") { _, _ in
+                        worldFireflies += 1
+                    }
+                    print("  - Fireflies in world node: \(worldFireflies)")
+                } else {
+                    print("  - World node exists: false")
+                }
+            } else {
+                print("  - Is GameScene: false")
+            }
         }
     }
 }

@@ -49,8 +49,6 @@ class WeatherManager {
     
     /// Set the current weather and apply all effects
     func setWeather(_ weather: WeatherType, effectsManager: EffectsManager? = nil) {
-        guard !isTransitioning else { return }
-        
         let oldWeather = currentWeather
         currentWeather = weather
         self.effectsManager = effectsManager
@@ -73,23 +71,30 @@ class WeatherManager {
     
     /// Transition smoothly between weather types
     func transitionToWeather(_ weather: WeatherType, duration: TimeInterval = 2.0, effectsManager: EffectsManager? = nil) {
-        guard !isTransitioning, weather != currentWeather else { return }
+        guard weather != currentWeather else { 
+            print("🌤️ Weather transition skipped - already at \(weather.displayName)")
+            return 
+        }
+        
+        print("🌤️ Starting weather transition to \(weather.displayName) over \(duration) seconds")
+        
+        // Apply weather change immediately for gameplay systems
+        setWeather(weather, effectsManager: effectsManager)
         
         isTransitioning = true
         transitionDuration = duration
         
-        print("🌤️ Starting weather transition to \(weather.displayName) over \(duration) seconds")
-        
-        // Gradually fade out current effects
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration / 2) { [weak self] in
-            self?.setWeather(weather, effectsManager: effectsManager)
-        }
-        
-        // Mark transition as complete
+        // Mark transition as complete after visual effects have time to settle
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             self?.isTransitioning = false
             print("🌤️ Weather transition complete")
         }
+    }
+    
+    /// Immediately change weather without transition (for testing/debugging)
+    func forceWeatherChange(_ weather: WeatherType, effectsManager: EffectsManager? = nil) {
+        print("🌤️ FORCE: Immediately changing weather to \(weather.displayName)")
+        setWeather(weather, effectsManager: effectsManager)
     }
     
     /// Get the current weather type
@@ -196,7 +201,7 @@ class WeatherManager {
             // Add ice overlay
             let iceOverlay = SKSpriteNode(imageNamed: "ice_overlay")
             iceOverlay.name = "weatherEffect"
-            iceOverlay.alpha = 0.7
+            iceOverlay.alpha = 0.2
             iceOverlay.zPosition = 1
             lilyPad.addChild(iceOverlay)
             
@@ -239,7 +244,8 @@ class WeatherManager {
         switch level {
         case 1...2: return .day
         case 3...4: return .night
-        case 5...6: return .rain
+        case 5: return .rain
+        case 6: return .stormy  // Introduce stormy weather earlier
         case 7...8: return .winter
         default:
             // Cycle through more challenging weather for higher levels

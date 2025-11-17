@@ -170,6 +170,74 @@ class CollisionManager {
             }
             
             if checkCollision(enemy: enemy, frogPosition: frogPosition, frogIsJumping: frogIsJumping) {
+                // CRITICAL: Edge spike bushes are SOLID BARRIERS - they ALWAYS block movement regardless of invincibility
+                if enemy.type == .edgeSpikeBush {
+                    print("🌵 PROCESSING EDGE SPIKE BUSH HIT! Acting as solid barrier.")
+                    let outcome = onHit(enemy)
+                    switch outcome {
+                    case .destroyed(let cause):
+                        // Edge spike bushes can be destroyed by axes - only then can frog pass through
+                        if case .some(.axe) = cause, let scene = self.scene {
+                            var screenPos = enemy.position
+                            if let gameScene = scene as? GameScene {
+                                screenPos = gameScene.convert(enemy.position, from: gameScene.worldManager.worldNode)
+                            }
+                            // Edge spike bushes get chopped straight down (no direction variance)
+                            let dir: CGFloat = -.pi/2  // Straight down
+                            self.uiManager?.playAxeChopEffect(at: screenPos, direction: dir)
+                            HapticFeedbackManager.shared.impact(.heavy)
+                        }
+                        if let targetPad = enemy.targetLilyPad {
+                            targetPad.removeEnemyType(enemy.type)
+                        }
+                        enemy.stopAnimation()
+                        enemy.node.removeFromParent()
+                        return true  // Remove the barrier - frog can now continue
+                    case .hitOnly:
+                        // CRITICAL: Edge spike bush acts as SOLID BARRIER - blocks frog movement completely
+                        // This happens regardless of invincibility status!
+                        if let frog = self.frogController {
+                            print("🌵 EDGE SPIKE BUSH BLOCKED FROG MOVEMENT - SOLID BARRIER!")
+                            
+                            // Only apply damage if not invincible (but still block movement!)
+                            if !frog.invincible && !rocketActive {
+                                // Lose a heart (like hitting a solid wall)
+                                if let scene = self.scene as? GameScene {
+                                    scene.healthManager.damageHealth()
+                                }
+                                // Show scared reaction on the frog (longer for solid barriers)
+                                frog.showScared(duration: 1.5)
+                                // Haptic feedback (strongest for solid barriers)
+                                HapticFeedbackManager.shared.impact(.heavy)
+                            } else {
+                                print("🌵 EDGE SPIKE BUSH HIT BUT FROG IS INVINCIBLE - STILL BLOCKING MOVEMENT!")
+                            }
+                            
+                            // CRITICAL: Stop the frog's movement immediately REGARDLESS of invincibility
+                            frog.isJumping = false  // Stop any jump in progress
+                            frog.velocity = .zero   // Stop all movement
+                            
+                            // Calculate bounce-back position (move frog away from barrier)
+                            let dx = frogPosition.x - enemy.position.x
+                            let dy = frogPosition.y - enemy.position.y
+                            let distance = sqrt(dx * dx + dy * dy)
+                            
+                            if distance > 0 && distance < 100 {  // Only bounce if very close
+                                // Normalize direction and push frog away from barrier
+                                let normalizedX = dx / distance
+                                let normalizedY = dy / distance
+                                let bounceDistance: CGFloat = 30.0  // Push back distance
+                                
+                                // Set new position away from the barrier
+                                frog.position.x = frogPosition.x + (normalizedX * bounceDistance)
+                                frog.position.y = frogPosition.y + (normalizedY * bounceDistance)
+                            }
+                        }
+                        // IMPORTANT: Edge spike bushes remain as permanent physical barriers
+                        return false
+                    }
+                }
+                
                 // CRITICAL FIX: Check frogController.invincible directly instead of using stale parameter
                 // This prevents multiple enemies from hitting in the same frame before invincibility is applied
                 let isInvincible = frogController?.invincible ?? false
@@ -214,8 +282,8 @@ class CollisionManager {
                         }
                     }
                     
-                    // Special handling: Spike bushes cause heart loss and a bounce-back, but can be destroyed by axes
-                    if enemy.type == .spikeBush || enemy.type == .edgeSpikeBush {
+                    // Special handling: Regular spike bushes cause heart loss and bounce-back, can be destroyed by axes
+                    if enemy.type == .spikeBush {
                         print("🌿 PROCESSING SPIKE BUSH HIT! Type: \(enemy.type)")
                         let outcome = onHit(enemy)
                         switch outcome {
@@ -260,7 +328,13 @@ class CollisionManager {
                             // Do not remove the spike bush; keep it as a hazard
                             return false
                         }
-                    } else {
+                    }
+                    
+                    // Special handling: Edge spike bushes are SOLID BARRIERS - they BLOCK movement unless destroyed by axe
+                    // NOTE: This is now handled above before the invincibility check
+                    
+                    // Regular spike bushes cause heart loss and bounce-back, can be destroyed by axes
+                    if enemy.type == .spikeBush {
                         let outcome = onHit(enemy)
                         switch outcome {
                         case .destroyed(let cause):
@@ -673,7 +747,7 @@ class CollisionManager {
         if checkCollision(enemy: enemy, frogPosition: frogPosition, frogIsJumping: frogIsJumping) {
             let isInvincible = frogController?.invincible ?? false
             if !isInvincible && !rocketActive {
-                handleEnemyCollision(enemy, enemies: &enemies, onHit: onHit, onLogBounce: onLogBounce)
+                handleEnemyCollision(enemy, enemies: &enemies, frogPosition: frogPosition, onHit: onHit, onLogBounce: onLogBounce)
             }
         }
     }
@@ -733,8 +807,65 @@ class CollisionManager {
         }
     }
     
-    private func handleEnemyCollision(_ enemy: Enemy, enemies: inout [Enemy], onHit: (Enemy) -> HitOutcome, 
+    private func handleEnemyCollision(_ enemy: Enemy, enemies: inout [Enemy], frogPosition: CGPoint, onHit: (Enemy) -> HitOutcome, 
                                     onLogBounce: ((Enemy) -> Void)?) {
+        
+        // CRITICAL: Edge spike bushes are SOLID BARRIERS - they ALWAYS block movement regardless of invincibility
+        if enemy.type == .edgeSpikeBush {
+            let outcome = onHit(enemy)
+            switch outcome {
+            case .destroyed(let cause):
+                if case .some(.axe) = cause, let scene = self.scene {
+                    var screenPos = enemy.position
+                    if let gameScene = scene as? GameScene {
+                        screenPos = gameScene.convert(enemy.position, from: gameScene.worldManager.worldNode)
+                    }
+                    // Edge spike bushes get chopped straight down (no direction variance)
+                    let dir: CGFloat = -.pi/2  // Straight down
+                    self.uiManager?.playAxeChopEffect(at: screenPos, direction: dir)
+                    HapticFeedbackManager.shared.impact(.heavy)
+                }
+                removeEnemy(enemy, from: &enemies)
+                return
+            case .hitOnly:
+                if let frog = self.frogController {
+                    print("🌵 EDGE SPIKE BUSH BLOCKED FROG MOVEMENT - SOLID BARRIER!")
+                    
+                    // Only apply damage if not invincible (but still block movement!)
+                    if !frog.invincible {
+                        if let scene = self.scene as? GameScene {
+                            scene.healthManager.damageHealth()
+                        }
+                        frog.showScared(duration: 1.5)
+                        HapticFeedbackManager.shared.impact(.heavy)
+                    } else {
+                        print("🌵 EDGE SPIKE BUSH HIT BUT FROG IS INVINCIBLE - STILL BLOCKING MOVEMENT!")
+                    }
+                    
+                    // CRITICAL: Stop frog movement immediately REGARDLESS of invincibility
+                    frog.isJumping = false  // Stop any jump in progress
+                    frog.velocity = .zero   // Stop all movement
+                    
+                    // Calculate bounce-back position (move frog away from barrier)
+                    let dx = frogPosition.x - enemy.position.x
+                    let dy = frogPosition.y - enemy.position.y
+                    let distance = sqrt(dx * dx + dy * dy)
+                    
+                    if distance > 0 && distance < 100 {  // Only bounce if very close
+                        // Normalize direction and push frog away from barrier
+                        let normalizedX = dx / distance
+                        let normalizedY = dy / distance
+                        let bounceDistance: CGFloat = 30.0  // Push back distance
+                        
+                        // Set new position away from the barrier
+                        frog.position.x = frogPosition.x + (normalizedX * bounceDistance)
+                        frog.position.y = frogPosition.y + (normalizedY * bounceDistance)
+                    }
+                }
+                return // Don't remove edge spike bushes - they remain as permanent barriers
+            }
+        }
+        
         if enemy.type == .log {
             let outcome = onHit(enemy)
             switch outcome {
@@ -757,8 +888,8 @@ class CollisionManager {
             }
         }
         
-        // Handle spike bushes - can be chopped by axes or cause damage
-        if enemy.type == .spikeBush || enemy.type == .edgeSpikeBush {
+        // Handle regular spike bushes - can be chopped by axes or cause damage
+        if enemy.type == .spikeBush {
             let outcome = onHit(enemy)
             switch outcome {
             case .destroyed(let cause):
@@ -787,29 +918,30 @@ class CollisionManager {
                 }
                 return // Don't remove spike bushes when not chopped
             }
-        } else {
-            let outcome = onHit(enemy)
-            switch outcome {
-            case .destroyed(let cause):
-                if cause != .honeyJar && (enemy.type == .bee || enemy.type == .snake || enemy.type == .dragonfly) {
-                    SoundController.shared.playSoundEffect(.dangerZone)
-                }
-                if case .some(.axe) = cause, let scene = self.scene {
-                    var screenPos = enemy.position
-                    if let gameScene = scene as? GameScene {
-                        screenPos = gameScene.convert(enemy.position, from: gameScene.worldManager.worldNode)
-                    }
-                    let dir: CGFloat = (enemy.type == .log && enemy.speed < 0) ? .pi : 0.0
-                    self.uiManager?.playAxeChopEffect(at: screenPos, direction: dir)
-                    HapticFeedbackManager.shared.impact(.heavy)
-                }
-                removeEnemy(enemy, from: &enemies)
-            case .hitOnly:
-                if enemy.type == .bee || enemy.type == .snake || enemy.type == .dragonfly {
-                    SoundController.shared.playSoundEffect(.dangerZone)
-                }
-                break
+        }
+        
+        // Handle other enemies (non edge spike bushes)
+        let outcome = onHit(enemy)
+        switch outcome {
+        case .destroyed(let cause):
+            if cause != .honeyJar && (enemy.type == .bee || enemy.type == .snake || enemy.type == .dragonfly) {
+                SoundController.shared.playSoundEffect(.dangerZone)
             }
+            if case .some(.axe) = cause, let scene = self.scene {
+                var screenPos = enemy.position
+                if let gameScene = scene as? GameScene {
+                    screenPos = gameScene.convert(enemy.position, from: gameScene.worldManager.worldNode)
+                }
+                let dir: CGFloat = (enemy.type == .log && enemy.speed < 0) ? .pi : 0.0
+                self.uiManager?.playAxeChopEffect(at: screenPos, direction: dir)
+                HapticFeedbackManager.shared.impact(.heavy)
+            }
+            removeEnemy(enemy, from: &enemies)
+        case .hitOnly:
+            if enemy.type == .bee || enemy.type == .snake || enemy.type == .dragonfly {
+                SoundController.shared.playSoundEffect(.dangerZone)
+            }
+            break
         }
     }
     

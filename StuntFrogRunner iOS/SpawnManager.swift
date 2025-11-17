@@ -22,6 +22,9 @@ class SpawnManager {
     // Level-based difficulty scaling - now uses LevelEnemyConfigManager
     var levelSpawnRateMultiplier: CGFloat = 1.0  // Legacy compatibility - will be replaced by level configs
     
+    // Weather-specific spawn configuration
+    private var currentWeatherConfig: LevelEnemyConfig?
+    
     // Reference to game state manager for level information
     weak var gameStateManager: GameStateManager?
     
@@ -42,7 +45,9 @@ class SpawnManager {
     
     // Edge spike bush wall management
     private var lastWallSpawnY: CGFloat = -CGFloat.greatestFiniteMagnitude
-    private let wallHorizontalOffset: CGFloat = 800
+    private let wallHorizontalOffset: CGFloat = 600  // Reduced from 800 to bring bushes on-screen
+    private let wallSpawnInterval: CGFloat = 150  // Spawn walls every 150 pixels for better coverage
+    private var lastContinuousWallCreationTime: TimeInterval = 0  // Throttle continuous wall creation
     
     // Tadpole pacing
     private var framesSinceLastTadpole: Int = 0
@@ -79,12 +84,16 @@ class SpawnManager {
         framesSinceLastTadpole = 0
         lastTadpoleWorldY = -CGFloat.greatestFiniteMagnitude
         lastWallSpawnY = -CGFloat.greatestFiniteMagnitude
+        lastContinuousWallCreationTime = 0  // Reset wall creation throttling
         frameCount = 0
         lastBeeCount = 0
         lastLogCount = 0
         spawningPaused = false
         spawningPausedStartTime = 0  // Reset pause timer
         graceEndTime = 0
+        
+        // Clear weather configuration (will be set fresh for new level)
+        currentWeatherConfig = nil
         
         // Reset finish line to starting position
         resetFinishLine()
@@ -144,6 +153,131 @@ class SpawnManager {
         print("📈 Spawn rate multiplier updated to: \(String(format: "%.2f", multiplier))x")
     }
     
+    /// Updates weather-specific spawn configuration for the current level
+    /// This method integrates weather effects into spawn rates and enemy types
+    func updateWeatherConfiguration(_ weatherConfig: LevelEnemyConfig) {
+        // Store the weather configuration for use in spawning decisions
+        currentWeatherConfig = weatherConfig
+        
+        print("🌤️ Weather configuration updated for spawn manager:")
+        print("   - Global spawn multiplier: \(String(format: "%.2f", weatherConfig.globalSpawnRateMultiplier))x")
+        print("   - Max enemies per screen: \(weatherConfig.maxEnemiesPerScreen)")
+        print("   - Enemy types configured: \(weatherConfig.enemyConfigs.count)")
+        
+        // Log weather-specific enemy spawn rates
+        for enemyConfig in weatherConfig.enemyConfigs {
+            let finalRate = enemyConfig.spawnRate * weatherConfig.globalSpawnRateMultiplier
+            print("     - \(enemyConfig.enemyType): base=\(String(format: "%.3f", enemyConfig.spawnRate)) final=\(String(format: "%.3f", finalRate)) max=\(enemyConfig.maxCount)")
+        }
+        
+        // Immediately validate that weather configuration was applied
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.validateWeatherConfiguration()
+        }
+    }
+    
+    /// Gets the current weather configuration if available
+    func getCurrentWeatherConfig() -> LevelEnemyConfig? {
+        return currentWeatherConfig
+    }
+    
+    /// Checks if the spawn manager is using weather-specific configuration
+    var hasWeatherConfiguration: Bool {
+        return currentWeatherConfig != nil
+    }
+    
+    /// Debug method to show current weather integration status
+    func debugWeatherIntegration() {
+        print("🌤️ SPAWN MANAGER WEATHER INTEGRATION DEBUG:")
+        
+        if let config = currentWeatherConfig {
+            print("   ✅ Weather Configuration: ACTIVE")
+            print("   - Global spawn multiplier: \(String(format: "%.2f", config.globalSpawnRateMultiplier))x")
+            print("   - Max enemies per screen: \(config.maxEnemiesPerScreen)")
+            print("   - Enemy types configured: \(config.enemyConfigs.count)")
+            
+            for enemyConfig in config.enemyConfigs {
+                let finalRate = enemyConfig.spawnRate * config.globalSpawnRateMultiplier
+                print("     • \(enemyConfig.enemyType):")
+                print("       - Base rate: \(String(format: "%.3f", enemyConfig.spawnRate))")
+                print("       - Final rate: \(String(format: "%.3f", finalRate))")
+                print("       - Max count: \(enemyConfig.maxCount)")
+                print("       - Can spawn on pads: \(enemyConfig.canSpawnOnPads)")
+                print("       - Can spawn in water: \(enemyConfig.canSpawnInWater)")
+            }
+        } else {
+            print("   ❌ Weather Configuration: NOT SET")
+            print("   - Using fallback weather fetching")
+        }
+        
+        if let gameStateManager = gameStateManager {
+            print("   ✅ GameStateManager: LINKED (current level: \(gameStateManager.currentLevel))")
+        } else {
+            print("   ❌ GameStateManager: NOT LINKED")
+        }
+        
+        print("   - Legacy spawn rate multiplier: \(String(format: "%.2f", levelSpawnRateMultiplier))x")
+    }
+    
+    /// Validates that weather configuration is properly applied
+    private func validateWeatherConfiguration() {
+        let weatherManager = WeatherManager.shared
+        let currentWeatherName = weatherManager.weather.displayName
+        
+        print("🌤️ WEATHER VALIDATION:")
+        print("   - WeatherManager current weather: \(currentWeatherName)")
+        
+        if let config = currentWeatherConfig {
+            print("   - SpawnManager has stored config: ✅")
+            print("   - Config spawn multiplier: \(String(format: "%.2f", config.globalSpawnRateMultiplier))x")
+        } else {
+            print("   - SpawnManager stored config: ❌ MISSING")
+        }
+    }
+    
+    /// Debug method to show current edge spike bush spawning status
+    func debugEdgeSpikeBushSpawning(enemies: [Enemy], frogPosition: CGPoint, sceneSize: CGSize) {
+        let currentWeather = WeatherManager.shared.weather
+        let currentTime = CACurrentMediaTime()
+        let timeSinceLastCreation = currentTime - lastContinuousWallCreationTime
+        
+        print("🌿 EDGE SPIKE BUSH DEBUG:")
+        print("   - Current weather: \(currentWeather)")
+        print("   - Should spawn: \(currentWeather == .ice || currentWeather == .winter)")
+        print("   - Last wall spawn Y: \(Int(lastWallSpawnY))")
+        print("   - Frog position Y: \(Int(frogPosition.y))")
+        print("   - Time since last continuous creation: \(String(format: "%.1f", timeSinceLastCreation))s")
+        
+        let edgeBushes = enemies.filter { $0.type == .edgeSpikeBush }
+        print("   - Total edge spike bushes: \(edgeBushes.count)")
+        
+        if !edgeBushes.isEmpty {
+            let minY = edgeBushes.map { $0.position.y }.min() ?? 0
+            let maxY = edgeBushes.map { $0.position.y }.max() ?? 0
+            print("   - Edge bushes Y range: \(Int(minY)) to \(Int(maxY))")
+            
+            let visibleBushes = edgeBushes.filter { bush in
+                let minVisibleY = frogPosition.y - sceneSize.height
+                let maxVisibleY = frogPosition.y + sceneSize.height
+                return bush.position.y >= minVisibleY && bush.position.y <= maxVisibleY
+            }
+            print("   - Visible edge bushes: \(visibleBushes.count)")
+        }
+        
+        // Test spawn position
+        let spawnWorldY = frogPosition.y + sceneSize.height + 100
+        let centerX = sceneSize.width / 2
+        let leftX = max(GameConfig.edgeSpikeBushMargin, centerX - wallHorizontalOffset)
+        let rightX = min(sceneSize.width - GameConfig.edgeSpikeBushMargin, centerX + wallHorizontalOffset)
+        
+        print("   - Next spawn Y would be: \(Int(spawnWorldY))")
+        print("   - Spawn positions: Left=\(Int(leftX)), Right=\(Int(rightX))")
+        
+        let minSpacing = wallSpawnInterval * 0.5
+        let canSpawn = spawnWorldY - lastWallSpawnY >= minSpacing
+        print("   - Can spawn (spacing check): \(canSpawn) (need \(Int(minSpacing)), have \(Int(spawnWorldY - lastWallSpawnY)))")
+    }
+    
     /// Gets the current finish line position (where the flag should be placed)
     func getCurrentFinishLinePosition() -> CGFloat {
         return finishLinePosition
@@ -165,6 +299,78 @@ class SpawnManager {
     /// Checks if the current score has reached or exceeded the finish line
     func hasReachedFinishLine(currentScore: Int) -> Bool {
         return CGFloat(currentScore) >= finishLinePosition
+    }
+    
+    /// Handles rocket cleanup when finish line is crossed
+    /// Should be called immediately when the finish line is crossed
+    func handleFinishLineCrossed(frogController: FrogController, lilyPads: [LilyPad], sceneSize: CGSize) {
+        print("🏁 Finish line crossed - handling rocket cleanup")
+        
+        // If the frog is riding the rocket, we need to land it safely
+        if frogController.rocketActive {
+            print("🚀 Frog is on rocket when crossing finish line - initiating safe landing")
+            
+            // Find a safe lily pad near the frog to land on
+            let safeLandingPad = findSafeLandingPad(
+                nearPosition: frogController.position,
+                lilyPads: lilyPads,
+                sceneSize: sceneSize
+            )
+            
+            if let landingPad = safeLandingPad {
+                print("🚀➡️🌸 Found safe landing pad at \(Int(landingPad.position.x)), \(Int(landingPad.position.y))")
+                // Use the existing method to safely land the rocket and place frog on pad
+                frogController.forceRocketLandingOnNextLevelStart(startPad: landingPad, sceneSize: sceneSize)
+            } else {
+                print("⚠️ No safe landing pad found - forcing rocket removal anyway")
+                // Force rocket removal even without a landing pad
+                frogController.forceRocketLanding()
+            }
+        }
+    }
+    
+    /// Finds a safe lily pad for the frog to land on when the rocket ends
+    private func findSafeLandingPad(nearPosition: CGPoint, lilyPads: [LilyPad], sceneSize: CGSize) -> LilyPad? {
+        // Define what makes a lily pad "safe" for landing
+        let safePads = lilyPads.filter { pad in
+            // Must be a safe type (not pulsing when shrinking, not grave)
+            guard isSafeForTadpoleSpawn(pad) else { return false }
+            
+            // Must not have enemies on it
+            guard pad.occupyingEnemyTypes.isEmpty else { return false }
+            
+            // Must be reasonably close to the frog's current position
+            let distance = sqrt(pow(pad.position.x - nearPosition.x, 2) + pow(pad.position.y - nearPosition.y, 2))
+            guard distance <= GameConfig.maxRegularJumpDistance * 1.5 else { return false }
+            
+            // Must be within reasonable screen bounds
+            guard pad.position.x > 50 && pad.position.x < sceneSize.width - 50 else { return false }
+            
+            return true
+        }
+        
+        if safePads.isEmpty {
+            print("🚨 No safe pads found for rocket landing!")
+            // Fall back to any lily pad that's at least not a grave pad
+            let emergencyPads = lilyPads.filter { pad in
+                pad.type != .grave && pad.position.x > 50 && pad.position.x < sceneSize.width - 50
+            }
+            return emergencyPads.first
+        }
+        
+        // Find the closest safe pad
+        let closestSafePad = safePads.min { pad1, pad2 in
+            let dist1 = sqrt(pow(pad1.position.x - nearPosition.x, 2) + pow(pad1.position.y - nearPosition.y, 2))
+            let dist2 = sqrt(pow(pad2.position.x - nearPosition.x, 2) + pow(pad2.position.y - nearPosition.y, 2))
+            return dist1 < dist2
+        }
+        
+        if let chosenPad = closestSafePad {
+            let distance = sqrt(pow(chosenPad.position.x - nearPosition.x, 2) + pow(chosenPad.position.y - nearPosition.y, 2))
+            print("🌸 Selected landing pad at distance \(Int(distance)) - type: \(chosenPad.type)")
+        }
+        
+        return closestSafePad
     }
     
     /// Flushes pending enemies to the main enemies array safely
@@ -253,24 +459,29 @@ class SpawnManager {
         print("🎯 Creating lily pad with current score: \(currentScore)")
         
         let type: LilyPadType
+        let currentWeather = WeatherManager.shared.weather
+
         if currentScore < 500 {  // Start spawning grave pads earlier for testing
             // Early game: Mix of normal and some grave pads for testing
             let r = CGFloat.random(in: 0.0...1.0)
             if r < 0.85 { type = .normal }
-            else { type = .grave }  // 15% grave pads for early testing
+            else if currentWeather == .night { type = .grave }  // 15% grave pads for early testing
+            else { type = .normal }  // fallback to normal if not night weather
         } else if currentScore < 1000 {
             // Continue with mix including grave pads
             let r = CGFloat.random(in: 0.0...1.0)
-            if r < 0.90 { type = .normal }
-            else { type = .grave }  // 10% grave pads
+            if r < 0.70 { type = .normal }
+            else if currentWeather == .night { type = .grave }   // 30% grave pads
+            else { type = .normal }  // fallback to normal if not night weather
         } else if currentScore < 8000 {
             // 1500-7999 points: 55% normal, 20% pulsing, 20% moving, 5% grave
             let r = CGFloat.random(in: 0.0...1.0)
             var proposedType: LilyPadType
-            if r < 0.55  { proposedType = .normal }
+            if r < 0.25  { proposedType = .normal }
             else if r < 0.75 { proposedType = .pulsing }
             else if r < 0.95 { proposedType = .moving }
-            else { proposedType = .grave }
+            else if currentWeather == .night { proposedType = .grave }
+            else { proposedType = .normal }  // fallback if not night weather
             
             // Apply pulsing pad clustering prevention
             if proposedType == .pulsing {
@@ -289,7 +500,8 @@ class SpawnManager {
             if r < 0.35 { proposedType = .normal }
             else if r < 0.65 { proposedType = .pulsing }
             else if r < 0.90 { proposedType = .moving }
-            else { proposedType = .grave }
+            else if currentWeather == .night { proposedType = .grave }
+            else { proposedType = .normal}
             
             // Apply pulsing pad clustering prevention
             if proposedType == .pulsing {
@@ -302,7 +514,7 @@ class SpawnManager {
             }
         }
         
-        let pad = LilyPad(position: position, radius: radius, type: type)
+        let pad = LilyPad(position: position, radius: radius, type: type, weather: WeatherManager.shared.weather)
         
         if type == .moving {
             pad.screenWidthProvider = { [weak self] in
@@ -454,10 +666,16 @@ class SpawnManager {
             return [.chaser]
         }
         
-        // Get weather-aware level configuration using discrete level
+        // Get weather-aware level configuration using stored config if available
         let level = gameStateManager?.currentLevel ?? 1
-        let weatherManager = WeatherManager.shared
-        let levelConfig = weatherManager.getWeatherLevelConfig(level: level, weather: weatherManager.weather)
+        let levelConfig: LevelEnemyConfig
+        if let storedConfig = currentWeatherConfig {
+            levelConfig = storedConfig
+        } else {
+            // Fallback: fetch fresh weather configuration
+            let weatherManager = WeatherManager.shared
+            levelConfig = weatherManager.getWeatherLevelConfig(level: level, weather: weatherManager.weather)
+        }
         
         // Filter enemy types that can spawn on pads
         let allowedTypes = levelConfig.enemyConfigs.compactMap { enemyConfig -> EnemyType? in
@@ -935,12 +1153,97 @@ class SpawnManager {
         }
     }
     
+    /// Manually force spawn edge walls immediately (useful when changing to ice/winter weather)
+    func forceSpawnEdgeWalls(sceneSize: CGSize, enemies: inout [Enemy], worldNode: SKNode, worldOffset: CGFloat) {
+        let currentWeather = WeatherManager.shared.weather
+        guard currentWeather == .ice || currentWeather == .winter else {
+            print("🌿 Force spawn skipped - weather is \(currentWeather), not ice/winter")
+            return
+        }
+        
+        // Spawn edge walls at multiple positions ahead of the player for complete coverage
+        let baseY = -worldOffset + sceneSize.height + 100
+        
+        // Reset last spawn position to allow immediate spawning
+        let originalLastWallSpawnY = lastWallSpawnY
+        lastWallSpawnY = -CGFloat.greatestFiniteMagnitude
+        
+        // Spawn walls at multiple intervals for complete coverage
+        let wallIntervals: [CGFloat] = [0, 150, 300, 450, 600, 750, 900, 1050, 1200]
+        
+        for interval in wallIntervals {
+            let wallY = baseY + interval
+            spawnEdgeWalls(at: wallY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode)
+        }
+        
+        print("🌿 Force spawned \(wallIntervals.count) sets of edge walls for \(currentWeather) weather")
+    }
+    
+    /// Creates a continuous edge wall system for ice/winter levels
+    /// Performance-safe: Only creates walls if enough time has passed since last creation
+    func createContinuousEdgeWalls(frogPosition: CGPoint, sceneSize: CGSize, enemies: inout [Enemy], worldNode: SKNode) {
+        let currentWeather = WeatherManager.shared.weather
+        guard currentWeather == .ice || currentWeather == .winter else { return }
+        
+        // FIXED: Much less restrictive throttling for continuous coverage
+        let currentTime = CACurrentMediaTime()
+        let timeSinceLastCreation = currentTime - lastContinuousWallCreationTime
+        if timeSinceLastCreation < 1.0 {  // Reduced from 3.0 to 1.0 seconds for more frequent spawning
+            return
+        }
+        
+        // Create walls from current frog position extending far ahead
+        let startY = frogPosition.y
+        let endY = frogPosition.y + sceneSize.height * 3  // 3 screen heights ahead
+        
+        var wallsCreated = 0
+        var currentY = startY
+        while currentY < endY {
+            let beforeCount = enemies.filter { $0.type == .edgeSpikeBush }.count
+            spawnEdgeWalls(at: currentY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode)
+            let afterCount = enemies.filter { $0.type == .edgeSpikeBush }.count
+            
+            if afterCount > beforeCount {
+                wallsCreated += (afterCount - beforeCount)
+            }
+            
+            currentY += wallSpawnInterval * 0.5  // Use smaller intervals for better coverage
+            
+            // FIXED: Higher performance limit for continuous coverage
+            if wallsCreated >= 30 { // Increased from 20 to 30 edge bushes per call (15 pairs)
+                break
+            }
+        }
+        
+        lastContinuousWallCreationTime = currentTime
+        print("🌿 Created continuous edge wall system: \(wallsCreated) bushes from Y:\(Int(startY)) to Y:\(Int(currentY))")
+    }
+    
+    /// Emergency continuous wall creation - bypasses throttling for critical situations
+    func forceCreateContinuousEdgeWalls(frogPosition: CGPoint, sceneSize: CGSize, enemies: inout [Enemy], worldNode: SKNode) {
+        let currentWeather = WeatherManager.shared.weather
+        guard currentWeather == .ice || currentWeather == .winter else { return }
+        
+        // Reset throttling to allow immediate creation
+        lastContinuousWallCreationTime = 0
+        createContinuousEdgeWalls(frogPosition: frogPosition, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode)
+        print("🌿 Force created continuous edge walls (bypassed throttling)")
+    }
+    
     /// Spawns paired edge spike bushes (left and right) at the given world Y to create containment walls.
     /// Ensures placement respects margins and avoids excessive duplication by spacing in Y.
-    private func spawnEdgeWalls(at worldY: CGFloat, sceneSize: CGSize, enemies: inout [Enemy], worldNode: SKNode) {
-        // PERFORMANCE FIX: More conservative spacing to prevent excessive spawning
-        let minWallVerticalSpacing: CGFloat = 200  // Increased from 100 to 200
-        if worldY - lastWallSpawnY < minWallVerticalSpacing { return }
+   func spawnEdgeWalls(at worldY: CGFloat, sceneSize: CGSize, enemies: inout [Enemy], worldNode: SKNode) {
+        // Check if we should spawn edge walls for current weather
+        let currentWeather = WeatherManager.shared.weather
+        guard currentWeather == .ice || currentWeather == .winter else {
+            return // Only spawn edge walls in ice/winter weather
+        }
+        
+        // FIXED: Much more aggressive spawning with smaller intervals
+        let minWallVerticalSpacing: CGFloat = wallSpawnInterval * 0.5  // Even smaller spacing for continuous coverage
+        if worldY - lastWallSpawnY < minWallVerticalSpacing { 
+            return 
+        }
         
         // Compute target X positions around the screen center ± offset, clamped within margins
         let centerX = sceneSize.width / 2
@@ -948,19 +1251,24 @@ class SpawnManager {
         let rightX = min(sceneSize.width - GameConfig.edgeSpikeBushMargin, centerX + wallHorizontalOffset)
         
         // If the left and right would collapse into margins (very narrow screens), skip
-        if rightX - leftX < 2 * GameConfig.edgeSpikeBushMargin { return }
+        if rightX - leftX < 2 * GameConfig.edgeSpikeBushMargin { 
+            return 
+        }
         
-        // PERFORMANCE FIX: More strict duplicate checking with wider range
+        // FIXED: Check for existing edge bushes with much smaller tolerance for continuous coverage
         let existingNearY = enemies.contains { enemy in
             guard enemy.type == .edgeSpikeBush else { return false }
-            return abs(enemy.position.y - worldY) < 150  // Increased from 80 to 150
+            return abs(enemy.position.y - worldY) < 75  // Reduced from 100 to 75 for even tighter spacing
         }
-        if existingNearY { return }
+        if existingNearY { 
+            return 
+        }
         
-        // PERFORMANCE FIX: Limit total number of edge spike bushes in the scene
+        // FIXED: Enforce higher limits for truly continuous coverage
         let currentEdgeBushCount = enemies.filter { $0.type == .edgeSpikeBush }.count
-        if currentEdgeBushCount >= 30 {  // Hard limit to prevent excessive accumulation
-            return
+        if currentEdgeBushCount >= 60 {  // Increased from 40 to 60 for better continuous coverage
+            // When at limit, try to cull some distant ones instead of stopping spawning
+            cullExcessEdgeSpikeBushes(enemies: &enemies, frogPosition: CGPoint(x: sceneSize.width/2, y: worldY), sceneSize: sceneSize)
         }
         
         // Create left bush
@@ -1073,9 +1381,33 @@ class SpawnManager {
         
         print("🌸 🏁 FINAL: Spawned \(successfulSpawns) lily pads successfully (total in array: \(lilyPads.count))")
         
-        // Seed initial edge walls near the top of the initial band
+        // Seed initial edge walls near the top of the initial band for icy weather
         let initialWallY = lastPosition.y + 200  // Place walls ahead of the spawned pads
-        //spawnEdgeWalls(at: initialWallY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode)
+        let currentWeather = WeatherManager.shared.weather
+        print("🌿 DEBUG: Current weather is \(currentWeather) - checking for edge wall spawning")
+        if currentWeather == .ice || currentWeather == .winter
+        {
+            // Use continuous edge wall creation for initial setup to ensure complete coverage
+            // First try to get frog position from scene, otherwise use a reasonable default
+            var frogPos = CGPoint(x: sceneSize.width / 2, y: lastPosition.y)
+            if let gameScene = scene as? GameScene {
+                frogPos = gameScene.frogController.position
+                print("🌿 Using frog position from GameScene: \(Int(frogPos.x)), \(Int(frogPos.y))")
+            } else {
+                print("🌿 Using default frog position (scene cast failed): \(Int(frogPos.x)), \(Int(frogPos.y))")
+            }
+            
+            // Force create continuous edge walls (bypasses throttling for initial setup)
+            forceCreateContinuousEdgeWalls(
+                frogPosition: frogPos,
+                sceneSize: sceneSize,
+                enemies: &enemies,
+                worldNode: worldNode
+            )
+            print("🌿 Initial continuous edge wall system created for \(currentWeather) weather")
+        } else {
+            print("🌿 No edge walls spawned - weather is \(currentWeather), not ice/winter")
+        }
     }
     
     // MARK: - Continuous Spawn
@@ -1227,10 +1559,43 @@ class SpawnManager {
         // Calculate the spawn point (where new objects appear ahead of the player)
         let spawnWorldY = -worldOffset + sceneSize.height + 100
         
-        // Continuously maintain edge spike bush walls along the path
+        // Continuously maintain edge spike bush walls along the path - more frequent spawning
         let inGraceForWalls = CACurrentMediaTime() < graceEndTime
-        if !inGraceForWalls {
-            //spawnEdgeWalls(at: spawnWorldY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode)
+        let currentWeather = WeatherManager.shared.weather
+        
+        // FIXED: Always spawn edge walls for ice/winter weather, even during grace period
+        // Grace period should only affect enemies that can hurt the player
+        if currentWeather == .ice || currentWeather == .winter {
+            // Check every frame for ice/winter to ensure continuous coverage
+            spawnEdgeWalls(at: spawnWorldY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode)
+            
+            // IMPROVED: More aggressive wall spawning to ensure continuous coverage
+            // Spawn walls at multiple intervals ahead every few frames
+            if frameCount % 15 == 0 {  // Every 15 frames for more frequent coverage
+                let additionalSpawnPoints = [
+                    spawnWorldY + 150,  // Closer intervals
+                    spawnWorldY + 300,
+                    spawnWorldY + 450,
+                    spawnWorldY + 600,
+                    spawnWorldY + 750
+                ]
+                
+                for additionalY in additionalSpawnPoints {
+                    spawnEdgeWalls(at: additionalY, sceneSize: sceneSize, enemies: &enemies, worldNode: worldNode)
+                }
+            }
+            
+            // ADDITIONAL: Force continuous wall creation occasionally to fill any gaps
+            if frameCount % 60 == 0 {  // Every 60 frames (once per second)
+                if let gameScene = scene as? GameScene {
+                    createContinuousEdgeWalls(
+                        frogPosition: gameScene.frogController.position,
+                        sceneSize: sceneSize,
+                        enemies: &enemies,
+                        worldNode: worldNode
+                    )
+                }
+            }
         }
         
         let dynamicScrollSpeed = 1.0
@@ -1326,8 +1691,8 @@ class SpawnManager {
             fillLargeGaps(frogPosition: frogPosition, maxRegular: maxRegular, sceneSize: sceneSize, lilyPads: &lilyPads, worldNode: worldNode, tadpoles: &tadpoles, bigHoneyPots: &bigHoneyPots, lifeVests: &lifeVests, enemies: &enemies)
         }
         
-        // PERFORMANCE FIX: More frequent edge spike bush cleanup to prevent accumulation
-        if frameCount % 180 == 0 {  // Every 3 seconds at 60 FPS
+        // PERFORMANCE FIX: Much less frequent edge spike bush cleanup to maintain continuous ice level coverage
+        if frameCount % 600 == 0 {  // Every 10 seconds at 60 FPS - much less frequent to allow walls to build up
             cullExcessEdgeSpikeBushes(enemies: &enemies, frogPosition: frogPosition, sceneSize: sceneSize)
         }
         
@@ -1347,9 +1712,16 @@ class SpawnManager {
         // Use discrete level from GameStateManager instead of calculating from score
         let level = gameStateManager?.currentLevel ?? 1
         
-        // Get weather-aware configuration instead of basic level config
-        let weatherManager = WeatherManager.shared
-        let levelConfig = weatherManager.getWeatherLevelConfig(level: level, weather: weatherManager.weather)
+        // Get weather-aware configuration - use stored config if available, otherwise fetch fresh
+        let levelConfig: LevelEnemyConfig
+        if let storedConfig = currentWeatherConfig {
+            levelConfig = storedConfig
+        } else {
+            // Fallback: fetch fresh weather configuration
+            let weatherManager = WeatherManager.shared
+            levelConfig = weatherManager.getWeatherLevelConfig(level: level, weather: weatherManager.weather)
+            print("🌤️ Using fresh weather config (stored config not available)")
+        }
         
         // DEBUG: Log spawn attempt occasionally with new level-based info
         if frameCount % 180 == 0 {  // Every 3 seconds
@@ -1508,9 +1880,15 @@ class SpawnManager {
             let currentScore: Int = (scene as? GameScene)?.score ?? 0
             // Use discrete level from GameStateManager
             let level = gameStateManager?.currentLevel ?? 1
-            // Get weather-aware configuration
-            let weatherManager = WeatherManager.shared
-            let levelConfig = weatherManager.getWeatherLevelConfig(level: level, weather: weatherManager.weather)
+            // Get weather-aware configuration - use stored config if available
+            let levelConfig: LevelEnemyConfig
+            if let storedConfig = currentWeatherConfig {
+                levelConfig = storedConfig
+            } else {
+                // Fallback: fetch fresh weather configuration
+                let weatherManager = WeatherManager.shared
+                levelConfig = weatherManager.getWeatherLevelConfig(level: level, weather: weatherManager.weather)
+            }
             
             // Use weighted selection from level configuration
             guard let selectedType = LevelEnemyConfigManager.getWeightedRandomEnemyType(for: level) else {
@@ -2162,18 +2540,18 @@ class SpawnManager {
             }
         }
         
-        /// PERFORMANCE FIX: Aggressive cleanup of edge spike bushes to prevent accumulation
+        /// PERFORMANCE FIX: Balanced cleanup of edge spike bushes - maintain coverage while preventing accumulation
         private func cullExcessEdgeSpikeBushes(enemies: inout [Enemy], frogPosition: CGPoint, sceneSize: CGSize) {
-            // More aggressive culling for edge spike bushes since they're static and can accumulate
-            let cullBehindY = frogPosition.y - sceneSize.height * 1.5  // Closer cull distance
-            let cullAheadY = frogPosition.y + sceneSize.height * 2.0   // Don't need as many ahead
+            // Much less aggressive culling for edge spike bushes to maintain continuous walls in ice/winter
+            let cullBehindY = frogPosition.y - sceneSize.height * 3.0  // Keep much more behind for ice level continuity
+            let cullAheadY = frogPosition.y + sceneSize.height * 5.0   // Keep much more ahead for better coverage
             
             // Find all edge spike bushes
             let edgeBushes = enemies.enumerated().compactMap { index, enemy in
                 enemy.type == .edgeSpikeBush ? (index: index, enemy: enemy) : nil
             }
             
-            // Remove bushes outside the tighter bounds
+            // Remove bushes outside the bounds
             let indicesToRemove = edgeBushes.compactMap { item in
                 let y = item.enemy.position.y
                 return (y < cullBehindY || y > cullAheadY) ? item.index : nil
@@ -2184,8 +2562,8 @@ class SpawnManager {
                 enemies.remove(at: index)
             }
             
-            // Also enforce a maximum count of edge spike bushes
-            let maxEdgeBushes = 20  // Reasonable limit for edge bushes
+            // Much higher maximum count for continuous ice level coverage
+            let maxEdgeBushes = 80  // Increased from 50 for better ice level coverage
             let remainingEdgeBushes = enemies.enumerated().compactMap { index, enemy in
                 enemy.type == .edgeSpikeBush ? (index: index, enemy: enemy, distance: abs(enemy.position.y - frogPosition.y)) : nil
             }.sorted { $0.distance > $1.distance }  // Sort by distance from frog (furthest first)

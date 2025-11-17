@@ -83,7 +83,7 @@ struct GameConfig {
     // Edge spike bush settings
     static let edgeSpikeBushSize: CGFloat = 125
     static let edgeSpikeBushSpacing: CGFloat = 40  // Vertical spacing between edge spike bushes
-    static let edgeSpikeBushMargin: CGFloat = -75   // Distance from screen edge
+    static let edgeSpikeBushMargin: CGFloat = 25   // Distance from screen edge (was -75, now positive)
     static let logWidth: CGFloat = 110  // Visual width
     static let logHeight: CGFloat = 22  // Visual height
     // Use these for physics/collision checks to make logs feel fairer than their visuals

@@ -96,10 +96,7 @@ class LevelEnemyConfigManager {
         return shared.levelConfigs[level] ?? shared.createFallbackConfig(for: level)
     }
     
-    static func getConfig(forScore score: Int) -> LevelEnemyConfig {
-        let level = (score / 25000) + 1
-        return getConfig(for: level)
-    }
+    
     
     /// Get all enemy types that can spawn at the given level/score
     static func getAllowedEnemyTypes(for level: Int) -> [EnemyType] {
