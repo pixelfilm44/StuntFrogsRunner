@@ -689,7 +689,11 @@ class GameScene: SKScene {
         }
         
         print("🌬️ Wind force received: dx=\(windForce.dx), dy=\(windForce.dy)")
-        applyWindToFrog(force: windForce)
+        if !frogController.shouldIgnoreExternalForces {
+            applyWindToFrog(force: windForce)
+
+        }
+        
     }
     
     /// Apply wind force to the frog based on current state
@@ -2419,7 +2423,11 @@ class GameScene: SKScene {
                     case .ice:
                         handleIceLanding()
                     case .water:
-                        handleWaterSplash()
+                        // Use splash guard to prevent multiple triggers
+                        if !stateManager.splashTriggered {
+                            stateManager.splashTriggered = true
+                            handleWaterSplash()
+                        }
                     }
                     return // Exit early to avoid lily pad collision checks
                 }
@@ -2471,7 +2479,11 @@ class GameScene: SKScene {
                         case .ice:
                             handleIceLanding()
                         case .water:
-                            handleWaterSplash()
+                            // Use splash guard to prevent multiple triggers
+                            if !stateManager.splashTriggered {
+                                stateManager.splashTriggered = true
+                                handleWaterSplash()
+                            }
                         }
                     }
                 }
@@ -2489,6 +2501,37 @@ class GameScene: SKScene {
         
 //        let scrollScore = worldManager.updateScrolling(isJumping: frogController.isJumping)
 //        scoreManager.addScore(scrollScore)
+        
+        // PERFORMANCE: Efficient water collision detection
+        // Check every other frame (30 FPS) for good performance while maintaining accurate collision detection
+        // This alternates with enemy collision checks to distribute computational load
+        if !frogController.rocketActive && gameState == .playing && frameCount % 2 == 1 {
+            let hasLifeVest = frogController.lifeVestCharges > 0
+            let waterCollisionDetected = collisionManager.handleWaterCollisions(
+                frogPosition: frogController.position,
+                lilyPads: lilyPads,
+                playerHasLifeVest: hasLifeVest,
+                currentFrame: frameCount
+            )
+            
+            // If water collision was detected and handled, decrement life vest charges if applicable
+            if waterCollisionDetected {
+                if frogController.lifeVestCharges > 0 {
+                    frogController.lifeVestCharges -= 1
+                    updateHUD()
+                    showFloatingText("Life Vest -1", color: .systemYellow)
+                    print("🦺 Life vest used via collision detection - charges remaining: \(frogController.lifeVestCharges)")
+                } else {
+                    print("💀 Water collision detected with no life vest - triggering drowning")
+                    // Use the splash guard mechanism to prevent multiple triggers
+                    if !stateManager.splashTriggered {
+                        stateManager.splashTriggered = true
+                        handleWaterSplash()
+                    }
+                }
+                return
+            }
+        }
         
         if !frogController.isJumping && !frogController.isGrounded && !frogController.inWater {
             let landingResult = landingController.checkLanding(
@@ -4827,36 +4870,6 @@ class GameScene: SKScene {
         }
     }
     
-    /// Test method to simulate weather effects
-    func testWeatherEffects() {
-        let weatherManager = WeatherManager.shared
-        let currentWeather = weatherManager.weather
-        
-        print("🌤️ TESTING: Weather effects for \(currentWeather.displayName)")
-        
-        // Test slippery pad effect
-        if weatherManager.shouldPadsBeSlippery() {
-            print("  - Testing slippery pad effect...")
-            let slipFactor = weatherManager.getSlipFactor()
-            applySlipEffectToFrog(factor: slipFactor)
-        }
-        
-        // Test wind effect
-        if weatherManager.isWindActive() {
-            print("  - Testing wind effect...")
-            let windForce = CGVector(dx: CGFloat.random(in: -50...50), dy: CGFloat.random(in: -30...30))
-            NotificationCenter.default.post(name: NSNotification.Name("WindForceApplied"), object: windForce)
-        }
-        
-        // Test lightning effect
-        if currentWeather.gameplayEffects.contains(where: { effect in
-            if case .lightning = effect { return true }
-            return false
-        }) {
-            print("  - Testing lightning effect...")
-            NotificationCenter.default.post(name: NSNotification.Name("LightningEffect"), object: nil)
-        }
-    }
     
     /// Debug method to show weather progression through levels
     func debugWeatherProgression() {

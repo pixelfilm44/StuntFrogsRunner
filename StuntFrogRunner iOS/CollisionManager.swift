@@ -23,6 +23,10 @@ class CollisionManager {
     weak var uiManager: UIManager?
     weak var frogController: FrogController?
     
+    // Water collision detection state
+    private var lastWaterCheckFrame: Int = 0
+    private let waterCheckCacheFrames = 2 // Check water collision every 2 frames for performance
+    
     private var rippleCounter: Int = 0
     
     // PERFORMANCE: Cache for reducing expensive collision calculations
@@ -46,6 +50,91 @@ class CollisionManager {
         self.scene = scene
         self.uiManager = uiManager
         self.frogController = frogController
+    }
+    
+    /// Direct water collision check - call this from your GameScene update loop
+    /// Returns true if water collision was handled
+    func handleWaterCollisions(frogPosition: CGPoint, lilyPads: [LilyPad], playerHasLifeVest: Bool, currentFrame: Int = 0) -> Bool {
+        return checkWaterCollision(frogPosition: frogPosition, lilyPads: lilyPads, playerHasLifeVest: playerHasLifeVest, currentFrame: currentFrame)
+    }
+    
+    // MARK: - Water Landing Detection
+    
+    /// Check if frog has fallen into water and handle accordingly
+    /// Should be called during main collision updates
+    /// Returns true if water collision was detected and handled
+    /// 
+    /// GAME OVER LOGIC: When frog falls into water without a life vest:
+    /// 1. FrogController.triggerWaterLanding() is called
+    /// 2. FrogController sets isDrowning = true and starts sinking animation
+    /// 3. FrogController's sinking animation completion triggers onGameOver callback
+    /// 4. GameScene should set up frogController.onGameOver to handle .splash game over
+    func checkWaterCollision(frogPosition: CGPoint, lilyPads: [LilyPad], playerHasLifeVest: Bool, currentFrame: Int = 0) -> Bool {
+        guard let frogController = frogController else { return false }
+        
+        // Performance optimization: Only check water collision every few frames
+        let frameToUse = currentFrame > 0 ? currentFrame : rippleCounter
+        if frameToUse - lastWaterCheckFrame < waterCheckCacheFrames {
+            return false
+        }
+        lastWaterCheckFrame = frameToUse
+        
+        // Skip if frog is already in water or handling water state
+        if frogController.inWater || frogController.isDrowning {
+            return false
+        }
+        
+        // Skip if frog is jumping or in rocket mode or invincible 
+        if frogController.isJumping || frogController.rocketActive || frogController.invincible {
+            return false
+        }
+        
+        // Skip if water collision is suppressed until next jump
+        if frogController.suppressWaterCollisionUntilNextJump {
+            return false
+        }
+        
+        // PERFORMANCE: Check if frog is on any lily pad using squared distances to avoid sqrt
+        let isOnLilyPad = lilyPads.contains { pad in
+            let dx = frogPosition.x - pad.position.x
+            let dy = frogPosition.y - pad.position.y
+            let distanceSq = dx * dx + dy * dy
+            let radiusWithTolerance = pad.radius + 10 // Small tolerance
+            return distanceSq <= radiusWithTolerance * radiusWithTolerance
+        }
+        
+        // If frog is NOT on a lily pad and is not safely grounded, trigger water landing
+        if !isOnLilyPad && !frogController.isJumping {
+            // Determine the type of water collision based on frog's state
+            if frogController.onIce {
+                print("💦 WATER COLLISION DETECTED: Frog slipped off lily pad into water!")
+            } else if frogController.isGrounded {
+                print("💦 WATER COLLISION DETECTED: Frog missed lily pad landing!")
+            } else {
+                print("💦 WATER COLLISION DETECTED: Frog fell into water!")
+            }
+            
+            // CRITICAL FIX: Trigger water landing with proper game over handling
+            frogController.triggerWaterLanding(
+                at: frogPosition,
+                hasLifeVest: playerHasLifeVest,
+                effectsManager: effectsManager
+            )
+            
+            // GAME OVER LOGIC: If no life vest, the frog is drowning
+            // The FrogController's onGameOver callback should handle this automatically
+            // through the sinking animation, but we can add additional logging here
+            if !playerHasLifeVest {
+                print("💀 DROWNING: No life vest - frog will sink and trigger game over!")
+                print("💀 Game over will be triggered by FrogController's sinking animation completion")
+            } else {
+                print("🛟 FLOATING: Frog has life vest - entering floating mode!")
+            }
+            
+            return true
+        }
+        
+        return false
     }
     
     // MARK: - Main Update Methods
@@ -510,9 +599,17 @@ class CollisionManager {
                          worldOffset: CGFloat, screenHeight: CGFloat, rocketActive: Bool, 
                          frogIsJumping: Bool, sceneSize: CGSize,
                          onEnemyHit: (Enemy) -> HitOutcome, onLogBounce: ((Enemy) -> Void)? = nil,
-                         onTadpoleCollect: () -> Void, onBigHoneyPotCollect: () -> Void) {
+                         onTadpoleCollect: () -> Void, onBigHoneyPotCollect: () -> Void,
+                         playerHasLifeVest: Bool = false) {
         
         frameCounter += 1
+        
+        // FIRST PRIORITY: Check for water collision (most important for gameplay)
+        if checkWaterCollision(frogPosition: frogPosition, lilyPads: lilyPads, playerHasLifeVest: playerHasLifeVest) {
+            // Water landing handled - frog is now in water state
+            // Continue with other updates but water collision is processed
+            print("💦 Water collision handled - continuing with other updates")
+        }
         
         // PERFORMANCE: Check if we need to update our cached nearby objects
         let frogMovement = hypot(frogPosition.x - lastFrogPosition.x, frogPosition.y - lastFrogPosition.y)

@@ -5,6 +5,7 @@
 
 import SpriteKit
 import UIKit
+import Foundation
 
 class FrogController {
     // Frog nodes
@@ -21,6 +22,9 @@ class FrogController {
     
     // DROWNING CALLBACK: Notify game scene when frog drowns
     var onDrowned: (() -> Void)?
+    
+    // GAME OVER CALLBACK: Notify game scene when game over should be triggered
+    var onGameOver: ((GameOverReason) -> Void)?
     
     
     var currentLilyPad: LilyPad? {
@@ -72,6 +76,7 @@ class FrogController {
     var lifeVestCharges: Int = 0
     var inWater: Bool = false
     var isDrowning: Bool = false  // NEW: Track explicit drowning state
+    var isSinking: Bool = false  // NEW: Track active sinking animation state
     // When true, ignore subsequent water-fall checks until the frog jumps again
     var suppressWaterCollisionUntilNextJump: Bool = false
     
@@ -80,6 +85,9 @@ class FrogController {
     var slideVelocity: CGVector = .zero
     var slideDeceleration: CGFloat = 0.95  // How quickly sliding slows down
     var minSlideSpeed: CGFloat = 1.2  // Below this speed, stop sliding (increased to prevent endless slow slides)
+    
+    // Frog facing direction (used for sliding and animations)
+    private var frogFacingAngle: CGFloat = 0
     
     // Safety mechanism to prevent infinite sliding
     private var slideFrameCount: Int = 0
@@ -108,6 +116,12 @@ class FrogController {
     private let rocketScale: CGFloat = 5.0  // Scale multiplier for rocket animation (minimum 800px width will be enforced)
     
     weak var scene: SKScene?
+    
+    /// Check if the frog should be left alone by external systems (wind, etc.)
+    /// Returns true if frog is sinking, in a game-ending state, or otherwise should not be moved
+    var shouldIgnoreExternalForces: Bool {
+        return isSinking || isDrowning || rocketActive
+    }
     
     init(scene: SKScene) {
         self.scene = scene
@@ -420,6 +434,7 @@ class FrogController {
         velocity = .zero
         inWater = false
         isDrowning = false  // NEW: Reset drowning state
+        isSinking = false  // NEW: Reset sinking state
         onIce = false
         slideVelocity = .zero
         suppressWaterCollisionUntilNextJump = false
@@ -454,6 +469,7 @@ class FrogController {
         // This prevents the frog from being stuck in floating mode
         inWater = false
         isDrowning = false
+        isSinking = false
         
         // Stop water bobbing when leaving water to jump
         frogSprite.removeAction(forKey: "frogBob")
@@ -637,6 +653,12 @@ class FrogController {
     
     
     func splash() {
+        // CRITICAL FIX: Prevent duplicate splash if new water landing system already handled it
+        if inWater {
+            print("🐸 Splash cancelled - already in water (handled by new water landing system)")
+            return
+        }
+        
         isJumping = false
         isGrounded = false
         frogSprite.setScale(1.0)
@@ -652,6 +674,7 @@ class FrogController {
             // Do not consume the vest here. Let GameScene decide and manage suppression.
             inWater = true
             isDrowning = false  // Not drowning if we have life vests
+            isSinking = false   // Not sinking if we have life vests
             
             // Debug floating texture assignment
             print("🐸 Setting floating texture. Before: \(String(describing: frogSprite.texture)), FloatingTexture: \(String(describing: floatingTexture))")
@@ -699,8 +722,8 @@ class FrogController {
             print("  🐸 Previous inWater state: \(inWater)")
             print("  🐸 Setting isDrowning: true")
             
-            // Play splash sound
-            soundController.playWaterSplash(severity: 1.0)
+            // REMOVED: Duplicate splash sound - already played in landInWater() method
+            // soundController.playWaterSplash(severity: 1.0)
             
             // Trigger drowning callback to notify game scene
             print("  🐸 Calling onDrowned callback...")
@@ -778,6 +801,7 @@ class FrogController {
             
             inWater = false
             isDrowning = false  // CRITICAL: Reset drowning state when landing on pad
+            isSinking = false   // CRITICAL: Reset sinking state when landing on pad
             frogSprite.removeAction(forKey: "frogBob")
             frogSprite.parent?.removeAction(forKey: waterRippleActionKey)
             frogSprite.texture = idleTexture
@@ -1003,6 +1027,7 @@ class FrogController {
         velocity = .zero
         inWater = false
         isDrowning = false
+        isSinking = false
         onIce = false
         slideVelocity = .zero
         suppressWaterCollisionUntilNextJump = false
@@ -1094,8 +1119,8 @@ class FrogController {
         slideFrameCount = 0  // Reset slide timeout counter
         
         // Use the frog's current facing direction for sliding
-        // The frog's zRotation includes the art correction (π/2), so subtract it to get world direction
-        let frogFacingAngle = frogSprite.zRotation + (.pi / 2)
+        // Update the facing angle first, then use it for slide direction
+        updateFacingAngle()
         let facingDirection = CGVector(dx: cos(frogFacingAngle), dy: sin(frogFacingAngle))
         
         // Calculate slide speed from initial velocity magnitude
@@ -1125,6 +1150,7 @@ class FrogController {
     }
     
     /// Start natural slip effect (for slippery lily pads) with more organic movement
+    /// Used for both ice levels and rain levels where lily pads become slippery
     func startNaturalSlip(initialVelocity: CGVector, slipFactor: CGFloat) {
         onIce = true
         inWater = false
@@ -1161,9 +1187,9 @@ class FrogController {
         // Add slight wobble animation to the frog sprite for slip effect
         let wobbleAngle: CGFloat = 0.1 * slipFactor
         let wobbleAction = SKAction.sequence([
-            SKAction.rotate(byAngle: wobbleAngle, duration: 0.15),
+            SKAction.rotate(byAngle: wobbleAngle, duration: 0.25),
             SKAction.rotate(byAngle: -wobbleAngle * 2, duration: 0.3),
-            SKAction.rotate(byAngle: wobbleAngle, duration: 0.15)
+            SKAction.rotate(byAngle: wobbleAngle, duration: 0.25)
         ])
         frogSprite.run(wobbleAction)
         
@@ -1261,6 +1287,179 @@ class FrogController {
         frogSprite.removeAction(forKey: "restoreSlipParams")
         
         print("🧊 Frog force stopped sliding")
+    }
+    
+    // MARK: - Water Landing Methods
+    
+    /// Handle frog landing in water - creates splash effect and handles drowning/floating
+    func landInWater(at position: CGPoint, hasLifeVest: Bool = false, effectsManager: EffectsManager? = nil) {
+        print("💦 landInWater called at position: \(position) - hasLifeVest: \(hasLifeVest)")
+        print("💦 Current state - inWater: \(inWater), isDrowning: \(isDrowning), onIce: \(onIce)")
+        
+        // Create immediate splash effect for performance and visual feedback
+        effectsManager?.createSplashEffect(at: position)
+        print("💦 Splash effect created")
+        
+        // Play splash sound
+        soundController.playWaterSplash(severity: 1.0)
+        print("💦 Splash sound played")
+        
+        // Set water state immediately to prevent further collision checks
+        inWater = true
+        isGrounded = false
+        isJumping = false
+        onIce = false
+        slideVelocity = .zero
+        
+        // Set drowning state based on life vest availability
+        isDrowning = !hasLifeVest
+        
+        // Stop any existing sliding actions for performance
+        frogSprite.removeAllActions()
+        print("💦 Water state set and actions cleared")
+        
+        // Handle life vest or drowning
+        if hasLifeVest {
+            // Float action - frog stays on surface with gentle bobbing
+            startFloatingAction()
+            print("🛟 FLOATING: Frog is floating with life vest!")
+        } else {
+            // Sink and trigger game over
+            startSinkingAction()
+            print("💀 DROWNING: Frog is sinking - game over!")
+        }
+    }
+    
+    /// Quick method to check if frog should slip on lily pad based on current weather
+    func shouldSlipOnLanding(weatherManager: WeatherManager = WeatherManager.shared) -> Bool {
+        return weatherManager.shouldPadsBeSlippery() || weatherManager.weather == .rain
+    }
+    
+    /// Update frog facing angle based on current sprite rotation
+    func updateFacingAngle() {
+        frogFacingAngle = frogSprite.zRotation + (.pi / 2)
+    }
+    
+    /// Set frog facing direction explicitly (useful for jump targeting)
+    func setFacingDirection(angle: CGFloat) {
+        frogFacingAngle = angle
+        frogSprite.zRotation = angle - (.pi / 2)  // Adjust for art correction
+    }
+    
+    /// Check if frog has slipped off into water and handle appropriately
+    /// This should be called during collision detection when frog is sliding
+    func checkForWaterLanding(at position: CGPoint, hasLifeVest: Bool = false, effectsManager: EffectsManager? = nil) -> Bool {
+        print("🐸 checkForWaterLanding called - onIce: \(onIce), inWater: \(inWater), isDrowning: \(isDrowning)")
+        
+        // Only check for water landing if frog is currently sliding/slipping
+        guard onIce || inWater else { 
+            print("🐸 Not sliding/in water - skipping water check")
+            return false 
+        }
+        
+        // If we're already in water or explicitly marked as drowning, handle water landing
+        if inWater || isDrowning {
+            print("🐸 WATER LANDING DETECTED! hasLifeVest: \(hasLifeVest)")
+            landInWater(at: position, hasLifeVest: hasLifeVest, effectsManager: effectsManager)
+            return true
+        }
+        
+        return false
+    }
+    
+    /// Force trigger water landing (for direct integration when collision detected)
+    func triggerWaterLanding(at position: CGPoint, hasLifeVest: Bool = false, effectsManager: EffectsManager? = nil) {
+        print("🐸 FORCE WATER LANDING triggered at \(position) - hasLifeVest: \(hasLifeVest)")
+        
+        // Set water state before calling landInWater
+        inWater = true
+        isDrowning = !hasLifeVest
+        
+        landInWater(at: position, hasLifeVest: hasLifeVest, effectsManager: effectsManager)
+    }
+    
+    /// Start floating animation for when frog has a life vest
+    private func startFloatingAction() {
+        // Stop any existing movement
+        frogSprite.removeAllActions()
+        
+        // Gentle bobbing animation
+        let bobUp = SKAction.moveBy(x: 0, y: 5, duration: 1.0)
+        let bobDown = SKAction.moveBy(x: 0, y: -5, duration: 1.0)
+        bobUp.timingMode = SKActionTimingMode.easeInEaseOut
+        bobDown.timingMode = SKActionTimingMode.easeInEaseOut
+        
+        let bobSequence = SKAction.sequence([bobUp, bobDown])
+        let bobForever = SKAction.repeatForever(bobSequence)
+        
+        // Slight rotation for floating effect
+        let rotateLeft = SKAction.rotate(byAngle: 0.1, duration: 1.5)
+        let rotateRight = SKAction.rotate(byAngle: -0.2, duration: 3.0)
+        let rotateBack = SKAction.rotate(byAngle: 0.1, duration: 1.5)
+        rotateLeft.timingMode = SKActionTimingMode.easeInEaseOut
+        rotateRight.timingMode = SKActionTimingMode.easeInEaseOut
+        rotateBack.timingMode = SKActionTimingMode.easeInEaseOut
+        
+        let rotateSequence = SKAction.sequence([rotateLeft, rotateRight, rotateBack])
+        let rotateForever = SKAction.repeatForever(rotateSequence)
+        
+        // Run both animations
+        frogSprite.run(bobForever, withKey: "floatBob")
+        frogSprite.run(rotateForever, withKey: "floatRotate")
+        
+        // Set alpha to indicate floating state
+        frogSprite.alpha = 0.9
+    }
+    
+    /// Start sinking animation for game over
+    private func startSinkingAction() {
+        // Stop any existing movement
+        frogSprite.removeAllActions()
+        
+        // Set drowning and sinking state explicitly
+        isDrowning = true
+        isSinking = true  // NEW: Prevent external interference
+        inWater = true
+        isGrounded = false
+        isJumping = false
+        onIce = false
+        slideVelocity = .zero
+        
+        // Set sinking texture if available
+        if let sinkTexture = sinkingTexture {
+            frogSprite.texture = sinkTexture
+        }
+        
+        // Sinking animation with slight rotation
+        let sinkAction = SKAction.moveBy(x: 0, y: -100, duration: 2.0)
+        sinkAction.timingMode = .easeIn
+        
+        let fadeAction = SKAction.fadeOut(withDuration: 2.0)
+        let rotateAction = SKAction.rotate(byAngle: .pi, duration: 2.0)
+        
+        let sinkGroup = SKAction.group([sinkAction, fadeAction, rotateAction])
+        
+        // Add completion logging to debug
+        frogSprite.run(sinkGroup) { [weak self] in
+            print("💀 Sinking animation completed - triggering game over")
+            // Trigger game over after sinking animation
+            self?.onGameOver?(.splash)
+        }
+        
+        print("💀 Sinking animation started - duration: 2.0 seconds")
+    }
+    
+    /// Stop floating animation when frog lands on a pad
+    func stopFloatingAction() {
+        frogSprite.removeAction(forKey: "floatBob")
+        frogSprite.removeAction(forKey: "floatRotate")
+        frogSprite.alpha = 1.0
+        
+        // Reset rotation to normal using current facing angle
+        frogFacingAngle = frogSprite.zRotation + (.pi / 2)  // Update facing angle
+        let resetRotation = SKAction.rotate(toAngle: frogFacingAngle, duration: 0.3)
+        resetRotation.timingMode = SKActionTimingMode.easeOut
+        frogSprite.run(resetRotation)
     }
 }
 

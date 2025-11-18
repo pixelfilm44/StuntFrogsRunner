@@ -1694,34 +1694,73 @@ class UIManager: NSObject {
     }
     
     func presentLeaderboard(leaderboardID: String) {
-        // Authenticate if needed, then present
-        if GKLocalPlayer.local.isAuthenticated {
-            presentLeaderboardView(leaderboardID: leaderboardID)
-        } else {
-            GKLocalPlayer.local.authenticateHandler = { [weak self] vc, error in
-                guard let self = self else { return }
-                if let vc = vc {
-                    self.present(viewController: vc)
-                } else if GKLocalPlayer.local.isAuthenticated {
-                    self.presentLeaderboardView(leaderboardID: leaderboardID)
-                } else {
-                    #if DEBUG
-                    print("Game Center authentication failed: \(error?.localizedDescription ?? "unknown error")")
-                    #endif
+        // Ensure Game Center operations happen on main thread
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            print("🎮 Attempting to present leaderboard: \(leaderboardID)")
+            
+            // Authenticate if needed, then present
+            if GKLocalPlayer.local.isAuthenticated {
+                print("✅ Player already authenticated, presenting leaderboard")
+                self.presentLeaderboardView(leaderboardID: leaderboardID)
+            } else {
+                print("🔐 Player not authenticated, starting authentication")
+                GKLocalPlayer.local.authenticateHandler = { [weak self] vc, error in
+                    DispatchQueue.main.async {
+                        guard let self = self else { return }
+                        if let vc = vc {
+                            print("📱 Presenting authentication view controller")
+                            self.present(viewController: vc)
+                        } else if GKLocalPlayer.local.isAuthenticated {
+                            print("✅ Authentication successful, presenting leaderboard")
+                            self.presentLeaderboardView(leaderboardID: leaderboardID)
+                        } else {
+                            print("❌ Game Center authentication failed: \(error?.localizedDescription ?? "unknown error")")
+                            #if DEBUG
+                            // Show a user-friendly message in debug builds
+                            let alert = UIAlertController(
+                                title: "Game Center Unavailable", 
+                                message: "Please sign in to Game Center in Settings to view leaderboards.",
+                                preferredStyle: .alert
+                            )
+                            alert.addAction(UIAlertAction(title: "OK", style: .default))
+                            self.present(viewController: alert)
+                            #endif
+                        }
+                    }
                 }
             }
         }
     }
 
     private func presentLeaderboardView(leaderboardID: String) {
-        let gcVC = GKGameCenterViewController(leaderboardID: leaderboardID, playerScope: .global, timeScope: .allTime)
-        gcVC.gameCenterDelegate = self
-        present(viewController: gcVC)
+        // Ensure this runs on main thread
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            print("🏆 Creating Game Center leaderboard view for ID: \(leaderboardID)")
+            
+            let gcVC = GKGameCenterViewController(leaderboardID: leaderboardID, playerScope: .global, timeScope: .allTime)
+            gcVC.gameCenterDelegate = self
+            
+            self.present(viewController: gcVC)
+        }
     }
 
     private func present(viewController: UIViewController) {
-        guard let rootVC = topViewController() else { return }
-        rootVC.present(viewController, animated: true)
+        // Ensure presentation happens on main thread
+        if Thread.isMainThread {
+            guard let rootVC = topViewController() else { 
+                print("❌ Could not find root view controller to present leaderboard")
+                return 
+            }
+            rootVC.present(viewController, animated: true)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.present(viewController: viewController)
+            }
+        }
     }
 
     private func topViewController(base: UIViewController? = nil) -> UIViewController? {
@@ -1730,13 +1769,47 @@ class UIManager: NSObject {
         if let base = base {
             baseViewController = base
         } else {
-            // Safer way to get the root view controller
-            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                  let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first else {
-                print("⚠️ Could not find key window")
+            // Thread-safe way to get the root view controller
+            if Thread.isMainThread {
+                // Try multiple approaches to find the key window safely
+                var keyWindow: UIWindow?
+                
+                // iOS 15+ approach
+                if #available(iOS 15.0, *) {
+                    keyWindow = UIApplication.shared.connectedScenes
+                        .compactMap { $0 as? UIWindowScene }
+                        .flatMap { $0.windows }
+                        .first { $0.isKeyWindow }
+                }
+                
+                // Fallback for iOS 13-14
+                if keyWindow == nil {
+                    keyWindow = UIApplication.shared.windows.first { $0.isKeyWindow }
+                }
+                
+                // Final fallback - get any window
+                if keyWindow == nil {
+                    if #available(iOS 15.0, *) {
+                        keyWindow = UIApplication.shared.connectedScenes
+                            .compactMap { $0 as? UIWindowScene }
+                            .flatMap { $0.windows }
+                            .first
+                    } else {
+                        keyWindow = UIApplication.shared.windows.first
+                    }
+                }
+                
+                guard let window = keyWindow else {
+                    print("⚠️ Could not find any window")
+                    return nil
+                }
+                
+                baseViewController = window.rootViewController
+            } else {
+                // If not on main thread, dispatch to main thread and return nil for now
+                print("⚠️ topViewController called from background thread")
                 return nil
             }
-            baseViewController = window.rootViewController
         }
         
         guard let rootVC = baseViewController else {

@@ -7,6 +7,7 @@ import SpriteKit
 
 class EffectsManager {
     weak var scene: SKScene?
+    weak var gameStateManager: GameStateManager?
     
     // Weather effects management
     private var rainNode: SKNode?
@@ -32,8 +33,9 @@ class EffectsManager {
     private var cachedImpactParticleAction: SKAction?
     private var cachedWindParticleAction: SKAction?
     
-    init(scene: SKScene) {
+    init(scene: SKScene, gameStateManager: GameStateManager? = nil) {
         self.scene = scene
+        self.gameStateManager = gameStateManager
     }
     
     func prepare() {
@@ -128,7 +130,7 @@ class EffectsManager {
     
     func createSplashEffect(at position: CGPoint) {
         guard let scene = scene else { return }
-        
+        if gameStateManager?.splashTriggered == true { return }
         // Big splash circle
         let splash = SKShapeNode(circleOfRadius: 70)
         splash.fillColor = UIColor(red: 0.5, green: 0.7, blue: 1.0, alpha: 0.8)
@@ -178,6 +180,8 @@ class EffectsManager {
         splashText.position = CGPoint(x: position.x, y: position.y + 90)
         splashText.zPosition = 152
         scene.addChild(splashText)
+        
+        
         
         let textAction = SKAction.sequence([
             SKAction.scale(to: 1.4, duration: 0.15),
@@ -246,8 +250,9 @@ class EffectsManager {
                 ripple.strokeColor = UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: alphaMod)
                 ripple.fillColor = .clear
                 
-                // Start with thicker line for visibility
-                ripple.lineWidth = max(0.5, (lineWidthBase - CGFloat(i)) * (0.8 + clamped * 0.6)) // adjusted for intensity
+                // Pre-calculate line width for performance optimization
+                let startLineWidth = max(0.5, (lineWidthBase - CGFloat(i)) * (0.8 + clamped * 0.6))
+                ripple.lineWidth = startLineWidth
                 ripple.position = worldPos
                 ripple.zPosition = zBelowPads
                 parent.addChild(ripple)
@@ -258,13 +263,12 @@ class EffectsManager {
                 // Scale more dramatically for better visibility (6-8x expansion)
                 let targetScale = rippleScaleBase + CGFloat(i) + rippleScaleExtra * clamped
                 
-                // Create custom action for line width animation (thin as it expands - realistic water)
+                // Create optimized custom action for line width animation (thin as it expands - realistic water)
                 let lineWidthAction = SKAction.customAction(withDuration: rippleDuration) { node, elapsedTime in
                     if let shape = node as? SKShapeNode {
                         let progress = CGFloat(elapsedTime) / CGFloat(rippleDuration)
-                        let startWidth = max(0.5, (lineWidthBase - CGFloat(i)) * (0.8 + clamped * 0.6))
                         let endWidth: CGFloat = 0.5
-                        shape.lineWidth = startWidth - (startWidth - endWidth) * progress
+                        shape.lineWidth = startLineWidth - (startLineWidth - endWidth) * progress
                     }
                 }
                 
