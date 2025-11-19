@@ -68,6 +68,7 @@ class GameScene: SKScene {
     private var hasSpawnedFinishLine: Bool = false
     private var frogPreviousY: CGFloat = 0
     private var levelStartingScore: Int = 0  // Track the score when the level started
+    private var finishLineCrossedThisLevel: Bool = false  // Track whether finish line has been crossed this level
     
     // MARK: - Parallax Background Elements
     private var rightTree: SKSpriteNode?
@@ -1086,7 +1087,7 @@ class GameScene: SKScene {
             // Add slight random variation (±30 degrees) to make it feel organic
             let variation = CGFloat.random(in: -(.pi/6)...(.pi/6))
             slipDirection += variation
-            baseSlideSpeed = 25.0 + (15.0 * factor) // More momentum-based speed
+            baseSlideSpeed = 55.0 + (10.0 * factor) // More momentum-based speed
         } else {
             // If no momentum, use frog's facing direction with slight random bias
             let frogFacingAngle = frogController.frogSprite.zRotation + (.pi / 2)
@@ -1094,7 +1095,7 @@ class GameScene: SKScene {
             // Add more variation when there's no momentum
             let variation = CGFloat.random(in: -(.pi/4)...(.pi/4))
             slipDirection += variation
-            baseSlideSpeed = 15.0 + (10.0 * factor) // Gentler slip without momentum
+            baseSlideSpeed = 25.0 + (2.0 * factor) // Gentler slip without momentum
         }
         
         // Create slip velocity with easing curves for more natural movement
@@ -1108,15 +1109,8 @@ class GameScene: SKScene {
         
         // Enhanced visual feedback based on slip intensity
         let slipIntensity = baseSlideSpeed / 40.0 // Normalize to 0-1 range
-        if slipIntensity > 0.7 {
-            showFloatingText("Whoa! Very slippery!", color: .systemRed)
-        } else if slipIntensity > 0.4 {
-            showFloatingText("Slippery pad!", color: .systemOrange)
-        } else {
-            showFloatingText("Slippery", color: .systemBlue)
-        }
+       
         
-        effectsManager?.createSlipEffect(at: frogContainer.position)
         
         // Haptic feedback intensity matches slip intensity
         if slipIntensity > 0.6 {
@@ -1137,7 +1131,7 @@ class GameScene: SKScene {
             
             // Apply slip effect with a very brief delay for more immediate, natural feel
             // The delay allows the landing animation to start but doesn't wait for it to complete
-            let delay = SKAction.wait(forDuration: 0.05)
+            let delay = SKAction.wait(forDuration: 0.005)
             let slipAction = SKAction.run { [weak self] in
                 self?.applySlipEffectToFrog(factor: slipFactor)
             }
@@ -1674,6 +1668,7 @@ class GameScene: SKScene {
         finishLine?.node.removeFromParent()
         finishLine = nil
         hasSpawnedFinishLine = false
+        finishLineCrossedThisLevel = false
         frogPreviousY = 0
         
         // Reset world manager with correct weather
@@ -2456,7 +2451,6 @@ class GameScene: SKScene {
                                                           intensity: landingIntensity, lilyPad: pad)
                         HapticFeedbackManager.shared.impact(.light)
                         
-                        showFloatingText("Landed!", color: .systemGreen)
                         print("🧊 Frog slid into lily pad and stopped (speed: \(currentSpeed))")
                         landedOnPad = true
                         break
@@ -2669,23 +2663,24 @@ class GameScene: SKScene {
             spawnFinishLine()
         }
         
-        // Check for finish line crossing
-        if let finishLine = finishLine {
-            // CRITICAL: Only check for crossing if we haven't already triggered level completion
-            if action(forKey: "levelTransition") == nil {
-                let crossed = finishLine.checkCrossing(frogPosition: frogController.position, frogPreviousY: frogPreviousY)
+        // IMPORTANT: Check if we just crossed the finish line this frame
+        // Use only physical crossing detection - check if frog physically crosses the finish line
+        if let finishLine = finishLine, !finishLineCrossedThisLevel {
+            if finishLine.checkCrossing(frogPosition: frogController.position, frogPreviousY: frogPreviousY) {
+                finishLineCrossedThisLevel = true // Prevent multiple calls
                 
-                // PERFORMANCE: Only do debug output every 180 frames (3 seconds) when near finish line
-                if crossed {
-                    print("🏁 Finish line crossed detected in update loop")
-                    handleFinishLineCrossed()
-                } else if gameLoopCoordinator.getFrameCount() % 180 == 0 {
-                    let currentY = frogController.position.y
-                    let finishY = finishLine.position.y
-                    if abs(currentY - finishY) < 200 {
-                        print("🏁 Near finish line: frogY=\(Int(currentY)), finishY=\(Int(finishY)), distance=\(Int(finishY - currentY))")
-                    }
-                }
+                print("🏁 FINISH LINE REACHED! Frog physically crossed the finish line")
+                print("🏁 Current score: \(score)")
+                
+                // CRITICAL: Handle rocket cleanup immediately when finish line is crossed
+                spawnManager.handleFinishLineCrossed(
+                    frogController: frogController,
+                    lilyPads: lilyPads,
+                    sceneSize: size
+                )
+                
+                // Then proceed with level completion logic
+                handleFinishLineCrossed()
             }
         }
         
@@ -2751,6 +2746,7 @@ class GameScene: SKScene {
     }
     
     private func handleEnemyHit(enemy: Enemy) -> HitOutcome {
+        print("🎯 handleEnemyHit called for enemy type: \(enemy.type)")
         var consumedProtection = false
         var destroyCause: AbilityType? = nil
         
@@ -2758,6 +2754,7 @@ class GameScene: SKScene {
             consumedProtection = true
             destroyCause = .honeyJar
             showFloatingText("Yum Yum!", color: .systemYellow)
+            print("🍯 Bee hit - used honey jar protection!")
             // Honey jar protects fully from bees: remove bee, no heart lost, no invincibility side effects.
             return .destroyed(cause: .honeyJar)
         } else if enemy.type == EnemyType.log && healthManager.useAxeCharge() {
@@ -2787,9 +2784,12 @@ class GameScene: SKScene {
         }
         
         if !consumedProtection {
+            print("❤️ No protection used - dealing damage for enemy type: \(enemy.type)")
             healthManager.damageHealth()
             // Show scared reaction on the frog for a brief moment
             frogController.showScared(duration: 1.0)
+        } else {
+            print("🛡️ Protection consumed for enemy type: \(enemy.type)")
         }
         
         frogController.activateInvincibility()
@@ -3411,7 +3411,8 @@ class GameScene: SKScene {
         // IMMEDIATELY remove rocket from frog if active
         if frogController.rocketActive {
             print("🚀 Removing rocket from frog upon finish line crossing")
-            frogController.rocketActive = false
+            // Use the proper cleanup method to ensure all rocket visuals are removed
+            frogController.forceRocketLanding()
             uiManager.hideRocketIndicator()
             uiManager.hideRocketLandButton()
             isRocketFinalApproach = false
@@ -3503,6 +3504,7 @@ class GameScene: SKScene {
         finishLine?.node.removeFromParent()
         finishLine = nil
         hasSpawnedFinishLine = false
+        finishLineCrossedThisLevel = false
         
         // Cancel any pending level transitions
         removeAction(forKey: "levelTransition")
@@ -3613,6 +3615,7 @@ class GameScene: SKScene {
         // STEP 5: Reset all level-specific state
         print("🧹 Resetting level state...")
         hasSpawnedFinishLine = false
+        finishLineCrossedThisLevel = false
         frogPreviousY = 0
         isRocketFinalApproach = false
         
@@ -3999,6 +4002,7 @@ class GameScene: SKScene {
         finishLine?.node.removeFromParent()
         finishLine = nil
         hasSpawnedFinishLine = false
+        finishLineCrossedThisLevel = false
         
         print("🚨 Force cleanup complete")
     }
@@ -4020,6 +4024,7 @@ class GameScene: SKScene {
         print("🧪 TESTING: Setting level travel distance to \(Int(startingDistance))")
         levelTravelDistance = startingDistance
         hasSpawnedFinishLine = false // Reset so finish line can spawn again
+        finishLineCrossedThisLevel = false // Reset crossing state for testing
         
         let requiredDistance = LevelEnemyConfigManager.getRequiredTravelDistance(for: currentLevel)
         print("🧪 Finish line should appear when travel distance reaches: \(Int(requiredDistance)) units")

@@ -193,7 +193,7 @@ class UIManager: NSObject {
     var pendingTadpoleCoins: Int = 0
 
     // Set this to your App Store Connect leaderboard identifier
-    var leaderboardID: String = "com.yourcompany.yourapp.leaderboard"
+    var leaderboardID: String = "TopScores"
     
     // Touch interaction delay mechanism
     private var menuInteractionEnabledTime: TimeInterval = 0

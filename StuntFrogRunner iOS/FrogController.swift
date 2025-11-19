@@ -21,10 +21,18 @@ class FrogController {
     }
     
     // DROWNING CALLBACK: Notify game scene when frog drowns
-    var onDrowned: (() -> Void)?
+    var onDrowned: (() -> Void)? {
+        didSet {
+            print("🐸 FrogController.onDrowned callback set: \(onDrowned != nil)")
+        }
+    }
     
     // GAME OVER CALLBACK: Notify game scene when game over should be triggered
-    var onGameOver: ((GameOverReason) -> Void)?
+    var onGameOver: ((GameOverReason) -> Void)? {
+        didSet {
+            print("🐸 FrogController.onGameOver callback set: \(onGameOver != nil)")
+        }
+    }
     
     
     var currentLilyPad: LilyPad? {
@@ -83,8 +91,8 @@ class FrogController {
     // Ice sliding state
     var onIce: Bool = false
     var slideVelocity: CGVector = .zero
-    var slideDeceleration: CGFloat = 0.95  // How quickly sliding slows down
-    var minSlideSpeed: CGFloat = 1.2  // Below this speed, stop sliding (increased to prevent endless slow slides)
+    var slideDeceleration: CGFloat = 0.97  // Increased from 0.95 for smoother sliding
+    var minSlideSpeed: CGFloat = 0.8  // Reduced from 1.2 for less abrupt stopping
     
     // Frog facing direction (used for sliding and animations)
     private var frogFacingAngle: CGFloat = 0
@@ -113,7 +121,7 @@ class FrogController {
     
     private var jumpFrameDuration: TimeInterval = 0.06  // tweak to taste
     private var rocketFrameDuration: TimeInterval = 0.1  // Duration for each rocket frame
-    private let rocketScale: CGFloat = 5.0  // Scale multiplier for rocket animation (minimum 800px width will be enforced)
+    private let rocketScale: CGFloat = 3.0  // Scale multiplier for rocket animation (minimum 800px width will be enforced)
     
     weak var scene: SKScene?
     
@@ -799,12 +807,33 @@ class FrogController {
             print("ðŸ¸ Frog position AFTER land - local(world): \(position)")
         }
             
-            inWater = false
-            isDrowning = false  // CRITICAL: Reset drowning state when landing on pad
-            isSinking = false   // CRITICAL: Reset sinking state when landing on pad
-            frogSprite.removeAction(forKey: "frogBob")
-            frogSprite.parent?.removeAction(forKey: waterRippleActionKey)
-            frogSprite.texture = idleTexture
+        // Reset water states
+        inWater = false
+        isDrowning = false  // CRITICAL: Reset drowning state when landing on pad
+        isSinking = false   // CRITICAL: Reset sinking state when landing on pad
+        frogSprite.removeAction(forKey: "frogBob")
+        frogSprite.parent?.removeAction(forKey: waterRippleActionKey)
+        frogSprite.texture = idleTexture
+        
+        // Check for slippery conditions and handle landing accordingly
+        let isSlippery = shouldSlipOnLanding()
+        let landingVelocity = velocity // Capture current velocity before it gets reset
+        
+       
+            // STABLE LANDING: Normal behavior with bounce
+            print("🐸 STABLE LANDING on lily pad")
+            
+            // Check if this is a moving lily pad and create appropriate visual effect
+            if pad.type == .moving {
+                // Create moving lily pad landing effect to show the frog will move with the pad
+                if let gameScene = scene as? GameScene {
+                    let padVelocity = CGVector(dx: pad.velocity.x, dy: pad.velocity.y)
+                    gameScene.effectsManager.createMovingPadLandingEffect(at: position, padVelocity: padVelocity)
+                    print("🚁 Frog landed on MOVING lily pad - will move with pad velocity: \(padVelocity)")
+                } else {
+                    print("🚁 Frog landed on moving lily pad (no effects manager available)")
+                }
+            }
             
             // Return to idle pose on land
             playIdle()
@@ -817,6 +846,7 @@ class FrogController {
             down.timingMode = .easeIn
             let bounce = SKAction.sequence([up, down])
             frogSprite.run(bounce, withKey: "frogBounce")
+        
         }
     
     
@@ -1225,29 +1255,38 @@ class FrogController {
         // Calculate current speed for smooth motion adjustments
         let currentSpeed = sqrt(slideVelocity.dx * slideVelocity.dx + slideVelocity.dy * slideVelocity.dy)
         
-        // Apply slide velocity to position with slight randomness for organic feel
-        // Reduce randomness when moving slowly to prevent infinite sliding
-        let organicVariation: CGFloat = currentSpeed > 2.0 ? 0.05 : 0.01
+        // Store previous position for trail effect
+        let previousPosition = position
+        
+        // Apply slide velocity to position with reduced randomness for smoother motion
+        // Use minimal organic variation to prevent rigid sliding while maintaining smoothness
+        let organicVariation: CGFloat = currentSpeed > 2.0 ? 0.02 : 0.005  // Reduced variation
         let randomFactorX = CGFloat.random(in: (1.0 - organicVariation)...(1.0 + organicVariation))
         let randomFactorY = CGFloat.random(in: (1.0 - organicVariation)...(1.0 + organicVariation))
         
         position.x += slideVelocity.dx * randomFactorX
         position.y += slideVelocity.dy * randomFactorY
         
-        // Apply deceleration with easing curve for more natural feel
+        // Create slip trail effect during sliding for visual feedback
+        if let gameScene = scene as? GameScene, currentSpeed > 3.0 && slideFrameCount % 3 == 0 {
+            let trailIntensity = min(1.0, currentSpeed / 15.0)
+            gameScene.effectsManager.createSlipTrail(from: previousPosition, to: position, intensity: trailIntensity)
+        }
+        
+        // Apply deceleration with smoother easing curve for more natural feel
         let easingFactor: CGFloat
         if currentSpeed > 15.0 {
             // Fast sliding: gradual deceleration
             easingFactor = slideDeceleration
         } else if currentSpeed > 5.0 {
             // Medium sliding: slightly more deceleration
-            easingFactor = slideDeceleration * 0.98
+            easingFactor = slideDeceleration * 0.99  // Gentler than before
         } else if currentSpeed > 2.0 {
-            // Slow sliding: more rapid deceleration to stop naturally
-            easingFactor = slideDeceleration * 0.95
+            // Slow sliding: more gradual deceleration to stop naturally
+            easingFactor = slideDeceleration * 0.97  // Less aggressive
         } else {
-            // Very slow sliding: aggressive deceleration to prevent endless crawling
-            easingFactor = slideDeceleration * 0.85
+            // Very slow sliding: moderate deceleration to prevent endless crawling
+            easingFactor = slideDeceleration * 0.92  // Less aggressive than 0.85
         }
         
         slideVelocity.dx *= easingFactor
@@ -1296,6 +1335,12 @@ class FrogController {
         print("💦 landInWater called at position: \(position) - hasLifeVest: \(hasLifeVest)")
         print("💦 Current state - inWater: \(inWater), isDrowning: \(isDrowning), onIce: \(onIce)")
         
+        // CRITICAL: Ensure we don't process water landing multiple times
+        if isSinking {
+            print("💦 Already sinking - ignoring duplicate water landing")
+            return
+        }
+        
         // Create immediate splash effect for performance and visual feedback
         effectsManager?.createSplashEffect(at: position)
         print("💦 Splash effect created")
@@ -1327,6 +1372,22 @@ class FrogController {
             // Sink and trigger game over
             startSinkingAction()
             print("💀 DROWNING: Frog is sinking - game over!")
+            
+            // SAFETY NET: If callbacks aren't properly set, try alternative methods
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                guard let self = self else { return }
+                if self.isDrowning && !self.isJumping && !self.isGrounded {
+                    print("💀 SAFETY NET: Drowning timeout - forcing game over")
+                    // Try multiple callback approaches
+                    self.onGameOver?(.splash)
+                    self.onDrowned?()
+                    
+                    // Last resort: direct scene call
+                    if let gameScene = self.scene as? GameScene {
+                        gameScene.gameOver(.splash )
+                    }
+                }
+            }
         }
     }
     
@@ -1443,7 +1504,20 @@ class FrogController {
         frogSprite.run(sinkGroup) { [weak self] in
             print("💀 Sinking animation completed - triggering game over")
             // Trigger game over after sinking animation
-            self?.onGameOver?(.splash)
+            if let self = self {
+                // Try onGameOver first, fallback to onDrowned for backwards compatibility
+                if let gameOverCallback = self.onGameOver {
+                    gameOverCallback(.splash)
+                } else if let drownedCallback = self.onDrowned {
+                    drownedCallback()
+                } else {
+                    print("❌ ERROR: No game over or drowned callback set!")
+                    // Force immediate game over through scene if possible
+                    if let gameScene = self.scene as? GameScene {
+                        gameScene.gameOver(.splash)
+                    }
+                }
+            }
         }
         
         print("💀 Sinking animation started - duration: 2.0 seconds")

@@ -23,6 +23,10 @@ class EffectsManager {
     private var isWindActive = false
     private var isNightOverlayActive = false
     
+    // Slip effect cooldown management - ensures only one slip per landing
+    private var lastSlipEffectTime: TimeInterval = 0
+    private let slipEffectCooldown: TimeInterval = 1.0 // Longer cooldown to prevent multiple slips
+    
     private var cachedSplashAction: SKAction?
     private var cachedSplashDropletAction: SKAction?
     private var cachedLandingRippleActionDelays: [TimeInterval] = []
@@ -615,66 +619,190 @@ class EffectsManager {
         }
     }
     
-    /// Creates a slip effect with sliding particles and visual feedback
-    func createSlipEffect(at position: CGPoint) {
+   
+    /// Creates landing effect specifically for moving lily pads
+    /// This helps indicate to the player that they've landed on a moving platform
+    func createMovingPadLandingEffect(at position: CGPoint, padVelocity: CGVector, intensity: CGFloat = 0.5) {
         guard let scene = scene else { return }
         
-        // Create slip streaks showing sliding motion
-        for i in 0..<6 {
-            let streak = SKShapeNode(rectOf: CGSize(width: CGFloat.random(in: 15...25), height: 2))
-            streak.fillColor = UIColor.systemBlue.withAlphaComponent(0.6)
-            streak.strokeColor = .clear
+        // Create directional landing particles that show the pad's movement
+        let particleCount = 6
+        let velocityMagnitude = sqrt(padVelocity.dx*padVelocity.dx + padVelocity.dy*padVelocity.dy)
+        
+        // Only show special effect if the pad is actually moving
+        guard velocityMagnitude > 0.1 else {
+            print("🚁 Pad velocity too low for moving effect: \(velocityMagnitude)")
+            return
+        }
+        
+        let velocityDirection = atan2(padVelocity.dy, padVelocity.dx)
+        
+        for i in 0..<particleCount {
+            let particle = SKShapeNode(circleOfRadius: 4)
+            particle.fillColor = UIColor.systemGreen.withAlphaComponent(0.7) // Green to distinguish from slip
+            particle.strokeColor = .clear
             
-            // Position streaks randomly around the slip point
-            let offsetX = CGFloat.random(in: -20...20)
-            let offsetY = CGFloat.random(in: -20...20)
-            streak.position = CGPoint(x: position.x + offsetX, y: position.y + offsetY)
-            streak.zPosition = 80
+            // Arrange particles in the direction of movement
+            let angle = velocityDirection + CGFloat(i - particleCount/2) * 0.3
+            let startDistance: CGFloat = 25
             
-            // Random rotation for natural look
-            streak.zRotation = CGFloat.random(in: 0...(CGFloat.pi * 2))
+            particle.position = CGPoint(
+                x: position.x + cos(angle) * startDistance,
+                y: position.y + sin(angle) * startDistance
+            )
+            particle.zPosition = 85
+            scene.addChild(particle)
             
-            scene.addChild(streak)
+            // Animate particles in the direction of pad movement
+            let moveDistance: CGFloat = min(40, velocityMagnitude * 20) // Scale with pad speed
+            let moveX = cos(velocityDirection) * moveDistance
+            let moveY = sin(velocityDirection) * moveDistance
             
-            // Animate streak sliding away and fading
-            let slideDistance = CGFloat.random(in: 40...60)
-            let slideDirection = CGFloat.random(in: 0...(CGFloat.pi * 2))
-            
-            let slideAction = SKAction.sequence([
-                SKAction.wait(forDuration: Double(i) * 0.05), // Small stagger
+            let particleAction = SKAction.sequence([
+                SKAction.wait(forDuration: Double(i) * 0.03),
                 SKAction.group([
-                    SKAction.moveBy(
-                        x: cos(slideDirection) * slideDistance,
-                        y: sin(slideDirection) * slideDistance,
-                        duration: 0.8
-                    ),
-                    SKAction.fadeOut(withDuration: 0.8),
-                    SKAction.scale(to: 0.2, duration: 0.8)
+                    SKAction.moveBy(x: moveX, y: moveY, duration: 0.6),
+                    SKAction.fadeOut(withDuration: 0.6),
+                    SKAction.scale(to: 0.3, duration: 0.6)
                 ]),
                 SKAction.removeFromParent()
             ])
-            
-            streak.run(slideAction)
+            particle.run(particleAction)
         }
         
-        // Central slip burst
-        let slipBurst = SKShapeNode(circleOfRadius: 12)
-        slipBurst.fillColor = UIColor.systemCyan.withAlphaComponent(0.4)
-        slipBurst.strokeColor = UIColor.systemBlue.withAlphaComponent(0.8)
-        slipBurst.lineWidth = 2
-        slipBurst.position = position
-        slipBurst.zPosition = 85
-        scene.addChild(slipBurst)
+        // Create a subtle directional indicator
+        let indicator = SKLabelNode(text: "🌊")
+        indicator.fontSize = 24
+        indicator.position = CGPoint(x: position.x, y: position.y + 40)
+        indicator.zPosition = 90
+        indicator.zRotation = velocityDirection + .pi/2 // Point in movement direction
+        scene.addChild(indicator)
         
-        // Slip burst animation
-        let burstAction = SKAction.sequence([
+        let indicatorAction = SKAction.sequence([
+            SKAction.scale(to: 1.2, duration: 0.1),
+            SKAction.wait(forDuration: 0.4),
             SKAction.group([
-                SKAction.scale(to: 2.5, duration: 0.5),
-                SKAction.fadeOut(withDuration: 0.5)
+                SKAction.fadeOut(withDuration: 0.4),
+                SKAction.moveBy(x: cos(velocityDirection) * 20, y: sin(velocityDirection) * 20, duration: 0.4)
             ]),
             SKAction.removeFromParent()
         ])
-        slipBurst.run(burstAction)
+        indicator.run(indicatorAction)
+        
+        print("🚁 Moving lily pad landing effect created - pad velocity: (\(padVelocity.dx), \(padVelocity.dy))")
+    }
+    
+    
+    /// Creates a smooth platform movement effect for frogs on moving lily pads
+    /// This ensures the frog visually stays attached to the moving platform
+    func createPlatformMovementEffect(at position: CGPoint, velocity: CGVector) {
+        guard let scene = scene else { return }
+        
+        // Create subtle movement ripples around the lily pad edge to show it's moving
+        let rippleCount = 3
+        for i in 0..<rippleCount {
+            let angle = CGFloat(i) * (CGFloat.pi * 2 / CGFloat(rippleCount))
+            let rippleOffset: CGFloat = 45 // Distance from center
+            
+            let ripplePosition = CGPoint(
+                x: position.x + cos(angle) * rippleOffset,
+                y: position.y + sin(angle) * rippleOffset
+            )
+            
+            let ripple = SKShapeNode(circleOfRadius: 3)
+            ripple.fillColor = UIColor.systemBlue.withAlphaComponent(0.3)
+            ripple.strokeColor = .clear
+            ripple.position = ripplePosition
+            ripple.zPosition = 75
+            scene.addChild(ripple)
+            
+            // Animate ripples in the direction of movement
+            let moveDistance: CGFloat = 20
+            let moveX = (velocity.dx / max(1, abs(velocity.dx) + abs(velocity.dy))) * moveDistance
+            let moveY = (velocity.dy / max(1, abs(velocity.dx) + abs(velocity.dy))) * moveDistance
+            
+            let rippleAction = SKAction.sequence([
+                SKAction.wait(forDuration: Double(i) * 0.1),
+                SKAction.group([
+                    SKAction.moveBy(x: moveX, y: moveY, duration: 0.6),
+                    SKAction.fadeOut(withDuration: 0.6),
+                    SKAction.scale(to: 2.0, duration: 0.6)
+                ]),
+                SKAction.removeFromParent()
+            ])
+            ripple.run(rippleAction)
+        }
+        
+        // Create a gentle trail effect behind the moving lily pad
+        if abs(velocity.dx) > 0.1 || abs(velocity.dy) > 0.1 {
+            let trail = SKShapeNode(circleOfRadius: 2)
+            trail.fillColor = UIColor.white.withAlphaComponent(0.4)
+            trail.strokeColor = .clear
+            
+            // Position trail behind the movement direction
+            let trailDistance: CGFloat = 30
+            let normalizedVelocity = CGVector(
+                dx: velocity.dx / max(1, sqrt(velocity.dx*velocity.dx + velocity.dy*velocity.dy)),
+                dy: velocity.dy / max(1, sqrt(velocity.dx*velocity.dx + velocity.dy*velocity.dy))
+            )
+            
+            trail.position = CGPoint(
+                x: position.x - normalizedVelocity.dx * trailDistance,
+                y: position.y - normalizedVelocity.dy * trailDistance
+            )
+            trail.zPosition = 70
+            scene.addChild(trail)
+            
+            let trailAction = SKAction.sequence([
+                SKAction.group([
+                    SKAction.fadeOut(withDuration: 0.4),
+                    SKAction.scale(to: 0.5, duration: 0.4)
+                ]),
+                SKAction.removeFromParent()
+            ])
+            trail.run(trailAction)
+        }
+    }
+    
+    /// Creates a continuous slip trail effect for ongoing sliding
+    func createSlipTrail(from startPosition: CGPoint, to endPosition: CGPoint, intensity: CGFloat = 1.0) {
+        guard let scene = scene else { return }
+        
+        // Only create trail if sufficient distance to avoid performance waste
+        let distance = sqrt(pow(endPosition.x - startPosition.x, 2) + pow(endPosition.y - startPosition.y, 2))
+        guard distance > 8.0 else { return } // Skip micro-movements
+        
+        let direction = atan2(endPosition.y - startPosition.y, endPosition.x - startPosition.x)
+        
+        // Create only 2-3 trail particles for better performance
+        let particleCount = min(3, max(2, Int(distance / 20)))
+        
+        for i in 0..<particleCount {
+            let progress = CGFloat(i) / CGFloat(particleCount - 1)
+            let trailPosition = CGPoint(
+                x: startPosition.x + (endPosition.x - startPosition.x) * progress,
+                y: startPosition.y + (endPosition.y - startPosition.y) * progress
+            )
+            
+            let trail = SKShapeNode(circleOfRadius: 2 + intensity * 1.5)
+            trail.fillColor = UIColor.systemBlue.withAlphaComponent(0.3 * intensity)
+            trail.strokeColor = .clear // Remove stroke for performance
+            trail.position = trailPosition
+            trail.zPosition = 75
+            scene.addChild(trail)
+            
+            // Simple, lightweight animation
+            let delay = Double(i) * 0.08
+            let trailAction = SKAction.sequence([
+                SKAction.wait(forDuration: delay),
+                SKAction.group([
+                    SKAction.fadeOut(withDuration: 0.3),
+                    SKAction.scale(to: 0.5, duration: 0.3)
+                ]),
+                SKAction.removeFromParent()
+            ])
+            trail.run(trailAction)
+        }
     }
     
     func createExplosionEffect(at position: CGPoint) {

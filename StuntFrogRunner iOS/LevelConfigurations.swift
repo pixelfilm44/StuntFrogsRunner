@@ -100,7 +100,7 @@ struct LevelConfigurations {
             globalSpawnRateMultiplier: 0.8, // 20% slower spawn rate for beginners
             maxEnemiesPerScreen: 15,
             specialRules: [.safeZone(radius: 200, duration: 5.0)], // 5-second safe zone at start
-            requiredTravelDistance: 5500 // Shorter distance for first level
+            requiredTravelDistance: 9500 // Shorter distance for first level
         )
         
         // LEVEL 2 - Add Variety (25,000-49,999 points)  
@@ -112,7 +112,7 @@ struct LevelConfigurations {
             ],
             globalSpawnRateMultiplier: 1.0, // Normal spawn rate
             maxEnemiesPerScreen: 16,
-            requiredTravelDistance: 6800
+            requiredTravelDistance: 9800
         )
         
         // LEVEL 3 - Ground Threats (50,000-74,999 points)
@@ -125,7 +125,7 @@ struct LevelConfigurations {
             ],
             globalSpawnRateMultiplier: 1.1, // 10% faster spawn rate
             maxEnemiesPerScreen: 18,
-            requiredTravelDistance: 7500
+            requiredTravelDistance: 10500
         )
         
         // LEVEL 4 - Spike Bushes (75,000-99,999 points)
@@ -139,7 +139,7 @@ struct LevelConfigurations {
             ],
             globalSpawnRateMultiplier: 1.2, // 20% faster spawn rate
             maxEnemiesPerScreen: 20,
-            requiredTravelDistance: 8400
+            requiredTravelDistance: 10600
         )
         
         // LEVEL 5 - Edge Danger (100,000-124,999 points)
@@ -154,7 +154,7 @@ struct LevelConfigurations {
             ],
             globalSpawnRateMultiplier: 1.3, // 30% faster spawn rate
             maxEnemiesPerScreen: 22,
-            requiredTravelDistance: 9700
+            requiredTravelDistance: 12000
         )
         
         // LEVEL 6 - Floating Logs (125,000-149,999 points)
@@ -170,7 +170,7 @@ struct LevelConfigurations {
             ],
             globalSpawnRateMultiplier: 1.4, // 40% faster spawn rate
             maxEnemiesPerScreen: 24,
-            requiredTravelDistance: 10000
+            requiredTravelDistance: 15000
         )
         
         // LEVEL 7 - Chasers Introduced (150,000-174,999 points)
@@ -190,7 +190,7 @@ struct LevelConfigurations {
             specialRules: [
                 .guaranteedEnemyType(.chaser, every: 600) // Guaranteed chaser every 10 seconds
             ],
-            requiredTravelDistance: 10500
+            requiredTravelDistance: 20000
         )
         
         // LEVEL 8 - Maximum Challenge (175,000-199,999 points)
@@ -210,7 +210,7 @@ struct LevelConfigurations {
             specialRules: [
                 .guaranteedEnemyType(.chaser, every: 480) // Guaranteed chaser every 8 seconds
             ],
-            requiredTravelDistance: 12000
+            requiredTravelDistance: 50000
         )
         
         // Return all configured levels

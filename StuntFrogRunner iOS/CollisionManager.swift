@@ -226,6 +226,10 @@ class CollisionManager {
 
                 // Do not snap snake Y to pad here; vertical motion is handled by the jump logic above
             } else if enemy.type == .bee {
+                // DEBUG: Track bee processing
+                if rippleCounter % 60 == 0 { // Log every second
+                    print("🐝 Processing bee at position: \(enemy.position)")
+                }
                 let time = CGFloat(CACurrentMediaTime())
                 if let targetPad = enemy.targetLilyPad {
                     let orbitRadius: CGFloat = 30
@@ -259,6 +263,11 @@ class CollisionManager {
             }
             
             if checkCollision(enemy: enemy, frogPosition: frogPosition, frogIsJumping: frogIsJumping) {
+                // DEBUG: Track collision detections
+                if enemy.type == .bee {
+                    print("🐝 BEE COLLISION DETECTED in updateEnemies!")
+                }
+                
                 // CRITICAL: Edge spike bushes are SOLID BARRIERS - they ALWAYS block movement regardless of invincibility
                 if enemy.type == .edgeSpikeBush {
                     print("🌵 PROCESSING EDGE SPIKE BUSH HIT! Acting as solid barrier.")
@@ -331,6 +340,40 @@ class CollisionManager {
                 // This prevents multiple enemies from hitting in the same frame before invincibility is applied
                 let isInvincible = frogController?.invincible ?? false
                 if !isInvincible && !rocketActive {
+                    
+                    // Handle bees, dragonflies, snakes, and chasers (general enemies)
+                    if enemy.type == .bee || enemy.type == .dragonfly || enemy.type == .snake || enemy.type == .chaser {
+                        print("🐝 PROCESSING BEE/GENERAL ENEMY HIT! Type: \(enemy.type)")
+                        let outcome = onHit(enemy)
+                        switch outcome {
+                        case .destroyed(let cause):
+                            // Only play danger zone sound if enemy was not destroyed by a protective ability
+                            if cause != .honeyJar {
+                                SoundController.shared.playSoundEffect(.dangerZone)
+                            }
+                            if let targetPad = enemy.targetLilyPad {
+                                targetPad.removeEnemyType(enemy.type)
+                            }
+                            enemy.stopAnimation()
+                            enemy.node.removeFromParent()
+                            return true
+                        case .hitOnly:
+                            // Play danger zone sound for enemies that hit and caused damage
+                            SoundController.shared.playSoundEffect(.dangerZone)
+                            // For most enemies, they disappear after hitting the frog
+                            if enemy.type == .bee || enemy.type == .dragonfly || enemy.type == .snake {
+                                if let targetPad = enemy.targetLilyPad {
+                                    targetPad.removeEnemyType(enemy.type)
+                                }
+                                enemy.stopAnimation()
+                                enemy.node.removeFromParent()
+                                return true
+                            }
+                            // Chasers might have different behavior - kept for now
+                            break
+                        }
+                    }
+                    
                     if enemy.type == .log {
                         // Attempt to handle via onHit first (enables Axe to destroy logs)
                         let outcome = onHit(enemy)
@@ -1354,11 +1397,25 @@ class CollisionManager {
         updateLilyPads(lilyPads: &lilyPads, worldOffset: worldOffset, screenHeight: screenHeight, frogPosition: frogPosition)
     }
     
-  func checkCollision(enemy: Enemy, frogPosition: CGPoint, frogIsJumping: Bool) -> Bool {
+    func checkCollision(enemy: Enemy, frogPosition: CGPoint, frogIsJumping: Bool) -> Bool {
         // Only bees and snakes can be jumped over when the frog is jumping
         // Spike bushes, logs, dragonflies, and other enemies still cause collision when jumping
         if frogIsJumping && (enemy.type == .bee || enemy.type == .snake) {
             return false
+        }
+        
+        // DEBUG: Add logging for bee collisions specifically
+        if enemy.type == .bee {
+            let dx = frogPosition.x - enemy.position.x
+            let dy = frogPosition.y - enemy.position.y
+            let distance = sqrt(dx * dx + dy * dy)
+            let collisionRadius = (GameConfig.frogSize / 2) + (GameConfig.beeSize / 2)
+            
+            let isColliding = distance < collisionRadius
+            if isColliding {
+                print("🐝 BEE COLLISION DETECTED! Distance: \(distance), Required: \(collisionRadius), Jumping: \(frogIsJumping)")
+            }
+            return isColliding
         }
         
         // DEBUG: Add logging for spike bush collisions

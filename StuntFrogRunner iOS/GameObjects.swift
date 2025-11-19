@@ -629,10 +629,15 @@ class LilyPad {
         let deltaX = position.x - previousPosition.x
         let deltaY = position.y - previousPosition.y
         
+        // Skip if lily pad didn't move significantly
+        guard abs(deltaX) > 0.01 || abs(deltaY) > 0.01 else { return }
+        
         // Update frog position if it's on this pad
         if hasFrog, let frogController = frog, frogController.isGrounded {
+            let oldFrogPos = frogController.position
             frogController.position.x += deltaX
             frogController.position.y += deltaY
+            print("🚁 Moving frog with lily pad: \(oldFrogPos) → \(frogController.position) (delta: \(deltaX), \(deltaY))")
         }
         
         // CRITICAL FIX: Update tadpole positions when pad moves

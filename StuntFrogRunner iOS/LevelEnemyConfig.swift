@@ -25,7 +25,7 @@ struct LevelEnemyConfig {
          globalSpawnRateMultiplier: CGFloat = 1.0,
          maxEnemiesPerScreen: Int = 20,
          specialRules: [SpecialSpawnRule] = [],
-         requiredTravelDistance: CGFloat = 2000) {  // Default 2000 units travel
+         requiredTravelDistance: CGFloat = 5000) {  // Default 2000 units travel
         self.level = level
         // Each level spans 25,000 points (Level 1: 0-24999, Level 2: 25000-49999, etc.)
         let startScore = (level - 1) * 25000
