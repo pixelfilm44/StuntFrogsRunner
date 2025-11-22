@@ -1,0 +1,174 @@
+import UIKit
+
+struct UpgradeOption {
+    let id: String
+    let name: String
+    let desc: String
+    let icon: String
+}
+
+class UpgradeViewController: UIViewController {
+    
+    weak var coordinator: GameCoordinator?
+    
+    // Available Upgrades Pool - Updated with Axe, Swatter, Cross
+    private let allOptions: [UpgradeOption] = [
+        UpgradeOption(id: "HONEY", name: "Honey Jar", desc: "Block 1 Bee Attack", icon: "🍯"),
+        UpgradeOption(id: "ROCKET", name: "Rocket", desc: "Fly for 7s", icon: "🚀"),
+        UpgradeOption(id: "BOOTS", name: "Rain Boots", desc: "No Sliding for 5s", icon: "👢"),
+        UpgradeOption(id: "HEART", name: "Heart Container", desc: "+1 Max HP & Heal", icon: "❤️"),
+        UpgradeOption(id: "VEST", name: "Life Vest", desc: "Float on Water (1 Use)", icon: "🦺"),
+        UpgradeOption(id: "AXE", name: "Woodcutter's Axe", desc: "Chops down 1 Log", icon: "🪓"),
+        UpgradeOption(id: "SWATTER", name: "Fly Swatter", desc: "Swats 1 Dragonfly", icon: "🏸"),
+        UpgradeOption(id: "CROSS", name: "Holy Cross", desc: "Repels 1 Ghost", icon: "✝️")
+    ]
+    
+    // MARK: - UI Elements
+    private lazy var containerView: UIView = {
+        let view = UIView()
+        view.backgroundColor = UIColor.black.withAlphaComponent(0.85)
+        view.layer.cornerRadius = 20
+        view.layer.borderWidth = 2
+        view.layer.borderColor = UIColor.white.cgColor
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+    
+    private lazy var titleLabel: UILabel = {
+        let label = UILabel()
+        label.text = "LEVEL UP!"
+        label.font = UIFont.systemFont(ofSize: 36, weight: .heavy)
+        label.textColor = .yellow
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var subtitleLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Choose a Bonus"
+        label.font = UIFont.systemFont(ofSize: 18, weight: .medium)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var stackView: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.distribution = .fillEqually
+        stack.spacing = 20
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
+    
+    // MARK: - Lifecycle
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+        generateOptions()
+    }
+    
+    private func setupUI() {
+        view.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        
+        view.addSubview(containerView)
+        containerView.addSubview(titleLabel)
+        containerView.addSubview(subtitleLabel)
+        containerView.addSubview(stackView)
+        
+        NSLayoutConstraint.activate([
+            containerView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            containerView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            containerView.widthAnchor.constraint(equalToConstant: 320),
+            containerView.heightAnchor.constraint(equalToConstant: 300),
+            
+            titleLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 25),
+            titleLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 5),
+            subtitleLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            
+            stackView.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 25),
+            stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
+            stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
+            stackView.heightAnchor.constraint(equalToConstant: 160)
+        ])
+    }
+    
+    private func generateOptions() {
+        // Pick 2 distinct random options
+        let shuffled = allOptions.shuffled()
+        let option1 = shuffled[0]
+        let option2 = shuffled[1]
+        
+        let card1 = createCard(for: option1)
+        let card2 = createCard(for: option2)
+        
+        stackView.addArrangedSubview(card1)
+        stackView.addArrangedSubview(card2)
+    }
+    
+    private func createCard(for option: UpgradeOption) -> UIView {
+        let button = UIButton(type: .custom)
+        button.backgroundColor = UIColor(red: 52/255, green: 73/255, blue: 94/255, alpha: 1) // #34495e
+        button.layer.cornerRadius = 15
+        button.layer.borderWidth = 2
+        button.layer.borderColor = UIColor.yellow.cgColor
+        
+        let iconLabel = UILabel()
+        iconLabel.text = option.icon
+        iconLabel.font = UIFont.systemFont(ofSize: 40)
+        iconLabel.textAlignment = .center
+        iconLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        let nameLabel = UILabel()
+        nameLabel.text = option.name
+        nameLabel.font = UIFont.systemFont(ofSize: 16, weight: .bold)
+        nameLabel.textColor = .yellow
+        nameLabel.textAlignment = .center
+        nameLabel.numberOfLines = 2
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        let descLabel = UILabel()
+        descLabel.text = option.desc
+        descLabel.font = UIFont.systemFont(ofSize: 12)
+        descLabel.textColor = .white
+        descLabel.textAlignment = .center
+        descLabel.numberOfLines = 3
+        descLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        button.addSubview(iconLabel)
+        button.addSubview(nameLabel)
+        button.addSubview(descLabel)
+        
+        NSLayoutConstraint.activate([
+            iconLabel.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            iconLabel.topAnchor.constraint(equalTo: button.topAnchor, constant: 20),
+            
+            nameLabel.topAnchor.constraint(equalTo: iconLabel.bottomAnchor, constant: 10),
+            nameLabel.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 5),
+            nameLabel.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -5),
+            
+            descLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 5),
+            descLabel.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 5),
+            descLabel.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -5)
+        ])
+        
+        button.addAction(UIAction(handler: { [weak self] _ in
+            self?.selectOption(option.id)
+        }), for: .touchUpInside)
+        
+        return button
+    }
+    
+    private func selectOption(_ id: String) {
+        // Haptic
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        
+        // Notify coordinator immediately
+        coordinator?.didSelectUpgrade(id)
+    }
+}
