@@ -8,7 +8,7 @@ struct Configuration {
         static let gravityZ: CGFloat = 0.6
         static let frictionGround: CGFloat = 0.8
         static let frictionAir: CGFloat = 0.99
-        static let baseJumpZ: CGFloat = 5.0
+        static let baseJumpZ: CGFloat = 4.0
         static let maxDragDistance: CGFloat = 250.0
         
         static func dragPower(level: Int) -> CGFloat {
@@ -34,6 +34,8 @@ struct Configuration {
         static let rocketDuration: TimeInterval = 7.0
         static let rocketLandingDuration: TimeInterval = 3.0
         static let bootsDuration: TimeInterval = 5.0
+        // NEW: SuperJump Duration
+        static let superJumpDuration: TimeInterval = 5.0
     }
     
     struct Shop {
@@ -48,7 +50,6 @@ struct Configuration {
             return currentLevel * 250
         }
         
-        // NEW: Log Jumper Cost
         static let logJumperCost = 300
     }
     

@@ -45,9 +45,11 @@ class Frog: GameEntity {
         var axe: Int = 0
         var swatter: Int = 0
         var cross: Int = 0
+        var superJumpTimer: Int = 0
     }
     
     var buffs = Buffs()
+    
     var rocketState: RocketState = .none
     var rocketTimer: Int = 0
     var landingTimer: Int = 0
@@ -61,8 +63,10 @@ class Frog: GameEntity {
     var isFloating: Bool = false
     var isWearingBoots: Bool = false
     
-    // NEW: Log Jumper Ability Flag
+    // FIX: Re-added missing property
     var canJumpLogs: Bool = false
+    
+    var isSuperJumping: Bool { return buffs.superJumpTimer > 0 }
     
     private var isBeingDragged: Bool = false
     
@@ -70,6 +74,7 @@ class Frog: GameEntity {
     let bodyNode = SKShapeNode(circleOfRadius: 20)
     private let shadowNode = SKShapeNode(ellipseOf: CGSize(width: 40, height: 20))
     private let vestNode = SKShapeNode(circleOfRadius: 22)
+    private let superAura = SKShapeNode(circleOfRadius: 28)
     
     init() {
         super.init(texture: nil, color: .clear, size: CGSize(width: 40, height: 40))
@@ -85,9 +90,20 @@ class Frog: GameEntity {
         shadowNode.zPosition = -1
         addChild(shadowNode)
         
+        superAura.fillColor = .clear
+        superAura.strokeColor = .cyan
+        superAura.lineWidth = 4
+        superAura.zPosition = 0
+        superAura.isHidden = true
+        let scaleUp = SKAction.scale(to: 1.2, duration: 0.3)
+        let scaleDown = SKAction.scale(to: 1.0, duration: 0.3)
+        superAura.run(SKAction.repeatForever(SKAction.sequence([scaleUp, scaleDown])))
+        addChild(superAura)
+        
         bodyNode.fillColor = .green
         bodyNode.strokeColor = .white
         bodyNode.lineWidth = 3
+        bodyNode.zPosition = 1
         addChild(bodyNode)
         
         vestNode.strokeColor = .orange
@@ -104,9 +120,12 @@ class Frog: GameEntity {
     
     func update(dt: TimeInterval, weather: WeatherType) {
         if buffs.rocketTimer > 0 { buffs.rocketTimer -= 1 }
+        if buffs.superJumpTimer > 0 { buffs.superJumpTimer -= 1 }
         
         if invincibilityTimer > 0 {
             invincibilityTimer -= 1
+            isInvincible = true
+        } else if isSuperJumping {
             isInvincible = true
         } else {
             isInvincible = false
@@ -136,15 +155,13 @@ class Frog: GameEntity {
             } else {
                 var currentFriction = Configuration.Physics.frictionGround
                 if let pad = onPad {
-                    // Move with pad
                     if pad.type == .moving || pad.type == .waterLily || pad.type == .log {
                         position.x += pad.moveSpeed * pad.moveDirection
                     }
-                    
                     let isRain = (weather == .rain)
                     let isIce = (pad.type == .ice)
                     if (isRain || isIce) && !isWearingBoots {
-                        currentFriction = 0.80
+                        currentFriction = 0.94
                     }
                 }
                 velocity.dx *= currentFriction
@@ -180,8 +197,9 @@ class Frog: GameEntity {
             visualVector.x *= ratio
             visualVector.y *= ratio
         }
-        // Note: Frog body stays stationary (0,0 relative), logic handled in GameScene drawing
-        // but we update rotation here
+        bodyNode.position = .zero
+        shadowNode.position = .zero
+        
         let angle = atan2(offset.y, offset.x)
         bodyNode.zRotation = angle - CGFloat.pi / 2
     }
@@ -238,17 +256,34 @@ class Frog: GameEntity {
         shadowNode.setScale(shadowScale)
         shadowNode.alpha = 0.3 * shadowScale
         
-        if isInvincible {
-            let flash = (invincibilityTimer / 10) % 2 == 0
-            bodyNode.alpha = flash ? 0.5 : 1.0
-        } else {
+        if isSuperJumping {
+            superAura.isHidden = false
+            superAura.position.y = bodyNode.position.y
+            bodyNode.fillColor = .cyan
             bodyNode.alpha = 1.0
+        } else {
+            superAura.isHidden = true
+            bodyNode.fillColor = .green
+            
+            if invincibilityTimer > 0 {
+                let flash = (invincibilityTimer / 10) % 2 == 0
+                bodyNode.alpha = flash ? 0.5 : 1.0
+            } else {
+                bodyNode.alpha = 1.0
+            }
         }
     }
     
     func jump(vector: CGVector, intensity: CGFloat) {
         resetPullOffset()
-        self.velocity = vector
+        
+        var finalVector = vector
+        if buffs.superJumpTimer > 0 {
+            finalVector.dx *= 2.0
+            finalVector.dy *= 2.0
+        }
+        
+        self.velocity = finalVector
         self.zVelocity = Configuration.Physics.baseJumpZ * (0.5 + (intensity * 0.5))
         self.onPad = nil
         self.isFloating = false
@@ -271,7 +306,6 @@ class Frog: GameEntity {
             velocity.dy *= 0.5
         } else {
             velocity = .zero
-            // Don't snap to log center as they are wide rectangles
             if pad.type != .log {
                 let dx = pad.position.x - position.x
                 let dy = pad.position.y - position.y
@@ -296,16 +330,13 @@ class Pad: GameEntity {
     var type: PadType = .normal
     var moveDirection: CGFloat = 1.0
     var moveSpeed: CGFloat = 2.0
-    
     private var shapeNode: SKShapeNode?
     private var shrinkTime: Double = 0
     private var shrinkSpeed: Double = 2.0
-    
     var scaledRadius: CGFloat {
         if type == .log { return 60.0 }
         return 45.0 * xScale
     }
-    
     init(type: PadType, position: CGPoint) {
         let size = (type == .log) ? CGSize(width: 120, height: 40) : CGSize(width: 90, height: 90)
         super.init(texture: nil, color: .clear, size: size)
@@ -313,7 +344,6 @@ class Pad: GameEntity {
         self.position = position
         self.zPosition = Layer.pad
         self.moveDirection = Bool.random() ? 1.0 : -1.0
-        
         if type == .shrinking {
             self.shrinkSpeed = Double.random(in: 1.0...3.0)
             self.shrinkTime = Double.random(in: 0...10.0)
@@ -325,9 +355,7 @@ class Pad: GameEntity {
         setupVisuals()
         if type != .log { self.zRotation = CGFloat.random(in: 0...CGFloat.pi*2) }
     }
-    
     required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not be implemented") }
-    
     func setupVisuals() {
         if type == .log {
             let rect = SKShapeNode(rectOf: CGSize(width: 120, height: 40), cornerRadius: 10)
@@ -367,7 +395,7 @@ class Pad: GameEntity {
             }
             padShape.lineWidth = 4
             addChild(padShape)
-            
+            self.shapeNode = padShape
             if type == .grave {
                 let tombstone = SKShapeNode(rectOf: CGSize(width: 20, height: 30), cornerRadius: 5)
                 tombstone.fillColor = .gray
@@ -395,7 +423,6 @@ class Pad: GameEntity {
             }
         }
     }
-    
     func updateColor(weather: WeatherType) {
         guard type == .normal || type == .moving || type == .waterLily else { return }
         let newColor: UIColor
@@ -407,7 +434,6 @@ class Pad: GameEntity {
         }
         shapeNode?.fillColor = newColor
     }
-    
     func update(dt: TimeInterval) {
         if type == .moving || type == .log || type == .waterLily {
             position.x += moveSpeed * moveDirection

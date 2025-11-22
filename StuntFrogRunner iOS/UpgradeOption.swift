@@ -11,7 +11,7 @@ class UpgradeViewController: UIViewController {
     
     weak var coordinator: GameCoordinator?
     
-    // Available Upgrades Pool - Updated with Axe, Swatter, Cross
+    // Available Upgrades Pool
     private let allOptions: [UpgradeOption] = [
         UpgradeOption(id: "HONEY", name: "Honey Jar", desc: "Block 1 Bee Attack", icon: "🍯"),
         UpgradeOption(id: "ROCKET", name: "Rocket", desc: "Fly for 7s", icon: "🚀"),
@@ -20,7 +20,9 @@ class UpgradeViewController: UIViewController {
         UpgradeOption(id: "VEST", name: "Life Vest", desc: "Float on Water (1 Use)", icon: "🦺"),
         UpgradeOption(id: "AXE", name: "Woodcutter's Axe", desc: "Chops down 1 Log", icon: "🪓"),
         UpgradeOption(id: "SWATTER", name: "Fly Swatter", desc: "Swats 1 Dragonfly", icon: "🏸"),
-        UpgradeOption(id: "CROSS", name: "Holy Cross", desc: "Repels 1 Ghost", icon: "✝️")
+        UpgradeOption(id: "CROSS", name: "Holy Cross", desc: "Repels 1 Ghost", icon: "✝️"),
+        // NEW: SuperJump
+        UpgradeOption(id: "SUPERJUMP", name: "Super Jump", desc: "Double Jump Range + Invincible", icon: "⚡️")
     ]
     
     // MARK: - UI Elements
@@ -164,11 +166,9 @@ class UpgradeViewController: UIViewController {
     }
     
     private func selectOption(_ id: String) {
-        // Haptic
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
         
-        // Notify coordinator immediately
         coordinator?.didSelectUpgrade(id)
     }
 }
