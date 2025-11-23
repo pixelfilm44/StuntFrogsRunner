@@ -17,6 +17,12 @@ enum RocketState {
     case landing
 }
 
+enum FrogAnimationState {
+    case sitting
+    case leaping     // Beginning of jump / end of jump
+    case jumping     // Midway through jump (peak)
+}
+
 // MARK: - Base Entity
 class GameEntity: SKSpriteNode {
     var velocity: CGVector = .zero
@@ -70,11 +76,34 @@ class Frog: GameEntity {
     
     private var isBeingDragged: Bool = false
     
+    // Animation state
+    private(set) var animationState: FrogAnimationState = .sitting
+    private var jumpStartZVelocity: CGFloat = 0  // Track initial jump velocity for phase transitions
+    private var lastFacingAngle: CGFloat = 0     // Preserve facing direction
+    
     // Visual nodes
-    let bodyNode = SKShapeNode(circleOfRadius: 20)
+    let bodyNode = SKNode()  // Container for the sprite
+    private let frogSprite = SKSpriteNode()
     private let shadowNode = SKShapeNode(ellipseOf: CGSize(width: 40, height: 20))
     private let vestNode = SKShapeNode(circleOfRadius: 22)
     private let superAura = SKShapeNode(circleOfRadius: 28)
+    private let rocketSprite = SKSpriteNode(imageNamed: "rocketRide")
+    
+    // Preloaded textures for performance
+    private static let sitTexture = SKTexture(imageNamed: "frogSit")
+    private static let leapTexture = SKTexture(imageNamed: "frogLeap")
+    private static let jumpTexture = SKTexture(imageNamed: "frogJump")
+    
+    // Target height for frog sprite (aspect ratio preserved automatically)
+    private static let frogTargetHeight: CGFloat = 40
+    
+    /// Sets the frog sprite texture while preserving the image's aspect ratio
+    private func setFrogTexture(_ texture: SKTexture) {
+        frogSprite.texture = texture
+        let textureSize = texture.size()
+        let aspectRatio = textureSize.width / textureSize.height
+        frogSprite.size = CGSize(width: Frog.frogTargetHeight * aspectRatio, height: Frog.frogTargetHeight)
+    }
     
     init() {
         super.init(texture: nil, color: .clear, size: CGSize(width: 40, height: 40))
@@ -100,22 +129,31 @@ class Frog: GameEntity {
         superAura.run(SKAction.repeatForever(SKAction.sequence([scaleUp, scaleDown])))
         addChild(superAura)
         
-        bodyNode.fillColor = .green
-        bodyNode.strokeColor = .white
-        bodyNode.lineWidth = 3
         bodyNode.zPosition = 1
         addChild(bodyNode)
+        
+        // Setup rocket sprite (hidden by default, shown during rocket ride)
+        // Use aspect-fit sizing to preserve image ratio
+        let rocketTexture = rocketSprite.texture ?? SKTexture(imageNamed: "rocketRide")
+        let rocketTextureSize = rocketTexture.size()
+        let rocketTargetHeight: CGFloat = 60
+        let rocketAspectRatio = rocketTextureSize.width / rocketTextureSize.height
+        rocketSprite.size = CGSize(width: rocketTargetHeight * rocketAspectRatio, height: rocketTargetHeight)
+        rocketSprite.position = CGPoint(x: 0, y: -30)  // Position below the frog
+        rocketSprite.zPosition = -1  // Behind the frog sprite
+        rocketSprite.isHidden = true
+        bodyNode.addChild(rocketSprite)
+        
+        // Setup frog sprite with initial sitting texture
+        // Use aspect-fit sizing to preserve image ratio
+        setFrogTexture(Frog.sitTexture)
+        bodyNode.addChild(frogSprite)
         
         vestNode.strokeColor = .orange
         vestNode.lineWidth = 4
         vestNode.fillColor = .clear
         vestNode.isHidden = true
         bodyNode.addChild(vestNode)
-        
-        let label = SKLabelNode(text: "🐸")
-        label.verticalAlignmentMode = .center
-        label.fontSize = 30
-        bodyNode.addChild(label)
     }
     
     func update(dt: TimeInterval, weather: WeatherType) {
@@ -200,15 +238,17 @@ class Frog: GameEntity {
         bodyNode.position = .zero
         shadowNode.position = .zero
         
-        let angle = atan2(offset.y, offset.x)
-        bodyNode.zRotation = angle - CGFloat.pi / 2
+        // Point in the direction the frog will jump (opposite of drag)
+        let angle = atan2(-offset.y, -offset.x) - CGFloat.pi / 2
+        bodyNode.zRotation = angle
+        lastFacingAngle = angle  // Store for when drag ends
     }
     
     func resetPullOffset() {
         isBeingDragged = false
         bodyNode.position = CGPoint(x: 0, y: zHeight)
         shadowNode.position = .zero
-        bodyNode.zRotation = 0
+        bodyNode.zRotation = lastFacingAngle  // Preserve last facing direction
     }
     
     private func updateRocketPhysics() {
@@ -242,12 +282,18 @@ class Frog: GameEntity {
     private func updateVisuals() {
         if !isBeingDragged {
             bodyNode.position.y = zHeight
-            if abs(velocity.dx) > 0.5 {
-                let angle = -velocity.dx * 0.05
-                bodyNode.zRotation = angle
+            
+            // Update facing direction based on movement
+            let speed = sqrt(velocity.dx * velocity.dx + velocity.dy * velocity.dy)
+            if speed > 0.5 {
+                // Calculate angle from velocity vector and store it
+                lastFacingAngle = atan2(velocity.dy, velocity.dx) - CGFloat.pi / 2
+                bodyNode.zRotation = lastFacingAngle
             } else {
-                bodyNode.zRotation = 0
+                // Keep facing the last direction when stationary
+                bodyNode.zRotation = lastFacingAngle
             }
+            
             let scale = 1.0 + (zHeight / 100.0)
             bodyNode.setScale(scale)
         }
@@ -256,20 +302,68 @@ class Frog: GameEntity {
         shadowNode.setScale(shadowScale)
         shadowNode.alpha = 0.3 * shadowScale
         
+        // Show/hide rocket during rocket ride
+        rocketSprite.isHidden = (rocketState == .none)
+        
+        // Update animation state based on jump phase
+        updateAnimationState()
+        
         if isSuperJumping {
             superAura.isHidden = false
             superAura.position.y = bodyNode.position.y
-            bodyNode.fillColor = .cyan
-            bodyNode.alpha = 1.0
+            frogSprite.colorBlendFactor = 0.5
+            frogSprite.color = .cyan
+            frogSprite.alpha = 1.0
         } else {
             superAura.isHidden = true
-            bodyNode.fillColor = .green
+            frogSprite.colorBlendFactor = 0.0
             
             if invincibilityTimer > 0 {
                 let flash = (invincibilityTimer / 10) % 2 == 0
-                bodyNode.alpha = flash ? 0.5 : 1.0
+                frogSprite.alpha = flash ? 0.5 : 1.0
             } else {
-                bodyNode.alpha = 1.0
+                frogSprite.alpha = 1.0
+            }
+        }
+    }
+    
+    private func updateAnimationState() {
+        let newState: FrogAnimationState
+        
+        // Calculate horizontal speed
+        let horizontalSpeed = sqrt(velocity.dx * velocity.dx + velocity.dy * velocity.dy)
+        
+        // Determine animation state based on jump phase and movement
+        if zHeight <= 0.1 && abs(zVelocity) < 0.1 {
+            // On ground / lilypad - use sitting if idle, leaping if sliding
+            if horizontalSpeed < 0.5 {
+                newState = .sitting
+            } else {
+                // Sliding on ice or moving - still show sitting pose when grounded
+                newState = .sitting
+            }
+        } else if zVelocity > jumpStartZVelocity * 0.3 {
+            // Rising phase - just started jumping (first ~30% of upward velocity)
+            newState = .leaping
+        } else if zVelocity > -jumpStartZVelocity * 0.3 {
+            // Peak phase - midway through jump
+            newState = .jumping
+        } else {
+            // Falling phase - about to land
+            newState = .leaping
+        }
+        
+        // Only update texture if state changed (performance optimization)
+        if newState != animationState {
+            animationState = newState
+            
+            switch animationState {
+            case .sitting:
+                setFrogTexture(Frog.sitTexture)
+            case .leaping:
+                setFrogTexture(Frog.leapTexture)
+            case .jumping:
+                setFrogTexture(Frog.jumpTexture)
             }
         }
     }
@@ -285,8 +379,14 @@ class Frog: GameEntity {
         
         self.velocity = finalVector
         self.zVelocity = Configuration.Physics.baseJumpZ * (0.5 + (intensity * 0.5))
+        self.jumpStartZVelocity = self.zVelocity  // Track for animation phase calculation
         self.onPad = nil
         self.isFloating = false
+        
+        // Immediately transition to leaping state
+        animationState = .leaping
+        setFrogTexture(Frog.leapTexture)
+        
         SoundManager.shared.play("jump")
         HapticsManager.shared.playImpact(.light)
     }
@@ -294,9 +394,14 @@ class Frog: GameEntity {
     func land(on pad: Pad, weather: WeatherType) {
         zVelocity = 0
         zHeight = 0
+        jumpStartZVelocity = 0  // Reset for next jump
         self.onPad = pad
         self.isFloating = false
         resetPullOffset()
+        
+        // Transition to sitting state
+        animationState = .sitting
+        setFrogTexture(Frog.sitTexture)
         
         let isRain = (weather == .rain)
         let isIce = (pad.type == .ice)
@@ -318,8 +423,14 @@ class Frog: GameEntity {
     
     func bounce() {
         zVelocity = 15.0
+        jumpStartZVelocity = zVelocity  // Track for animation phases
         velocity.dx *= -0.5
         velocity.dy *= -0.5
+        
+        // Transition to leaping state since we're bouncing up
+        animationState = .leaping
+        setFrogTexture(Frog.leapTexture)
+        
         HapticsManager.shared.playImpact(.heavy)
     }
 }
@@ -330,9 +441,24 @@ class Pad: GameEntity {
     var type: PadType = .normal
     var moveDirection: CGFloat = 1.0
     var moveSpeed: CGFloat = 2.0
-    private var shapeNode: SKShapeNode?
+    private var padSprite: SKSpriteNode?
     private var shrinkTime: Double = 0
     private var shrinkSpeed: Double = 2.0
+    private var currentWeather: WeatherType = .sunny
+    
+    // Preloaded textures for performance
+    private static let dayTexture = SKTexture(imageNamed: "lilypadDay")
+    private static let nightTexture = SKTexture(imageNamed: "lilypadNight")
+    private static let rainTexture = SKTexture(imageNamed: "lilypadRain")
+    private static let iceTexture = SKTexture(imageNamed: "lilypadIce")
+    private static let snowTexture = SKTexture(imageNamed: "lilypadSnow")
+    private static let graveTexture = SKTexture(imageNamed: "lilypadGrave")
+    private static let shrinkTexture = SKTexture(imageNamed: "lilypadShrink")
+    private static let waterLilyTexture = SKTexture(imageNamed: "lilypadWater")
+    private static let waterLilyNightTexture = SKTexture(imageNamed: "lilypadWaterNight")
+    private static let waterLilyRainTexture = SKTexture(imageNamed: "lilypadWaterRain")
+    private static let waterLilySnowTexture = SKTexture(imageNamed: "lilypadWaterSnow")
+    
     var scaledRadius: CGFloat {
         if type == .log { return 60.0 }
         return 45.0 * xScale
@@ -358,81 +484,64 @@ class Pad: GameEntity {
     required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not be implemented") }
     func setupVisuals() {
         if type == .log {
-            let rect = SKShapeNode(rectOf: CGSize(width: 120, height: 40), cornerRadius: 10)
-            rect.fillColor = UIColor.brown
-            rect.strokeColor = UIColor(red: 0.4, green: 0.2, blue: 0.1, alpha: 1.0)
-            rect.lineWidth = 2
-            addChild(rect)
-            let grain = SKShapeNode(rectOf: CGSize(width: 100, height: 2))
-            grain.fillColor = .black.withAlphaComponent(0.2)
-            grain.strokeColor = .clear
-            addChild(grain)
+            let texture = SKTexture(imageNamed: "log")
+            let sprite = SKSpriteNode(texture: texture, size: CGSize(width: 120, height: 40))
+            addChild(sprite)
+        } else if type == .ice {
+            // Use ice lilypad texture
+            let texture = Pad.iceTexture
+            let sprite = SKSpriteNode(texture: texture)
+            sprite.size = CGSize(width: 90, height: 90)
+            addChild(sprite)
         } else {
-            let radius: CGFloat = 45
-            let path = UIBezierPath()
-            let startAngle: CGFloat = 0.2
-            let endAngle: CGFloat = CGFloat.pi * 2 - 0.2
-            path.addArc(withCenter: .zero, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: true)
-            path.addLine(to: .zero)
-            path.close()
-            let padShape = SKShapeNode(path: path.cgPath)
+            // Use PNG textures for all other pad types
+            let texture: SKTexture
             switch type {
-            case .ice:
-                padShape.fillColor = UIColor(red: 0.6, green: 0.8, blue: 1.0, alpha: 1.0)
-                padShape.strokeColor = .white
             case .grave:
-                padShape.fillColor = UIColor(red: 0.2, green: 0.4, blue: 0.2, alpha: 1.0)
-                padShape.strokeColor = .black
+                texture = Pad.graveTexture
             case .shrinking:
-                padShape.fillColor = UIColor(red: 155/255, green: 89/255, blue: 182/255, alpha: 1.0)
-                padShape.strokeColor = UIColor(red: 142/255, green: 68/255, blue: 173/255, alpha: 1.0)
+                texture = Pad.shrinkTexture
             case .waterLily:
-                padShape.fillColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
-                padShape.strokeColor = UIColor(red: 236/255, green: 64/255, blue: 122/255, alpha: 1)
+                texture = Pad.waterLilyTexture
             default:
-                padShape.fillColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
-                padShape.strokeColor = UIColor(red: 39/255, green: 174/255, blue: 96/255, alpha: 1)
+                texture = Pad.dayTexture
             }
-            padShape.lineWidth = 4
-            addChild(padShape)
-            self.shapeNode = padShape
-            if type == .grave {
-                let tombstone = SKShapeNode(rectOf: CGSize(width: 20, height: 30), cornerRadius: 5)
-                tombstone.fillColor = .gray
-                tombstone.strokeColor = .darkGray
-                tombstone.position = CGPoint(x: 0, y: 5)
-                tombstone.zRotation = -self.zRotation
-                addChild(tombstone)
-                let cross = SKLabelNode(text: "✝")
-                cross.fontSize = 16
-                cross.fontColor = .black
-                cross.position = CGPoint(x: 0, y: -5)
-                tombstone.addChild(cross)
-            }
-            if type == .waterLily {
-                let flower = SKShapeNode(circleOfRadius: 15)
-                flower.fillColor = UIColor(red: 248/255, green: 187/255, blue: 208/255, alpha: 1.0)
-                flower.strokeColor = .white
-                flower.lineWidth = 2
-                flower.zRotation = -self.zRotation
-                addChild(flower)
-                let center = SKShapeNode(circleOfRadius: 5)
-                center.fillColor = .yellow
-                center.strokeColor = .clear
-                flower.addChild(center)
-            }
+            
+            let sprite = SKSpriteNode(texture: texture)
+            sprite.size = CGSize(width: 90, height: 90)
+            addChild(sprite)
+            self.padSprite = sprite
         }
     }
     func updateColor(weather: WeatherType) {
         guard type == .normal || type == .moving || type == .waterLily else { return }
-        let newColor: UIColor
-        switch weather {
-        case .sunny: newColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
-        case .rain: newColor = UIColor(red: 34/255, green: 153/255, blue: 84/255, alpha: 1)
-        case .night: newColor = UIColor(red: 22/255, green: 160/255, blue: 133/255, alpha: 1)
-        case .winter: newColor = UIColor(red: 163/255, green: 228/255, blue: 215/255, alpha: 1)
+        currentWeather = weather
+        
+        let texture: SKTexture
+        if type == .waterLily {
+            switch weather {
+            case .sunny:
+                texture = Pad.waterLilyTexture
+            case .rain:
+                texture = Pad.waterLilyRainTexture
+            case .night:
+                texture = Pad.waterLilyNightTexture
+            case .winter:
+                texture = Pad.waterLilySnowTexture
+            }
+        } else {
+            switch weather {
+            case .sunny:
+                texture = Pad.dayTexture
+            case .rain:
+                texture = Pad.rainTexture
+            case .night:
+                texture = Pad.nightTexture
+            case .winter:
+                texture = Pad.snowTexture
+            }
         }
-        shapeNode?.fillColor = newColor
+        padSprite?.texture = texture
     }
     func update(dt: TimeInterval) {
         if type == .moving || type == .log || type == .waterLily {
@@ -455,6 +564,11 @@ class Enemy: GameEntity {
     var type: String = "BEE"
     private var originalPosition: CGPoint
     private var angle: CGFloat = 0.0
+    
+    // Preloaded textures for performance
+    private static let beeTexture = SKTexture(imageNamed: "bee")
+    private static let dragonflyTexture = SKTexture(imageNamed: "dragonfly")
+    
     init(position: CGPoint, type: String = "BEE") {
         self.originalPosition = position
         super.init(texture: nil, color: .clear, size: CGSize(width: 30, height: 30))
@@ -471,25 +585,27 @@ class Enemy: GameEntity {
         shadow.strokeColor = .clear
         shadow.position.y = -20
         addChild(shadow)
-        let body = SKShapeNode(circleOfRadius: 15)
+        
         switch type {
         case "DRAGONFLY":
-            body.fillColor = UIColor(red: 52/255, green: 152/255, blue: 219/255, alpha: 1)
+            let sprite = SKSpriteNode(texture: Enemy.dragonflyTexture)
+            sprite.size = CGSize(width: 30, height: 30)
+            addChild(sprite)
         case "GHOST":
+            let body = SKShapeNode(circleOfRadius: 15)
             body.fillColor = UIColor.white.withAlphaComponent(0.7)
-        default:
-            body.fillColor = UIColor(red: 241/255, green: 196/255, blue: 15/255, alpha: 1)
+            body.strokeColor = .black
+            body.lineWidth = 2
+            addChild(body)
+            let label = SKLabelNode(text: "👻")
+            label.verticalAlignmentMode = .center
+            label.fontSize = 20
+            body.addChild(label)
+        default: // BEE
+            let sprite = SKSpriteNode(texture: Enemy.beeTexture)
+            sprite.size = CGSize(width: 30, height: 30)
+            addChild(sprite)
         }
-        body.strokeColor = .black
-        body.lineWidth = 2
-        addChild(body)
-        var icon = "🐝"
-        if type == "DRAGONFLY" { icon = "🦟" }
-        else if type == "GHOST" { icon = "👻" }
-        let label = SKLabelNode(text: icon)
-        label.verticalAlignmentMode = .center
-        label.fontSize = 20
-        body.addChild(label)
     }
     func update(dt: TimeInterval, target: CGPoint? = nil) {
         if type == "DRAGONFLY" {
@@ -523,10 +639,9 @@ class Coin: GameEntity {
         self.position = position
         self.zHeight = 10
         self.zPosition = Layer.item
-        let label = SKLabelNode(text: "🪙")
-        label.verticalAlignmentMode = .center
-        label.fontSize = 24
-        addChild(label)
+        let starSprite = SKSpriteNode(imageNamed: "star")
+        starSprite.size = CGSize(width: 24, height: 24)
+        addChild(starSprite)
         let moveUp = SKAction.moveBy(x: 0, y: 5, duration: 0.5)
         moveUp.timingMode = .easeInEaseOut
         let moveDown = moveUp.reversed()

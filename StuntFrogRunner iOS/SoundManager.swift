@@ -7,13 +7,24 @@ import SpriteKit
 class SoundManager {
     static let shared = SoundManager()
     private var players: [String: AVAudioPlayer] = [:]
+    private var musicPlayer: AVAudioPlayer?
+    private var currentMusic: String?
+    
+    // Music track names
+    enum Music: String, CaseIterable {
+        case menu = "menu_music"
+        case day = "day_music"
+        case night = "night_music"
+        case rain = "rain_music"
+        case winter = "winter_music"
+    }
     
     private init() {}
     
     func preloadSounds() {
         let sounds = ["jump", "land", "coin", "hit", "splash"]
         for sound in sounds {
-            if let url = Bundle.main.url(forResource: sound, withExtension: "wav") {
+            if let url = Bundle.main.url(forResource: sound, withExtension: "mp3") {
                 if let player = try? AVAudioPlayer(contentsOf: url) {
                     player.prepareToPlay()
                     players[sound] = player
@@ -26,6 +37,98 @@ class SoundManager {
         guard let player = players[name] else { return }
         if player.isPlaying { player.stop(); player.currentTime = 0 }
         player.play()
+    }
+    
+    // MARK: - Music Playback
+    
+    func playMusic(_ music: Music, fadeDuration: TimeInterval = 0.5) {
+        let name = music.rawValue
+        
+        // Don't restart if already playing the same track
+        guard currentMusic != name else { return }
+        
+        // Fade out current music if playing
+        if let currentPlayer = musicPlayer, currentPlayer.isPlaying {
+            fadeOut(player: currentPlayer, duration: fadeDuration) { [weak self] in
+                self?.startMusic(name: name, fadeDuration: fadeDuration)
+            }
+        } else {
+            startMusic(name: name, fadeDuration: fadeDuration)
+        }
+    }
+    
+    private func startMusic(name: String, fadeDuration: TimeInterval) {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "mp3") else {
+            print("Music file not found: \(name).mp3")
+            return
+        }
+        
+        do {
+            musicPlayer = try AVAudioPlayer(contentsOf: url)
+            musicPlayer?.numberOfLoops = -1 // Loop indefinitely
+            musicPlayer?.volume = 0
+            musicPlayer?.prepareToPlay()
+            musicPlayer?.play()
+            currentMusic = name
+            
+            // Fade in
+            fadeIn(player: musicPlayer, duration: fadeDuration, targetVolume: 0.6)
+        } catch {
+            print("Failed to load music: \(error.localizedDescription)")
+        }
+    }
+    
+    func stopMusic(fadeDuration: TimeInterval = 0.5) {
+        guard let player = musicPlayer, player.isPlaying else { return }
+        fadeOut(player: player, duration: fadeDuration) { [weak self] in
+            self?.musicPlayer?.stop()
+            self?.currentMusic = nil
+        }
+    }
+    
+    func pauseMusic() {
+        musicPlayer?.pause()
+    }
+    
+    func resumeMusic() {
+        musicPlayer?.play()
+    }
+    
+    func setMusicVolume(_ volume: Float) {
+        musicPlayer?.volume = max(0, min(1, volume))
+    }
+    
+    // MARK: - Fade Effects
+    
+    private func fadeIn(player: AVAudioPlayer?, duration: TimeInterval, targetVolume: Float) {
+        guard let player = player else { return }
+        
+        let steps = 20
+        let stepDuration = duration / Double(steps)
+        let volumeStep = targetVolume / Float(steps)
+        
+        for i in 1...steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(i)) {
+                player.volume = volumeStep * Float(i)
+            }
+        }
+    }
+    
+    private func fadeOut(player: AVAudioPlayer, duration: TimeInterval, completion: @escaping () -> Void) {
+        let steps = 20
+        let stepDuration = duration / Double(steps)
+        let volumeStep = player.volume / Float(steps)
+        let initialVolume = player.volume
+        
+        for i in 1...steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(i)) {
+                player.volume = initialVolume - (volumeStep * Float(i))
+                
+                if i == steps {
+                    completion()
+                }
+            }
+        }
     }
 }
 

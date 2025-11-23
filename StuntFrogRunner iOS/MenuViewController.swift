@@ -95,6 +95,7 @@ class MenuViewController: UIViewController {
         super.viewWillAppear(animated)
         updateStats()
         coordinator?.authenticateGameCenter()
+        SoundManager.shared.playMusic(.menu)
     }
     
     private func setupUI() {

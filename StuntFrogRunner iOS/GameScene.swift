@@ -22,7 +22,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
     // MARK: - HUD Elements
     private let scoreLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
     private let coinLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
-    private var heartNodes: [SKShapeNode] = []
+    private let coinIcon = SKSpriteNode(imageNamed: "star")
+    private var heartNodes: [SKSpriteNode] = []
     private let buffsNode = SKNode()
     private let descendButton = SKLabelNode(fontNamed: "AvenirNext-Heavy")
     private let descendBg = SKShapeNode(rectOf: CGSize(width: 200, height: 60), cornerRadius: 30)
@@ -153,11 +154,15 @@ class GameScene: SKScene, CollisionManagerDelegate {
         scoreLabel.addChild(scoreShadow)
         uiNode.addChild(scoreLabel)
         
-        coinLabel.text = "🪙 0"
+        coinIcon.size = CGSize(width: 24, height: 24)
+        coinIcon.position = CGPoint(x: (size.width / 2) - hudMargin, y: (size.height / 2) - 100)
+        uiNode.addChild(coinIcon)
+        
+        coinLabel.text = "0"
         coinLabel.fontSize = 24
         coinLabel.fontColor = .yellow
         coinLabel.horizontalAlignmentMode = .right
-        coinLabel.position = CGPoint(x: (size.width / 2) - hudMargin, y: (size.height / 2) - 100)
+        coinLabel.position = CGPoint(x: (size.width / 2) - hudMargin - 30, y: (size.height / 2) - 100)
         uiNode.addChild(coinLabel)
         
         drawHearts()
@@ -196,17 +201,16 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let startX = -(size.width / 2) + hudMargin + 15
         let yPos = (size.height / 2) - 100
         for i in 0..<frog.maxHealth {
-            let heart = SKShapeNode(circleOfRadius: 12)
+            let heart = SKSpriteNode(imageNamed: "heart")
+            heart.size = CGSize(width: 24, height: 24)
             heart.position = CGPoint(x: startX + (CGFloat(i) * 30), y: yPos)
             if i < frog.currentHealth {
-                heart.fillColor = .red
-                heart.strokeColor = .white
+                heart.alpha = 1.0
             } else {
-                heart.fillColor = .black
-                heart.strokeColor = .white
                 heart.alpha = 0.3
+                heart.colorBlendFactor = 1.0
+                heart.color = .black
             }
-            heart.lineWidth = 2
             uiNode.addChild(heart)
             heartNodes.append(heart)
         }
@@ -267,7 +271,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
             score = currentScore
             scoreLabel.text = "\(score)m"
         }
-        coinLabel.text = "🪙 \(totalCoins)"
+        coinLabel.text = "\(totalCoins)"
         updateBuffsHUD()
     }
     
@@ -305,6 +309,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         updateBuffsHUD()
         descendBg.isHidden = true
         setWeather(.sunny, duration: 0.0)
+        SoundManager.shared.playMusic(.day)
     }
     
     private func spawnInitialPads() {
@@ -391,15 +396,19 @@ class GameScene: SKScene, CollisionManagerDelegate {
             let rain = VFXManager.shared.createRainEmitter(width: w)
             rain.position = pos
             weatherNode.addChild(rain)
+            SoundManager.shared.playMusic(.rain)
         case .winter:
             let snow = VFXManager.shared.createSnowEmitter(width: w)
             snow.position = pos
             weatherNode.addChild(snow)
+            SoundManager.shared.playMusic(.winter)
         case .night:
             let flies = VFXManager.shared.createFirefliesEmitter(width: w, height: h)
             flies.position = .zero
             weatherNode.addChild(flies)
-        case .sunny: break
+            SoundManager.shared.playMusic(.night)
+        case .sunny:
+            SoundManager.shared.playMusic(.day)
         }
         for pad in pads { pad.updateColor(weather: type) }
     }
@@ -446,11 +455,17 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         var type: Pad.PadType = .normal
         let scoreVal = Int(frog.position.y / 10)
-        if scoreVal > 500 && Double.random(in: 0...1) < 0.2 { type = .moving }
-        else if scoreVal > 1000 && Double.random(in: 0...1) < 0.1 { type = .ice }
+        let difficultyLevel = Configuration.Difficulty.level(forScore: scoreVal)
+        
+        // Pad type selection based on difficulty level
+        if difficultyLevel >= Configuration.Difficulty.movingPadStartLevel && Double.random(in: 0...1) < Configuration.Difficulty.movingPadProbability {
+            type = .moving
+        } else if difficultyLevel >= Configuration.Difficulty.icePadStartLevel && Double.random(in: 0...1) < Configuration.Difficulty.icePadProbability {
+            type = .ice
+        }
         if scoreVal > 150 && Double.random(in: 0...1) < 0.15 { type = .waterLily }
         if currentWeather == .night && Double.random(in: 0...1) < 0.15 { type = .grave }
-        let shrinkingChance = min(0.4, Double(scoreVal) / 5000.0)
+        let shrinkingChance = Configuration.Difficulty.shrinkingProbability(forLevel: difficultyLevel)
         if Double.random(in: 0...1) < shrinkingChance { type = .shrinking }
         
         let pad = Pad(type: type, position: CGPoint(x: newX, y: newY))
@@ -458,12 +473,21 @@ class GameScene: SKScene, CollisionManagerDelegate {
         worldNode.addChild(pad)
         pads.append(pad)
         
+        // Spawn additional lily pads in a chain (each within 50 pixels of another)
+        // This applies to normal pads only, not water lilies
+        if type == .normal {
+            spawnLilyPadChain(startingAt: pad.position, count: Int.random(in: 2...4))
+        }
+        
         if type == .grave {
             let ghost = Enemy(position: CGPoint(x: newX, y: newY + 40), type: "GHOST")
             worldNode.addChild(ghost)
             enemies.append(ghost)
         }
-        if scoreVal > 200 && Double.random(in: 0...1) < 0.25 {
+        
+        // Log spawning based on difficulty
+        let logChance = Configuration.Difficulty.logProbability(forLevel: difficultyLevel)
+        if logChance > 0 && Double.random(in: 0...1) < logChance {
             let logX = CGFloat.random(in: 100...500)
             if abs(logX - newX) > 120 {
                 let log = Pad(type: .log, position: CGPoint(x: logX, y: newY))
@@ -477,15 +501,56 @@ class GameScene: SKScene, CollisionManagerDelegate {
             worldNode.addChild(coin)
             coins.append(coin)
         }
-        let enemyProb = 0.2 + (Double(scoreVal) / 5000.0)
+        
+        // Enemy spawning based on difficulty
+        let enemyProb = Configuration.Difficulty.enemyProbability(forLevel: difficultyLevel)
         if Double.random(in: 0...1) < enemyProb {
             if type != .grave {
-                let enemyType = (scoreVal > 400 && Double.random(in: 0...1) < 0.4) ? "DRAGONFLY" : "BEE"
+                // Enemy type selection based on difficulty
+                let dragonflyChance = Configuration.Difficulty.dragonflyProbability(forLevel: difficultyLevel)
+                let enemyType = (Double.random(in: 0...1) < dragonflyChance) ? "DRAGONFLY" : "BEE"
                 let ex = CGFloat.random(in: 50...550)
                 let enemy = Enemy(position: CGPoint(x: ex, y: newY + 50), type: enemyType)
                 worldNode.addChild(enemy)
                 enemies.append(enemy)
             }
+        }
+    }
+    
+    /// Spawns a chain of normal lily pads, each within 50 pixels of another
+    private func spawnLilyPadChain(startingAt origin: CGPoint, count: Int) {
+        let minDistance: CGFloat = 120.0  // Minimum spacing to avoid overlap
+        let maxDistance: CGFloat = 160.0 // Maximum to ensure reachability (within ~50 of the cluster)
+        var lastPosition = origin
+        
+        for _ in 0..<count {
+            // Generate a random position - close enough to jump to, far enough to not overlap
+            let angle = CGFloat.random(in: 0...(CGFloat.pi * 2))
+            let distance = CGFloat.random(in: minDistance...maxDistance)
+            
+            var newX = lastPosition.x + cos(angle) * distance
+            var newY = lastPosition.y + sin(angle) * distance
+            
+            // Constrain to river bounds
+            let padding = Configuration.Dimensions.frogRadius * 2
+            newX = max(padding, min(Configuration.Dimensions.riverWidth - padding, newX))
+            newY = max(lastPosition.y - 30, newY) // Prevent going too far backwards
+            
+            // Check we're not overlapping existing pads too closely
+            let tooClose = pads.contains { pad in
+                let dx = pad.position.x - newX
+                let dy = pad.position.y - newY
+                return sqrt(dx*dx + dy*dy) < 70 // Increased minimum separation
+            }
+            
+            guard !tooClose else { continue }
+            
+            let lilyPad = Pad(type: .normal, position: CGPoint(x: newX, y: newY))
+            lilyPad.updateColor(weather: currentWeather)
+            worldNode.addChild(lilyPad)
+            pads.append(lilyPad)
+            
+            lastPosition = CGPoint(x: newX, y: newY)
         }
     }
     

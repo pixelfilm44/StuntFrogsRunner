@@ -30,6 +30,15 @@ class ShopViewController: UIViewController {
         return label
     }()
     
+    private lazy var scrollView: UIScrollView = {
+        let scroll = UIScrollView()
+        scroll.showsVerticalScrollIndicator = true
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.alwaysBounceVertical = true
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        return scroll
+    }()
+    
     private lazy var stackView: UIStackView = {
         let stack = UIStackView()
         stack.axis = .vertical
@@ -69,8 +78,10 @@ class ShopViewController: UIViewController {
         
         containerView.addSubview(headerLabel)
         containerView.addSubview(coinsLabel)
-        containerView.addSubview(stackView)
+        containerView.addSubview(scrollView)
         containerView.addSubview(backButton)
+        
+        scrollView.addSubview(stackView)
         
         NSLayoutConstraint.activate([
             headerLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
@@ -79,28 +90,36 @@ class ShopViewController: UIViewController {
             coinsLabel.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 10),
             coinsLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             
-            stackView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            stackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            stackView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            // Scroll View - between coins label and back button
+            scrollView.topAnchor.constraint(equalTo: coinsLabel.bottomAnchor, constant: 20),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: backButton.topAnchor, constant: -20),
+            
+            // Stack View inside Scroll View
+            stackView.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: 10),
+            stackView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor, constant: 20),
+            stackView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor, constant: -20),
+            stackView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: -10),
+            stackView.widthAnchor.constraint(equalTo: scrollView.widthAnchor, constant: -40),
             
             backButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
             backButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             backButton.widthAnchor.constraint(equalToConstant: 150),
             backButton.heightAnchor.constraint(equalToConstant: 50)
         ])
-        
-        // Add Items (Wait for refreshData to populate)
     }
     
-    enum UpgradeType { case jump, health, logJumper }
+    enum UpgradeType { case jump, health, logJumper, superJump, rocketJump }
     
     private func createItemView(type: UpgradeType) -> UIView {
-        let view = UIView()
-        view.backgroundColor = UIColor.white.withAlphaComponent(0.1)
-        view.layer.cornerRadius = 10
-        view.layer.borderWidth = 2
-        view.layer.borderColor = UIColor.white.cgColor
-        view.heightAnchor.constraint(equalToConstant: 120).isActive = true
+        let cardView = UIView()
+        cardView.backgroundColor = UIColor.white.withAlphaComponent(0.1)
+        cardView.layer.cornerRadius = 12
+        cardView.layer.borderWidth = 2
+        cardView.layer.borderColor = UIColor.white.cgColor
+        cardView.clipsToBounds = true
+        cardView.heightAnchor.constraint(equalToConstant: 120).isActive = true
         
         let title = UILabel()
         title.font = UIFont.systemFont(ofSize: 20, weight: .bold)
@@ -110,6 +129,7 @@ class ShopViewController: UIViewController {
         let desc = UILabel()
         desc.font = UIFont.systemFont(ofSize: 14)
         desc.textColor = .lightGray
+        desc.numberOfLines = 2
         desc.translatesAutoresizingMaskIntoConstraints = false
         
         let costLabel = UILabel()
@@ -121,6 +141,7 @@ class ShopViewController: UIViewController {
         buyButton.backgroundColor = .green
         buyButton.setTitle("UPGRADE", for: .normal)
         buyButton.setTitleColor(.black, for: .normal)
+        buyButton.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .bold)
         buyButton.layer.cornerRadius = 8
         buyButton.translatesAutoresizingMaskIntoConstraints = false
         
@@ -129,6 +150,7 @@ class ShopViewController: UIViewController {
         let cost: Int
         let maxLevel: Int
         var isPurchased = false
+        var isUnlockItem = false  // NEW: Track if this unlocks upgrade menu options
         
         switch type {
         case .jump:
@@ -150,27 +172,57 @@ class ShopViewController: UIViewController {
             currentLevel = isPurchased ? 1 : 0
             title.text = "Log Jumper"
             desc.text = "Land on Logs safely!"
+        case .superJump:
+            isPurchased = PersistenceManager.shared.hasSuperJump
+            cost = Configuration.Shop.superJumpCost
+            maxLevel = 1
+            currentLevel = isPurchased ? 1 : 0
+            isUnlockItem = true
+            title.text = "Super Jump ⚡️"
+            desc.text = "Double Jump Range + Invincible"
+        case .rocketJump:
+            isPurchased = PersistenceManager.shared.hasRocketJump
+            cost = Configuration.Shop.rocketJumpCost
+            maxLevel = 1
+            currentLevel = isPurchased ? 1 : 0
+            isUnlockItem = true
+            title.text = "Rocket 🚀"
+            desc.text = "Fly for 7 seconds"
         }
         
         let userCoins = PersistenceManager.shared.totalCoins
+        
+        // Style the card based on unlock status
+        if isUnlockItem {
+            if isPurchased {
+                // Owned unlock items get a green border
+                cardView.layer.borderColor = UIColor.systemGreen.cgColor
+                cardView.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.15)
+            } else {
+                // Unpurchased unlock items get a purple/special border
+                cardView.layer.borderColor = UIColor.systemPurple.cgColor
+                cardView.backgroundColor = UIColor.systemPurple.withAlphaComponent(0.15)
+            }
+        }
         
         if isPurchased {
             costLabel.text = "OWNED"
             buyButton.isEnabled = false
             buyButton.backgroundColor = .gray
             buyButton.setTitle("OWNED", for: .normal)
-        } else if type != .logJumper && currentLevel >= maxLevel {
+        } else if !isUnlockItem && type != .logJumper && currentLevel >= maxLevel {
             costLabel.text = "MAXED"
             buyButton.isEnabled = false
             buyButton.backgroundColor = .gray
             buyButton.setTitle("MAXED", for: .normal)
         } else {
             costLabel.text = "\(cost) Coins"
+            buyButton.setTitle(isUnlockItem ? "UNLOCK" : "UPGRADE", for: .normal)
             
-            // NEW: Check affordability
+            // Check affordability
             if userCoins < cost {
                 buyButton.isEnabled = false
-                buyButton.backgroundColor = UIColor.systemGray // Dimmed
+                buyButton.backgroundColor = UIColor.systemGray
                 buyButton.setTitleColor(.lightGray, for: .disabled)
             }
         }
@@ -179,42 +231,132 @@ class ShopViewController: UIViewController {
             self?.attemptPurchase(type: type, cost: cost)
         }), for: .touchUpInside)
         
-        view.addSubview(title)
-        view.addSubview(desc)
-        view.addSubview(costLabel)
-        view.addSubview(buyButton)
+        cardView.addSubview(title)
+        cardView.addSubview(desc)
+        cardView.addSubview(costLabel)
+        cardView.addSubview(buyButton)
         
         NSLayoutConstraint.activate([
-            // Title: Top Left
-            title.topAnchor.constraint(equalTo: view.topAnchor, constant: 15),
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 15),
+            title.topAnchor.constraint(equalTo: cardView.topAnchor, constant: 15),
+            title.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 15),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: buyButton.leadingAnchor, constant: -10),
             
-            // Description: Below Title
             desc.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 5),
-            desc.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 15),
+            desc.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 15),
+            desc.trailingAnchor.constraint(lessThanOrEqualTo: buyButton.leadingAnchor, constant: -10),
             
-            // Cost Label: NEW POSITION (Below Description, Left Aligned)
             costLabel.topAnchor.constraint(equalTo: desc.bottomAnchor, constant: 10),
-            costLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 15),
+            costLabel.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 15),
             
-            // Buy Button: Vertically Centered, Right Aligned
-            buyButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            buyButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -15),
+            buyButton.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            buyButton.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -15),
             buyButton.widthAnchor.constraint(equalToConstant: 100),
             buyButton.heightAnchor.constraint(equalToConstant: 40)
         ])
         
-        return view
+        // NEW: Add badge for unlock items
+        if isUnlockItem {
+            let badge = createBadge(text: isPurchased ? "✓ UNLOCKED" : "🎁 UNLOCKS UPGRADE", isPurchased: isPurchased)
+            cardView.addSubview(badge)
+            
+            NSLayoutConstraint.activate([
+                badge.topAnchor.constraint(equalTo: cardView.topAnchor, constant: 8),
+                badge.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -8)
+            ])
+        }
+        
+        return cardView
+    }
+    
+    private func createBadge(text: String, isPurchased: Bool) -> UIView {
+        let badge = UILabel()
+        badge.text = text
+        badge.font = UIFont.systemFont(ofSize: 10, weight: .bold)
+        badge.textColor = .white
+        badge.backgroundColor = isPurchased ? UIColor.systemGreen : UIColor.systemPurple
+        badge.layer.cornerRadius = 8
+        badge.layer.masksToBounds = true
+        badge.textAlignment = .center
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Add padding
+        badge.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        badge.widthAnchor.constraint(greaterThanOrEqualToConstant: 80).isActive = true
+        
+        // Custom padding via content insets simulation
+        let container = UIView()
+        container.backgroundColor = isPurchased ? UIColor.systemGreen : UIColor.systemPurple
+        container.layer.cornerRadius = 10
+        container.layer.masksToBounds = true
+        container.translatesAutoresizingMaskIntoConstraints = false
+        
+        let label = UILabel()
+        label.text = text
+        label.font = UIFont.systemFont(ofSize: 9, weight: .bold)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        
+        container.addSubview(label)
+        
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 4),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -4),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8)
+        ])
+        
+        return container
+    }
+    
+    private func createSectionHeader(title: String) -> UIView {
+        let header = UIView()
+        header.translatesAutoresizingMaskIntoConstraints = false
+        
+        let label = UILabel()
+        label.text = title
+        label.font = UIFont.systemFont(ofSize: 16, weight: .heavy)
+        label.textColor = UIColor.white.withAlphaComponent(0.7)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        
+        let line = UIView()
+        line.backgroundColor = UIColor.white.withAlphaComponent(0.3)
+        line.translatesAutoresizingMaskIntoConstraints = false
+        
+        header.addSubview(label)
+        header.addSubview(line)
+        
+        NSLayoutConstraint.activate([
+            header.heightAnchor.constraint(equalToConstant: 30),
+            
+            label.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            label.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            
+            line.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 10),
+            line.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            line.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            line.heightAnchor.constraint(equalToConstant: 1)
+        ])
+        
+        return header
     }
     
     private func refreshData() {
         let coins = PersistenceManager.shared.totalCoins
-        coinsLabel.text = "Coins: \(coins)"
+        coinsLabel.text = "💰 Coins: \(coins)"
         
         stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        
+        // Section: Permanent Upgrades
+        stackView.addArrangedSubview(createSectionHeader(title: "PERMANENT UPGRADES"))
         stackView.addArrangedSubview(createItemView(type: .jump))
         stackView.addArrangedSubview(createItemView(type: .health))
         stackView.addArrangedSubview(createItemView(type: .logJumper))
+        
+        // Section: Upgrade Menu Unlocks
+        stackView.addArrangedSubview(createSectionHeader(title: "UPGRADE MENU UNLOCKS"))
+        stackView.addArrangedSubview(createItemView(type: .superJump))
+        stackView.addArrangedSubview(createItemView(type: .rocketJump))
     }
     
     private func attemptPurchase(type: UpgradeType, cost: Int) {
@@ -226,6 +368,8 @@ class ShopViewController: UIViewController {
             case .jump: PersistenceManager.shared.upgradeJump()
             case .health: PersistenceManager.shared.upgradeHealth()
             case .logJumper: PersistenceManager.shared.unlockLogJumper()
+            case .superJump: PersistenceManager.shared.unlockSuperJump()
+            case .rocketJump: PersistenceManager.shared.unlockRocketJump()
             }
             
             refreshData()
