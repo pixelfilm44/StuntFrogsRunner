@@ -11,6 +11,9 @@ class PersistenceManager {
         static let jumpLevel = "sf_upgrade_jump"
         static let healthLevel = "sf_upgrade_health"
         static let logJumper = "sf_upgrade_log_jumper" // NEW Key
+        static let superJump = "sf_upgrade_super_jump"
+        static let rocketJump = "sf_upgrade_rocket_jump"
+        static let hasSeenHelp = "sf_has_seen_help"
     }
     
     private init() {}
@@ -64,6 +67,34 @@ class PersistenceManager {
     
     func unlockLogJumper() {
         defaults.set(true, forKey: Keys.logJumper)
+    }
+    
+    // NEW: Super Jump Persistence
+    var hasSuperJump: Bool {
+        return defaults.bool(forKey: Keys.superJump)
+    }
+    
+    func unlockSuperJump() {
+        defaults.set(true, forKey: Keys.superJump)
+    }
+    
+    // NEW: Rocket Jump Persistence
+    var hasRocketJump: Bool {
+        return defaults.bool(forKey: Keys.rocketJump)
+    }
+    
+    func unlockRocketJump() {
+        defaults.set(true, forKey: Keys.rocketJump)
+    }
+    
+    // MARK: - Help Tutorial
+    
+    var hasSeenHelp: Bool {
+        return defaults.bool(forKey: Keys.hasSeenHelp)
+    }
+    
+    func markHelpAsSeen() {
+        defaults.set(true, forKey: Keys.hasSeenHelp)
     }
     
     // MARK: - High Score

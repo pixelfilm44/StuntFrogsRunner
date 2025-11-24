@@ -3,9 +3,16 @@ import SpriteKit
 protocol CollisionManagerDelegate: AnyObject {
     func didLand(on pad: Pad)
     func didCrash(into enemy: Enemy)
+    func didCrash(into snake: Snake)
     func didHitObstacle(pad: Pad)
     func didCollect(coin: Coin)
+    func didCollect(treasureChest: TreasureChest)
     func didFallIntoWater()
+    func didLand(on crocodile: Crocodile)
+    func didCompleteCrocodileRide(crocodile: Crocodile)
+    func crocodileDidDestroy(pad: Pad)
+    func crocodileDidDestroy(enemy: Enemy)
+    func crocodileDidDestroy(snake: Snake)
 }
 
 class CollisionManager {
@@ -13,28 +20,145 @@ class CollisionManager {
     weak var delegate: CollisionManagerDelegate?
     
     private let coinRadiusSq: CGFloat
+    private let chestRadiusSq: CGFloat
     private let enemyRadiusSq: CGFloat
     private let frogRadius: CGFloat
     
     init() {
         let coinR: CGFloat = 20.0
+        let chestR: CGFloat = 25.0  // Slightly larger than coins
         let enemyR: CGFloat = 15.0
         let frogR = Configuration.Dimensions.frogRadius
         
         self.coinRadiusSq = pow(coinR + frogR, 2)
+        self.chestRadiusSq = pow(chestR + frogR, 2)
         self.enemyRadiusSq = pow(enemyR + frogR, 2)
         self.frogRadius = frogR
     }
     
-    func update(frog: Frog, pads: [Pad], enemies: [Enemy], coins: [Coin]) {
-        if frog.zHeight <= 0 && frog.zVelocity <= 0 {
-            checkForLanding(frog: frog, pads: pads)
+    func update(frog: Frog, pads: [Pad], enemies: [Enemy], coins: [Coin], crocodiles: [Crocodile] = [], treasureChests: [TreasureChest] = [], snakes: [Snake] = []) {
+        // Check crocodile ride completion first
+        for crocodile in crocodiles {
+            if crocodile.isRideComplete() {
+                delegate?.didCompleteCrocodileRide(crocodile: crocodile)
+            }
         }
-        checkEntityCollisions(frog: frog, enemies: enemies, coins: coins)
+        
+        if frog.zHeight <= 0 && frog.zVelocity <= 0 {
+            checkForLanding(frog: frog, pads: pads, crocodiles: crocodiles)
+        }
+        checkEntityCollisions(frog: frog, enemies: enemies, coins: coins, treasureChests: treasureChests, snakes: snakes)
         checkObstacleCollisions(frog: frog, pads: pads)
         
         // NEW: Check Log-to-Pad collisions
         checkLogPadCollisions(pads: pads)
+        
+        // NEW: Check Crocodile collisions (with pads and enemies)
+        checkCrocodilePadCollisions(crocodiles: crocodiles, pads: pads)
+        checkCrocodileEnemyCollisions(crocodiles: crocodiles, enemies: enemies)
+        checkCrocodileSnakeCollisions(crocodiles: crocodiles, snakes: snakes)
+    }
+    
+    private func checkCrocodileEnemyCollisions(crocodiles: [Crocodile], enemies: [Enemy]) {
+        let crocHW: CGFloat = 150
+        let crocHH: CGFloat = 60
+        
+        for crocodile in crocodiles {
+            // Only destroy enemies when carrying the frog
+            guard crocodile.state == .carrying && crocodile.isCarryingFrog else { continue }
+            
+            for enemy in enemies {
+                let dx = abs(crocodile.position.x - enemy.position.x)
+                let dy = abs(crocodile.position.y - enemy.position.y)
+                
+                // Enemy collision radius
+                let enemyRadius: CGFloat = 20
+                
+                if dx < (crocHW + enemyRadius) && dy < (crocHH + enemyRadius) {
+                    delegate?.crocodileDidDestroy(enemy: enemy)
+                }
+            }
+        }
+    }
+    
+    private func checkCrocodileSnakeCollisions(crocodiles: [Crocodile], snakes: [Snake]) {
+        let crocHW: CGFloat = 150
+        let crocHH: CGFloat = 60
+        
+        for crocodile in crocodiles {
+            // Only destroy snakes when carrying the frog
+            guard crocodile.state == .carrying && crocodile.isCarryingFrog else { continue }
+            
+            for snake in snakes where !snake.isDestroyed {
+                let dx = abs(crocodile.position.x - snake.position.x)
+                let dy = abs(crocodile.position.y - snake.position.y)
+                
+                // Snake collision radius
+                let snakeRadius: CGFloat = snake.scaledRadius
+                
+                if dx < (crocHW + snakeRadius) && dy < (crocHH + snakeRadius) {
+                    delegate?.crocodileDidDestroy(snake: snake)
+                }
+            }
+        }
+    }
+    
+    private func checkCrocodilePadCollisions(crocodiles: [Crocodile], pads: [Pad]) {
+        // Crocodile half-extents (300x120 size -> 150x60 half)
+        let crocHW: CGFloat = 150
+        let crocHH: CGFloat = 60
+        
+        for crocodile in crocodiles {
+            // Only check collision for visible crocodiles (not submerged)
+            guard crocodile.state != .submerged else { continue }
+            
+            // Check if crocodile is carrying (destroys obstacles) or not (gets pushed)
+            let isCarrying = crocodile.state == .carrying && crocodile.isCarryingFrog
+            
+            for pad in pads {
+                // Determine dimensions of the pad
+                let padHW: CGFloat = (pad.type == .log) ? 60 : 50
+                let padHH: CGFloat = (pad.type == .log) ? 20 : 50
+                
+                let dx = crocodile.position.x - pad.position.x
+                let dy = crocodile.position.y - pad.position.y
+                let absDx = abs(dx)
+                let absDy = abs(dy)
+                
+                let overlapX = absDx < (crocHW + padHW)
+                let overlapY = absDy < (crocHH + padHH)
+                
+                if overlapX && overlapY {
+                    if isCarrying {
+                        // DESTROY the pad/log when carrying the frog!
+                        delegate?.crocodileDidDestroy(pad: pad)
+                    } else {
+                        // Push crocodile away from the pad when not carrying
+                        let overlapAmountX = (crocHW + padHW) - absDx
+                        let overlapAmountY = (crocHH + padHH) - absDy
+                        
+                        if overlapAmountX < overlapAmountY {
+                            // Push horizontally
+                            if dx > 0 {
+                                crocodile.position.x += overlapAmountX * 0.5
+                            } else {
+                                crocodile.position.x -= overlapAmountX * 0.5
+                            }
+                        } else {
+                            // Push vertically (usually upstream since croc moves that way)
+                            if dy > 0 {
+                                crocodile.position.y += overlapAmountY * 0.5
+                            } else {
+                                crocodile.position.y -= overlapAmountY * 0.5
+                            }
+                        }
+                        
+                        // Keep crocodile within river bounds after push
+                        crocodile.constrainToRiver()
+                    }
+                }
+            }
+        }
     }
     
     private func checkLogPadCollisions(pads: [Pad]) {
@@ -73,8 +197,38 @@ class CollisionManager {
         }
     }
     
-    private func checkForLanding(frog: Frog, pads: [Pad]) {
+    private func checkForLanding(frog: Frog, pads: [Pad], crocodiles: [Crocodile] = []) {
         var hasLanded = false
+        
+        // First check if frog is already riding a crocodile
+        for crocodile in crocodiles {
+            if crocodile.state == .carrying && crocodile.isCarryingFrog {
+                // Frog is riding this crocodile - count as landed
+                hasLanded = true
+                break
+            }
+        }
+        
+        // Then check for new crocodile landing (if not already riding)
+        if !hasLanded {
+            for crocodile in crocodiles {
+                // Only land on idle or fleeing crocodiles (not submerged, rising, or already carrying)
+                guard crocodile.state == .idle || crocodile.state == .fleeing else { continue }
+                
+                let dx = abs(frog.position.x - crocodile.position.x)
+                let dy = abs(frog.position.y - crocodile.position.y)
+                
+                // Rectangular hitbox for crocodile (300x120 size - 3x bigger)
+                let halfW: CGFloat = 150 + frogRadius
+                let halfH: CGFloat = 60 + frogRadius
+                
+                if dx < halfW && dy < halfH {
+                    hasLanded = true
+                    delegate?.didLand(on: crocodile)
+                    return
+                }
+            }
+        }
         
         for pad in pads {
             // FIX: If Log Jumper ability is active, treat Logs as landing pads
@@ -148,7 +302,7 @@ class CollisionManager {
         }
     }
     
-    private func checkEntityCollisions(frog: Frog, enemies: [Enemy], coins: [Coin]) {
+    private func checkEntityCollisions(frog: Frog, enemies: [Enemy], coins: [Coin], treasureChests: [TreasureChest], snakes: [Snake]) {
         for coin in coins where !coin.isCollected {
             let dx = frog.position.x - coin.position.x
             let dy = frog.position.y - coin.position.y
@@ -156,6 +310,18 @@ class CollisionManager {
             if distSq < coinRadiusSq {
                 coin.isCollected = true
                 delegate?.didCollect(coin: coin)
+            }
+        }
+        
+        // Check treasure chest collisions
+        for chest in treasureChests where !chest.isCollected {
+            let dx = frog.position.x - chest.position.x
+            let dy = frog.position.y - chest.position.y
+            let distSq = (dx * dx) + (dy * dy)
+            // Check horizontal proximity and z-height proximity (frog must be near the chest level)
+            let zDiff = abs(frog.zHeight - chest.zHeight)
+            if distSq < chestRadiusSq && zDiff < 25 {
+                delegate?.didCollect(treasureChest: chest)
             }
         }
         
@@ -169,6 +335,20 @@ class CollisionManager {
             
             if distSq < enemyRadiusSq && zDiff < 30 {
                 delegate?.didCrash(into: enemy)
+            }
+        }
+        
+        // Check snake collisions
+        for snake in snakes where !snake.isDestroyed {
+            let dx = frog.position.x - snake.position.x
+            let dy = frog.position.y - snake.position.y
+            let distSq = (dx * dx) + (dy * dy)
+            let zDiff = abs(frog.zHeight - snake.zHeight)
+            
+            // Snake radius collision check
+            let snakeRadiusSq = pow(snake.scaledRadius + frogRadius, 2)
+            if distSq < snakeRadiusSq && zDiff < 20 {
+                delegate?.didCrash(into: snake)
             }
         }
     }

@@ -1,5 +1,7 @@
 import UIKit
 
+import UIKit
+
 class ChallengesViewController: UIViewController {
     
     weak var coordinator: GameCoordinator?
@@ -15,7 +17,7 @@ class ChallengesViewController: UIViewController {
     
     private lazy var titleLabel: UILabel = {
         let label = UILabel()
-        label.text = "🏆 CHALLENGES"
+        label.text = "CHALLENGES"
         label.font = UIFont.systemFont(ofSize: 32, weight: .heavy)
         label.textColor = .white
         label.textAlignment = .center

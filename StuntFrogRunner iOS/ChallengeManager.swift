@@ -1,5 +1,7 @@
 import Foundation
 
+import Foundation
+
 /// Represents a single game challenge
 struct Challenge: Codable, Identifiable {
     let id: String
@@ -54,6 +56,7 @@ enum ChallengeType: String, Codable {
     case surviveWeather       // Survive specific weather types
     case landOnPads           // Land on X pads in a single run
     case consecutiveJumps     // X jumps without falling in water
+    case crocodileRides       // Complete crocodile rides
 }
 
 /// Manages all game challenges and persists progress
@@ -94,7 +97,7 @@ class ChallengeManager {
                 title: "Getting There",
                 description: "Travel 500m in a single run",
                 requirement: 500,
-                reward: .coins(150),
+                reward: .coins(100),
                 type: .singleRunScore,
                 progress: 0,
                 isCompleted: false,
@@ -243,6 +246,41 @@ class ChallengeManager {
                 progress: 0,
                 isCompleted: false,
                 isRewardClaimed: false
+            ),
+            
+            // Crocodile Ride Challenges
+            Challenge(
+                id: "croc_ride_1",
+                title: "Croc Surfer",
+                description: "Complete your first crocodile ride",
+                requirement: 1,
+                reward: .coins(100),
+                type: .crocodileRides,
+                progress: 0,
+                isCompleted: false,
+                isRewardClaimed: false
+            ),
+            Challenge(
+                id: "croc_ride_5",
+                title: "Reptile Wrangler",
+                description: "Complete 5 crocodile rides",
+                requirement: 5,
+                reward: .coins(250),
+                type: .crocodileRides,
+                progress: 0,
+                isCompleted: false,
+                isRewardClaimed: false
+            ),
+            Challenge(
+                id: "croc_ride_15",
+                title: "Crocodile Dundee",
+                description: "Complete 15 crocodile rides",
+                requirement: 15,
+                reward: .coins(500),
+                type: .crocodileRides,
+                progress: 0,
+                isCompleted: false,
+                isRewardClaimed: false
             )
         ]
     }
@@ -317,15 +355,60 @@ class ChallengeManager {
     /// Call when an enemy is defeated
     func recordEnemyDefeated() {
         stats.enemiesDefeated += 1
-        saveStats()
+        // Note: Don't save to disk here for performance - stats are saved on game end
         updateChallenges(ofType: .enemiesDefeated)
     }
     
     /// Call when rocket is used
     func recordRocketUsed() {
         stats.rocketsUsed += 1
-        saveStats()
+        // Note: Don't save to disk here for performance - stats are saved on game end
         updateChallenges(ofType: .useRocket)
+    }
+    
+    /// Call when a crocodile ride is successfully completed
+    func recordCrocodileRideCompleted() {
+        stats.crocodileRidesCompleted += 1
+        // Note: Don't save to disk here for performance - stats are saved on game end
+        updateChallenges(ofType: .crocodileRides)
+    }
+    
+    /// Call when landing on a pad (real-time tracking)
+    func recordPadLanded(totalThisRun: Int) {
+        if totalThisRun > stats.bestPadsInRun {
+            stats.bestPadsInRun = totalThisRun
+            updateChallenges(ofType: .landOnPads)
+        }
+    }
+    
+    /// Call when making consecutive jumps (real-time tracking)
+    func recordConsecutiveJumps(count: Int) {
+        if count > stats.bestConsecutiveJumps {
+            stats.bestConsecutiveJumps = count
+            updateChallenges(ofType: .consecutiveJumps)
+        }
+    }
+    
+    /// Call when collecting coins (real-time tracking)
+    func recordCoinsCollected(totalThisRun: Int, totalOverall: Int) {
+        var updated = false
+        if totalThisRun > stats.bestCoinsInRun {
+            stats.bestCoinsInRun = totalThisRun
+            updated = true
+        }
+        stats.totalCoins = totalOverall
+        if updated {
+            updateChallenges(ofType: .coinsInRun)
+        }
+        updateChallenges(ofType: .totalCoins)
+    }
+    
+    /// Call when score increases (real-time tracking)
+    func recordScoreUpdate(currentScore: Int) {
+        if currentScore > stats.bestSingleRunScore {
+            stats.bestSingleRunScore = currentScore
+            updateChallenges(ofType: .singleRunScore)
+        }
     }
     
     private func updateAllChallenges() {
@@ -367,12 +450,20 @@ class ChallengeManager {
             newProgress = stats.bestPadsInRun
         case .consecutiveJumps:
             newProgress = stats.bestConsecutiveJumps
+        case .crocodileRides:
+            newProgress = stats.crocodileRidesCompleted
         }
         
         challenges[index].progress = newProgress
         
         if newProgress >= challenges[index].requirement {
             challenges[index].isCompleted = true
+            // Broadcast achievement completion
+            NotificationCenter.default.post(
+                name: .challengeCompleted,
+                object: nil,
+                userInfo: ["challenge": challenges[index]]
+            )
         }
     }
     
@@ -451,4 +542,5 @@ struct ChallengeStats: Codable {
     var weathersSurvived: Int = 0
     var bestPadsInRun: Int = 0
     var bestConsecutiveJumps: Int = 0
+    var crocodileRidesCompleted: Int = 0
 }

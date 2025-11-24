@@ -5,25 +5,56 @@ struct UpgradeOption {
     let name: String
     let desc: String
     let icon: String
+    let iconImage: String?  // Optional image name for custom icons
+    
+    init(id: String, name: String, desc: String, icon: String, iconImage: String? = nil) {
+        self.id = id
+        self.name = name
+        self.desc = desc
+        self.icon = icon
+        self.iconImage = iconImage
+    }
 }
 
 class UpgradeViewController: UIViewController {
     
     weak var coordinator: GameCoordinator?
     
+    /// Set to true if the player currently has full health (currentHealth == maxHealth)
+    var hasFullHealth: Bool = false
+    
     // Available Upgrades Pool
-    private let allOptions: [UpgradeOption] = [
-        UpgradeOption(id: "HONEY", name: "Honey Jar", desc: "Block 1 Bee Attack", icon: "🍯"),
-        UpgradeOption(id: "ROCKET", name: "Rocket", desc: "Fly for 7s", icon: "🚀"),
-        UpgradeOption(id: "BOOTS", name: "Rain Boots", desc: "No Sliding for 5s", icon: "👢"),
+    private let baseOptions: [UpgradeOption] = [
+        UpgradeOption(id: "HONEY", name: "Honey Jar", desc: "Block 1 Bee Attack", icon: "", iconImage: "honeyPot"),
+        UpgradeOption(id: "BOOTS", name: "Rain Boots", desc: "No Sliding for a rain season", icon: "👢"),
         UpgradeOption(id: "HEART", name: "Heart Container", desc: "+1 Max HP & Heal", icon: "❤️"),
-        UpgradeOption(id: "VEST", name: "Life Vest", desc: "Float on Water (1 Use)", icon: "🦺"),
+        UpgradeOption(id: "HEARTBOOST", name: "Heart Boost", desc: "Refill All Hearts", icon: "", iconImage: "heartBoost"),
+        UpgradeOption(id: "VEST", name: "Life Vest", desc: "Float on Water (1 Use)", icon: "", iconImage: "lifevest"),
         UpgradeOption(id: "AXE", name: "Woodcutter's Axe", desc: "Chops down 1 Log", icon: "🪓"),
         UpgradeOption(id: "SWATTER", name: "Fly Swatter", desc: "Swats 1 Dragonfly", icon: "🏸"),
-        UpgradeOption(id: "CROSS", name: "Holy Cross", desc: "Repels 1 Ghost", icon: "✝️"),
-        // NEW: SuperJump
-        UpgradeOption(id: "SUPERJUMP", name: "Super Jump", desc: "Double Jump Range + Invincible", icon: "⚡️")
+        UpgradeOption(id: "CROSS", name: "Holy Cross", desc: "Repels 1 Ghost", icon: "✝️")
     ]
+    
+    // Purchasable Upgrades (only appear if unlocked in shop)
+    private let superJumpOption = UpgradeOption(id: "SUPERJUMP", name: "Super Jump", desc: "Double Jump Range + Invincible", icon: "⚡️")
+    private let rocketJumpOption = UpgradeOption(id: "ROCKET", name: "Rocket", desc: "Fly for 7s", icon: "🚀")
+    
+    private var allOptions: [UpgradeOption] {
+        var options = baseOptions
+        
+        // Don't offer heart boost if player already has full health
+        if hasFullHealth {
+            options.removeAll { $0.id == "HEARTBOOST" }
+        }
+        
+        if PersistenceManager.shared.hasSuperJump {
+            options.append(superJumpOption)
+        }
+        if PersistenceManager.shared.hasRocketJump {
+            options.append(rocketJumpOption)
+        }
+        return options
+    }
     
     // MARK: - UI Elements
     private lazy var containerView: UIView = {
@@ -119,11 +150,23 @@ class UpgradeViewController: UIViewController {
         button.layer.borderWidth = 2
         button.layer.borderColor = UIColor.yellow.cgColor
         
-        let iconLabel = UILabel()
-        iconLabel.text = option.icon
-        iconLabel.font = UIFont.systemFont(ofSize: 40)
-        iconLabel.textAlignment = .center
-        iconLabel.translatesAutoresizingMaskIntoConstraints = false
+        // Use image if iconImage is provided, otherwise use emoji label
+        let iconView: UIView
+        if let imageName = option.iconImage, let image = UIImage(named: imageName) {
+            let imageView = UIImageView(image: image)
+            imageView.contentMode = .scaleAspectFit
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            imageView.widthAnchor.constraint(equalToConstant: 50).isActive = true
+            imageView.heightAnchor.constraint(equalToConstant: 50).isActive = true
+            iconView = imageView
+        } else {
+            let iconLabel = UILabel()
+            iconLabel.text = option.icon
+            iconLabel.font = UIFont.systemFont(ofSize: 40)
+            iconLabel.textAlignment = .center
+            iconView = iconLabel
+        }
+        iconView.translatesAutoresizingMaskIntoConstraints = false
         
         let nameLabel = UILabel()
         nameLabel.text = option.name
@@ -141,15 +184,15 @@ class UpgradeViewController: UIViewController {
         descLabel.numberOfLines = 3
         descLabel.translatesAutoresizingMaskIntoConstraints = false
         
-        button.addSubview(iconLabel)
+        button.addSubview(iconView)
         button.addSubview(nameLabel)
         button.addSubview(descLabel)
         
         NSLayoutConstraint.activate([
-            iconLabel.centerXAnchor.constraint(equalTo: button.centerXAnchor),
-            iconLabel.topAnchor.constraint(equalTo: button.topAnchor, constant: 20),
+            iconView.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            iconView.topAnchor.constraint(equalTo: button.topAnchor, constant: 20),
             
-            nameLabel.topAnchor.constraint(equalTo: iconLabel.bottomAnchor, constant: 10),
+            nameLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 10),
             nameLabel.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 5),
             nameLabel.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -5),
             

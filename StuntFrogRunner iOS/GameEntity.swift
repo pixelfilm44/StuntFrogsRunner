@@ -72,6 +72,11 @@ class Frog: GameEntity {
     // FIX: Re-added missing property
     var canJumpLogs: Bool = false
     
+    // Air jump - allows directional boost while airborne after bouncing from water
+    var canAirJump: Bool = false
+    private let airJumpMinHeight: CGFloat = 20.0  // Minimum zHeight to allow air jump
+    private let airJumpPower: CGFloat = 6.0       // Horizontal/vertical boost strength
+    
     var isSuperJumping: Bool { return buffs.superJumpTimer > 0 }
     
     private var isBeingDragged: Bool = false
@@ -94,15 +99,17 @@ class Frog: GameEntity {
     private static let leapTexture = SKTexture(imageNamed: "frogLeap")
     private static let jumpTexture = SKTexture(imageNamed: "frogJump")
     
-    // Target height for frog sprite (aspect ratio preserved automatically)
-    private static let frogTargetHeight: CGFloat = 40
+    // Target heights for frog sprite (aspect ratio preserved automatically)
+    private static let frogSitHeight: CGFloat = 40
+    private static let frogLeapHeight: CGFloat = 80
+    private static let frogJumpHeight: CGFloat = 80
     
     /// Sets the frog sprite texture while preserving the image's aspect ratio
-    private func setFrogTexture(_ texture: SKTexture) {
+    private func setFrogTexture(_ texture: SKTexture, height: CGFloat) {
         frogSprite.texture = texture
         let textureSize = texture.size()
         let aspectRatio = textureSize.width / textureSize.height
-        frogSprite.size = CGSize(width: Frog.frogTargetHeight * aspectRatio, height: Frog.frogTargetHeight)
+        frogSprite.size = CGSize(width: height * aspectRatio, height: height)
     }
     
     init() {
@@ -136,17 +143,29 @@ class Frog: GameEntity {
         // Use aspect-fit sizing to preserve image ratio
         let rocketTexture = rocketSprite.texture ?? SKTexture(imageNamed: "rocketRide")
         let rocketTextureSize = rocketTexture.size()
-        let rocketTargetHeight: CGFloat = 60
+        let rocketTargetHeight: CGFloat = 150
         let rocketAspectRatio = rocketTextureSize.width / rocketTextureSize.height
         rocketSprite.size = CGSize(width: rocketTargetHeight * rocketAspectRatio, height: rocketTargetHeight)
         rocketSprite.position = CGPoint(x: 0, y: -30)  // Position below the frog
         rocketSprite.zPosition = -1  // Behind the frog sprite
         rocketSprite.isHidden = true
+        
+        // Add flame sprite behind the rocket
+        let flameSprite = SKSpriteNode(imageNamed: "flame")
+        let flameTargetHeight: CGFloat = 80
+        let flameTexture = flameSprite.texture ?? SKTexture(imageNamed: "flame")
+        let flameTextureSize = flameTexture.size()
+        let flameAspectRatio = flameTextureSize.width / flameTextureSize.height
+        flameSprite.size = CGSize(width: flameTargetHeight * flameAspectRatio, height: flameTargetHeight)
+        flameSprite.position = CGPoint(x: 0, y: -rocketTargetHeight * 0.5)  // Position below the rocket
+        flameSprite.zPosition = -1  // Behind the rocket sprite
+        rocketSprite.addChild(flameSprite)
+        
         bodyNode.addChild(rocketSprite)
         
         // Setup frog sprite with initial sitting texture
         // Use aspect-fit sizing to preserve image ratio
-        setFrogTexture(Frog.sitTexture)
+        setFrogTexture(Frog.sitTexture, height: Frog.frogSitHeight)
         bodyNode.addChild(frogSprite)
         
         vestNode.strokeColor = .orange
@@ -216,13 +235,61 @@ class Frog: GameEntity {
         rocketTimer = 0
         landingTimer = 0
         velocity.dx = 0
-        velocity.dy = 0
-        zVelocity = -25.0
+        velocity.dy = 1.5  // Keep drifting forward slowly during descent
+        zVelocity = -32.0
     }
     
     func hit() {
         invincibilityTimer = 120
         isInvincible = true
+    }
+    
+    /// Plays a drowning animation where the frog sinks underwater and disappears.
+    /// - Parameter completion: Called when the animation finishes
+    func playDrowningAnimation(completion: @escaping () -> Void) {
+        // Stop all movement
+        velocity = .zero
+        zVelocity = 0
+        
+        // Disable physics updates during animation
+        isInvincible = true
+        
+        // Create the sinking and fading animation sequence
+        let duration: TimeInterval = 1.2
+        
+        // Sink down animation (move bodyNode down to simulate sinking)
+        let sinkDistance: CGFloat = 60
+        let sink = SKAction.moveBy(x: 0, y: -sinkDistance, duration: duration)
+        sink.timingMode = .easeIn
+        
+        // Fade out
+        let fadeOut = SKAction.fadeOut(withDuration: duration)
+        fadeOut.timingMode = .easeIn
+        
+        // Scale down slightly (like disappearing underwater)
+        let scaleDown = SKAction.scale(to: 0.3, duration: duration)
+        scaleDown.timingMode = .easeIn
+        
+        // Add a subtle rotation as if being pulled under
+        let wobble1 = SKAction.rotate(byAngle: 0.2, duration: duration * 0.25)
+        let wobble2 = SKAction.rotate(byAngle: -0.4, duration: duration * 0.25)
+        let wobble3 = SKAction.rotate(byAngle: 0.3, duration: duration * 0.25)
+        let wobble4 = SKAction.rotate(byAngle: -0.1, duration: duration * 0.25)
+        let wobbleSequence = SKAction.sequence([wobble1, wobble2, wobble3, wobble4])
+        
+        // Combine animations for the body
+        let bodyAnimation = SKAction.group([sink, fadeOut, scaleDown, wobbleSequence])
+        
+        // Also fade and scale the shadow
+        let shadowFade = SKAction.fadeOut(withDuration: duration * 0.5)
+        let shadowScale = SKAction.scale(to: 0.1, duration: duration * 0.5)
+        let shadowAnimation = SKAction.group([shadowFade, shadowScale])
+        
+        // Run animations
+        shadowNode.run(shadowAnimation)
+        bodyNode.run(bodyAnimation) {
+            completion()
+        }
     }
     
     func setPullOffset(_ offset: CGPoint) {
@@ -271,7 +338,7 @@ class Frog: GameEntity {
                 descend()
                 return
             }
-            velocity.dy *= 0.95
+            velocity.dy *= 0.25
             if velocity.dy < 0.5 { velocity.dy = 0.5 }
             position.y += velocity.dy
             zHeight = 60 + sin(CGFloat(Date().timeIntervalSince1970) * 5) * 5
@@ -316,12 +383,19 @@ class Frog: GameEntity {
             frogSprite.alpha = 1.0
         } else {
             superAura.isHidden = true
-            frogSprite.colorBlendFactor = 0.0
             
-            if invincibilityTimer > 0 {
+            // Low health warning - flash red when at 1 heart
+            if currentHealth == 1 && invincibilityTimer <= 0 {
+                let flashPhase = Int(Date().timeIntervalSince1970 * 4) % 2
+                frogSprite.colorBlendFactor = flashPhase == 0 ? 0.6 : 0.0
+                frogSprite.color = .red
+                frogSprite.alpha = 1.0
+            } else if invincibilityTimer > 0 {
+                frogSprite.colorBlendFactor = 0.0
                 let flash = (invincibilityTimer / 10) % 2 == 0
                 frogSprite.alpha = flash ? 0.5 : 1.0
             } else {
+                frogSprite.colorBlendFactor = 0.0
                 frogSprite.alpha = 1.0
             }
         }
@@ -359,11 +433,11 @@ class Frog: GameEntity {
             
             switch animationState {
             case .sitting:
-                setFrogTexture(Frog.sitTexture)
+                setFrogTexture(Frog.sitTexture, height: Frog.frogSitHeight)
             case .leaping:
-                setFrogTexture(Frog.leapTexture)
+                setFrogTexture(Frog.leapTexture, height: Frog.frogLeapHeight)
             case .jumping:
-                setFrogTexture(Frog.jumpTexture)
+                setFrogTexture(Frog.jumpTexture, height: Frog.frogJumpHeight)
             }
         }
     }
@@ -371,13 +445,11 @@ class Frog: GameEntity {
     func jump(vector: CGVector, intensity: CGFloat) {
         resetPullOffset()
         
-        var finalVector = vector
-        if buffs.superJumpTimer > 0 {
-            finalVector.dx *= 2.0
-            finalVector.dy *= 2.0
-        }
+        // NOTE: SuperJump multiplier is now applied in GameScene.touchesEnded
+        // and updateTrajectoryVisuals to keep trajectory prediction accurate.
+        // Do NOT multiply here again to avoid double-application.
         
-        self.velocity = finalVector
+        self.velocity = vector
         self.zVelocity = Configuration.Physics.baseJumpZ * (0.5 + (intensity * 0.5))
         self.jumpStartZVelocity = self.zVelocity  // Track for animation phase calculation
         self.onPad = nil
@@ -385,7 +457,7 @@ class Frog: GameEntity {
         
         // Immediately transition to leaping state
         animationState = .leaping
-        setFrogTexture(Frog.leapTexture)
+        setFrogTexture(Frog.leapTexture, height: Frog.frogLeapHeight)
         
         SoundManager.shared.play("jump")
         HapticsManager.shared.playImpact(.light)
@@ -397,11 +469,12 @@ class Frog: GameEntity {
         jumpStartZVelocity = 0  // Reset for next jump
         self.onPad = pad
         self.isFloating = false
+        self.canAirJump = false  // Reset air jump ability on landing
         resetPullOffset()
         
         // Transition to sitting state
         animationState = .sitting
-        setFrogTexture(Frog.sitTexture)
+        setFrogTexture(Frog.sitTexture, height: Frog.frogSitHeight)
         
         let isRain = (weather == .rain)
         let isIce = (pad.type == .ice)
@@ -422,16 +495,55 @@ class Frog: GameEntity {
     }
     
     func bounce() {
-        zVelocity = 15.0
+        // High bounce to give time for air jump - extra air time for steering to a lilypad
+        zVelocity = 22.0
         jumpStartZVelocity = zVelocity  // Track for animation phases
         velocity.dx *= -0.5
         velocity.dy *= -0.5
         
+        // Enable air jump after bouncing from water
+        canAirJump = true
+        
         // Transition to leaping state since we're bouncing up
         animationState = .leaping
-        setFrogTexture(Frog.leapTexture)
+        setFrogTexture(Frog.leapTexture, height: Frog.frogLeapHeight)
         
         HapticsManager.shared.playImpact(.heavy)
+    }
+    
+    /// Check if the frog can perform an air jump (must be airborne and have the ability)
+    func canPerformAirJump() -> Bool {
+        return canAirJump && zHeight >= airJumpMinHeight && onPad == nil
+    }
+    
+    /// Perform a directional air jump - simple tap in a direction
+    /// - Parameter direction: Normalized direction vector (e.g., left = (-1, 0), up = (0, 1))
+    func airJump(direction: CGVector) {
+        guard canPerformAirJump() else { return }
+        
+        // Consume the air jump ability
+        canAirJump = false
+        
+        // Apply directional boost to current velocity
+        self.velocity.dx += direction.dx * airJumpPower
+        self.velocity.dy += direction.dy * airJumpPower
+        
+        // Give a small upward boost to extend air time
+        self.zVelocity = max(self.zVelocity, 8.0)
+        self.jumpStartZVelocity = self.zVelocity
+        self.isFloating = false
+        
+        // Transition to leaping state
+        animationState = .leaping
+        setFrogTexture(Frog.leapTexture, height: Frog.frogLeapHeight)
+        
+        // Update facing direction
+        let angle = atan2(direction.dy, direction.dx) - CGFloat.pi / 2
+        lastFacingAngle = angle
+        bodyNode.zRotation = angle
+        
+        SoundManager.shared.play("jump")
+        HapticsManager.shared.playImpact(.medium)
     }
 }
 
@@ -441,6 +553,7 @@ class Pad: GameEntity {
     var type: PadType = .normal
     var moveDirection: CGFloat = 1.0
     var moveSpeed: CGFloat = 2.0
+    var hasSpawnedGhost: Bool = false  // Track if grave has already spawned its ghost
     private var padSprite: SKSpriteNode?
     private var shrinkTime: Double = 0
     private var shrinkSpeed: Double = 2.0
@@ -459,14 +572,22 @@ class Pad: GameEntity {
     private static let waterLilyRainTexture = SKTexture(imageNamed: "lilypadWaterRain")
     private static let waterLilySnowTexture = SKTexture(imageNamed: "lilypadWaterSnow")
     
+    /// The base radius for this pad (before any scaling from shrinking)
+    private(set) var baseRadius: CGFloat = Configuration.Dimensions.minPadRadius
+    
     var scaledRadius: CGFloat {
         if type == .log { return 60.0 }
-        return 45.0 * xScale
+        return baseRadius * xScale
     }
-    init(type: PadType, position: CGPoint) {
-        let size = (type == .log) ? CGSize(width: 120, height: 40) : CGSize(width: 90, height: 90)
+    
+    init(type: PadType, position: CGPoint, radius: CGFloat? = nil) {
+        // Use provided radius or generate a random one
+        let padRadius = (type == .log) ? 45.0 : (radius ?? Configuration.Dimensions.randomPadRadius())
+        let diameter = padRadius * 2
+        let size = (type == .log) ? CGSize(width: 120, height: 40) : CGSize(width: diameter, height: diameter)
         super.init(texture: nil, color: .clear, size: size)
         self.type = type
+        self.baseRadius = padRadius
         self.position = position
         self.zPosition = Layer.pad
         self.moveDirection = Bool.random() ? 1.0 : -1.0
@@ -543,6 +664,25 @@ class Pad: GameEntity {
         }
         padSprite?.texture = texture
     }
+    /// Plays a subtle squish animation when the frog lands on the pad.
+    /// Uses SKAction for GPU-accelerated animation with no performance impact.
+    func playLandingSquish() {
+        // Don't animate logs or shrinking pads (shrinking has its own animation)
+        guard type != .log && type != .shrinking else { return }
+        
+        // Remove any existing squish action to avoid stacking
+        removeAction(forKey: "landingSquish")
+        
+        // Quick squish down (shrink slightly) then bounce back
+        let squishDown = SKAction.scale(to: 0.85, duration: 0.06)
+        let squishUp = SKAction.scale(to: 1.0, duration: 0.12)
+        squishDown.timingMode = .easeOut
+        squishUp.timingMode = .easeOut
+        
+        let squishSequence = SKAction.sequence([squishDown, squishUp])
+        run(squishSequence, withKey: "landingSquish")
+    }
+    
     func update(dt: TimeInterval) {
         if type == .moving || type == .log || type == .waterLily {
             position.x += moveSpeed * moveDirection
@@ -592,15 +732,9 @@ class Enemy: GameEntity {
             sprite.size = CGSize(width: 30, height: 30)
             addChild(sprite)
         case "GHOST":
-            let body = SKShapeNode(circleOfRadius: 15)
-            body.fillColor = UIColor.white.withAlphaComponent(0.7)
-            body.strokeColor = .black
-            body.lineWidth = 2
-            addChild(body)
-            let label = SKLabelNode(text: "👻")
-            label.verticalAlignmentMode = .center
-            label.fontSize = 20
-            body.addChild(label)
+            let ghostSprite = SKSpriteNode(imageNamed: "ghostFrog")
+            ghostSprite.size = CGSize(width: 65, height: 65)
+            addChild(ghostSprite)
         default: // BEE
             let sprite = SKSpriteNode(texture: Enemy.beeTexture)
             sprite.size = CGSize(width: 30, height: 30)
@@ -648,4 +782,546 @@ class Coin: GameEntity {
         run(SKAction.repeatForever(SKAction.sequence([moveUp, moveDown])))
     }
     required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not be implemented") }
+}
+
+// MARK: - Treasure Chest
+class TreasureChest: GameEntity {
+    
+    /// Possible rewards from opening a treasure chest
+    enum Reward: CaseIterable {
+        case heartsRefill       // Refill all hearts
+        case lifevest4Pack      // 4 life vests
+        case cross4Pack         // 4 holy crosses
+        case axe4Pack           // 4 axes
+        case swatter4Pack       // 4 fly swatters
+        
+        var displayName: String {
+            switch self {
+            case .heartsRefill: return "Full Hearts!"
+            case .lifevest4Pack: return "4x Life Vest"
+            case .cross4Pack: return "4x Holy Cross"
+            case .axe4Pack: return "4x Axe"
+            case .swatter4Pack: return "4x Swatter"
+            }
+        }
+        
+        var icon: String {
+            switch self {
+            case .heartsRefill: return "❤️‍🔥"
+            case .lifevest4Pack: return "🦺"
+            case .cross4Pack: return "✝️"
+            case .axe4Pack: return "🪓"
+            case .swatter4Pack: return "🏸"
+            }
+        }
+        
+        static func random() -> Reward {
+            return allCases.randomElement() ?? .heartsRefill
+        }
+    }
+    
+    var isCollected = false
+    private(set) var reward: Reward
+    private let chestSprite: SKSpriteNode
+    private let glowNode: SKShapeNode
+    
+    // Preloaded texture (with fallback if image is missing)
+    private static var chestTexture: SKTexture {
+        if let _ = UIImage(named: "treasureChest") {
+            return SKTexture(imageNamed: "treasureChest")
+        } else {
+            // Fallback: create a simple chest-like shape texture won't work, use sprite instead
+            return SKTexture(imageNamed: "star") // Fallback to star if chest image missing
+        }
+    }
+    
+    init(position: CGPoint) {
+        self.reward = Reward.random()
+        
+        // Create chest sprite - check if treasureChest image exists
+        if UIImage(named: "treasureChest") != nil {
+            chestSprite = SKSpriteNode(texture: TreasureChest.chestTexture)
+            chestSprite.size = CGSize(width: 40, height: 40)
+        } else {
+            // Fallback: create a simple chest visual using shapes
+            chestSprite = SKSpriteNode(color: .clear, size: CGSize(width: 40, height: 40))
+            let chestBody = SKShapeNode(rectOf: CGSize(width: 36, height: 28), cornerRadius: 4)
+            chestBody.fillColor = UIColor(red: 0.55, green: 0.35, blue: 0.15, alpha: 1.0) // Brown
+            chestBody.strokeColor = UIColor(red: 0.85, green: 0.65, blue: 0.13, alpha: 1.0) // Gold
+            chestBody.lineWidth = 3
+            chestBody.position.y = -2
+            chestSprite.addChild(chestBody)
+            
+            // Lid
+            let lid = SKShapeNode(rectOf: CGSize(width: 38, height: 12), cornerRadius: 3)
+            lid.fillColor = UIColor(red: 0.6, green: 0.4, blue: 0.2, alpha: 1.0)
+            lid.strokeColor = UIColor(red: 0.85, green: 0.65, blue: 0.13, alpha: 1.0)
+            lid.lineWidth = 2
+            lid.position.y = 12
+            chestSprite.addChild(lid)
+            
+            // Lock/clasp
+            let clasp = SKShapeNode(circleOfRadius: 5)
+            clasp.fillColor = UIColor(red: 0.85, green: 0.65, blue: 0.13, alpha: 1.0)
+            clasp.strokeColor = UIColor(red: 0.7, green: 0.5, blue: 0.1, alpha: 1.0)
+            clasp.lineWidth = 1
+            clasp.position.y = 4
+            chestSprite.addChild(clasp)
+        }
+        
+        // Create glow effect
+        glowNode = SKShapeNode(circleOfRadius: 25)
+        glowNode.fillColor = .yellow.withAlphaComponent(0.3)
+        glowNode.strokeColor = .yellow.withAlphaComponent(0.6)
+        glowNode.lineWidth = 2
+        glowNode.zPosition = -1
+        
+        super.init(texture: nil, color: .clear, size: CGSize(width: 40, height: 40))
+        self.position = position
+        self.zHeight = 15  // Slightly above the lilypad
+        self.zPosition = Layer.item + 1  // Above coins
+        
+        setupVisuals()
+    }
+    
+    required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    
+    private func setupVisuals() {
+        // Add glow behind chest
+        addChild(glowNode)
+        
+        // Add chest sprite
+        addChild(chestSprite)
+        
+        // Pulsing glow animation
+        let glowUp = SKAction.fadeAlpha(to: 0.8, duration: 0.6)
+        let glowDown = SKAction.fadeAlpha(to: 0.4, duration: 0.6)
+        glowNode.run(SKAction.repeatForever(SKAction.sequence([glowUp, glowDown])))
+        
+        // Subtle floating animation
+        let moveUp = SKAction.moveBy(x: 0, y: 6, duration: 0.8)
+        moveUp.timingMode = .easeInEaseOut
+        let moveDown = moveUp.reversed()
+        run(SKAction.repeatForever(SKAction.sequence([moveUp, moveDown])))
+        
+        // Slight rotation wobble for visual interest
+        let rotateLeft = SKAction.rotate(byAngle: 0.1, duration: 1.0)
+        let rotateRight = SKAction.rotate(byAngle: -0.1, duration: 1.0)
+        chestSprite.run(SKAction.repeatForever(SKAction.sequence([rotateLeft, rotateRight, rotateRight, rotateLeft])))
+    }
+    
+    /// Play the chest opening animation and return the reward
+    func open() -> Reward {
+        guard !isCollected else { return reward }
+        isCollected = true
+        
+        // Stop all animations
+        removeAllActions()
+        glowNode.removeAllActions()
+        chestSprite.removeAllActions()
+        
+        // Opening animation - scale up and burst
+        let scaleUp = SKAction.scale(to: 1.5, duration: 0.15)
+        let burst = SKAction.group([
+            SKAction.scale(to: 2.0, duration: 0.2),
+            SKAction.fadeOut(withDuration: 0.2)
+        ])
+        let remove = SKAction.removeFromParent()
+        
+        run(SKAction.sequence([scaleUp, burst, remove]))
+        
+        return reward
+    }
+}
+
+// MARK: - Snake
+class Snake: GameEntity {
+    
+    /// Movement speed (pixels per frame)
+    private let moveSpeed: CGFloat = 2.5
+    
+    /// Visual nodes
+    private let bodySprite = SKSpriteNode()
+    private let shadowNode = SKShapeNode(ellipseOf: CGSize(width: 50, height: 20))
+    
+    /// Animation textures
+    private static let animationTextures: [SKTexture] = {
+        return (1...5).map { SKTexture(imageNamed: "snake\($0)") }
+    }()
+    
+    /// Animation key
+    private let animationKey = "snakeAnimation"
+    
+    /// Collision radius
+    var scaledRadius: CGFloat { return 25.0 }
+    
+    /// Whether the snake has been destroyed
+    var isDestroyed: Bool = false
+    
+    init(position: CGPoint) {
+        super.init(texture: nil, color: .clear, size: CGSize(width: 60, height: 40))
+        self.position = position
+        self.zHeight = 5  // Slightly above water level (on lilypads/logs)
+        self.zPosition = Layer.item + 2  // Above coins and other items
+        setupVisuals()
+        startAnimation()
+    }
+    
+    required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    
+    private func setupVisuals() {
+        // Shadow
+        shadowNode.fillColor = .black.withAlphaComponent(0.25)
+        shadowNode.strokeColor = .clear
+        shadowNode.position.y = -10
+        shadowNode.zPosition = -1
+        addChild(shadowNode)
+        
+        // Snake sprite
+        let texture = Snake.animationTextures.first ?? SKTexture(imageNamed: "snake1")
+        let textureSize = texture.size()
+        let targetHeight: CGFloat = 50
+        let aspectRatio = textureSize.width / textureSize.height
+        bodySprite.size = CGSize(width: targetHeight * aspectRatio, height: targetHeight)
+        bodySprite.texture = texture
+        bodySprite.zPosition = 1
+        addChild(bodySprite)
+    }
+    
+    private func startAnimation() {
+        // Cycle through snake1-5 frames
+        let animateAction = SKAction.animate(with: Snake.animationTextures, timePerFrame: 0.12)
+        let repeatAnimation = SKAction.repeatForever(animateAction)
+        bodySprite.run(repeatAnimation, withKey: animationKey)
+    }
+    
+    /// Updates the snake's position - moves left to right, avoiding logs and going over lilypads
+    /// - Parameters:
+    ///   - dt: Delta time
+    ///   - pads: Array of pads to check for obstacles
+    /// - Returns: True if the snake has moved off the right side of the screen
+    func update(dt: TimeInterval, pads: [Pad]) -> Bool {
+        guard !isDestroyed else { return false }
+        
+        // Move from left to right
+        position.x += moveSpeed
+        
+        // Check for log obstacles - move around them
+        for pad in pads where pad.type == .log {
+            let dx = abs(position.x - pad.position.x)
+            let dy = abs(position.y - pad.position.y)
+            
+            // Log is nearby horizontally and vertically
+            if dx < 80 && dy < 60 {
+                // Move up or down to avoid the log
+                if position.y < pad.position.y {
+                    position.y -= 1.5  // Move down
+                } else {
+                    position.y += 1.5  // Move up
+                }
+            }
+        }
+        
+        // Constrain Y position to stay within river bounds
+        let margin: CGFloat = 30
+        if position.y < margin {
+            position.y = margin
+        } else if position.y > Configuration.Dimensions.riverWidth - margin {
+            position.y = Configuration.Dimensions.riverWidth - margin
+        }
+        
+        // Return true if snake has moved off the right edge
+        return position.x > Configuration.Dimensions.riverWidth + 50
+    }
+    
+    /// Destroys the snake (called when hit by axe)
+    func destroy() {
+        guard !isDestroyed else { return }
+        isDestroyed = true
+        
+        // Stop animation
+        bodySprite.removeAction(forKey: animationKey)
+        
+        // Death animation - shrink and fade
+        let shrink = SKAction.scale(to: 0.3, duration: 0.2)
+        let fade = SKAction.fadeOut(withDuration: 0.2)
+        let spin = SKAction.rotate(byAngle: .pi * 2, duration: 0.2)
+        let deathAnimation = SKAction.group([shrink, fade, spin])
+        let remove = SKAction.removeFromParent()
+        
+        run(SKAction.sequence([deathAnimation, remove]))
+    }
+}
+
+// MARK: - Crocodile
+class Crocodile: GameEntity {
+    
+    enum CrocodileState {
+        case submerged      // Hidden below water, waiting to rise
+        case rising         // Emerging from water
+        case idle           // Floating on surface, can be landed on
+        case fleeing        // Swimming away from approaching frog
+        case carrying       // Frog is riding on the crocodile
+    }
+    
+    private(set) var state: CrocodileState = .submerged
+    private var stateTimer: TimeInterval = 0
+    private var riseDelay: TimeInterval = 0
+    
+    // Carrying state
+    private(set) var isCarryingFrog: Bool = false
+    private var carryTimer: TimeInterval = 0
+    static let carryDuration: TimeInterval = 15.0  // 15 second ride
+    static let carryReward: Int = 10  // Coins rewarded for successful ride (increased for longer ride)
+    
+    // Movement
+    private let swimSpeed: CGFloat = 4.0
+    private let fleeSpeed: CGFloat = 6.0
+    private var steerDirection: CGFloat = 0  // -1 for left, 0 for none, 1 for right
+    private let detectionRadius: CGFloat = 400.0
+    
+    // Visual nodes
+    private let bodySprite = SKSpriteNode(imageNamed: "crocodile")
+    private let shadowNode = SKShapeNode(ellipseOf: CGSize(width: 240, height: 90))  // 3x bigger
+    private let rideIndicator = SKShapeNode(circleOfRadius: 50)  //
+    
+    // Preloaded textures
+    private static let crocodileTexture = SKTexture(imageNamed: "crocodile")
+    private static let carryingTextures: [SKTexture] = [
+        SKTexture(imageNamed: "crocodile1"),
+        SKTexture(imageNamed: "crocodile2"),
+        SKTexture(imageNamed: "crocodile3"),
+        SKTexture(imageNamed: "crocodile4"),
+        SKTexture(imageNamed: "crocodile5")
+    ]
+    
+    // Animation key
+    private let carryingAnimationKey = "carryingAnimation"
+    
+    var scaledRadius: CGFloat { return 150.0 }  // 3x bigger hitbox
+    
+    init(position: CGPoint, riseDelay: TimeInterval = 0) {
+        super.init(texture: nil, color: .clear, size: CGSize(width: 300, height: 120))  // 3x bigger
+        self.position = position
+        self.riseDelay = riseDelay
+        self.zPosition = Layer.pad + 1
+        self.alpha = 0  // Start invisible (submerged)
+        setupVisuals()
+    }
+    
+    required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    
+    private func setupVisuals() {
+       
+        
+        // Crocodile sprite - 3x bigger
+        let textureSize = Crocodile.crocodileTexture.size()
+        let targetHeight: CGFloat = 150  // 3x bigger (was 50)
+        let aspectRatio = textureSize.width / textureSize.height
+        bodySprite.size = CGSize(width: targetHeight * aspectRatio, height: targetHeight)
+        bodySprite.texture = Crocodile.crocodileTexture
+        bodySprite.zPosition = 1
+        addChild(bodySprite)
+        
+        // Ride indicator (shows when can be landed on)
+        rideIndicator.strokeColor = .green
+        rideIndicator.fillColor = .green.withAlphaComponent(0.2)
+        rideIndicator.lineWidth = 3  // Thicker line for bigger indicator
+        rideIndicator.zPosition = 0
+        rideIndicator.isHidden = true
+        addChild(rideIndicator)
+        
+        // Pulsing animation for ride indicator
+        let scaleUp = SKAction.scale(to: 1.2, duration: 0.4)
+        let scaleDown = SKAction.scale(to: 1.0, duration: 0.4)
+        rideIndicator.run(SKAction.repeatForever(SKAction.sequence([scaleUp, scaleDown])))
+    }
+    
+    func update(dt: TimeInterval, frogPosition: CGPoint, frogZHeight: CGFloat) {
+        stateTimer += dt
+        
+        switch state {
+        case .submerged:
+            // Wait for rise delay, then start rising
+            if stateTimer >= riseDelay {
+                transitionTo(.rising)
+            }
+            
+        case .rising:
+            // Fade in over 1 second
+            let riseProgress = min(1.0, stateTimer / 1.0)
+            self.alpha = CGFloat(riseProgress)
+            
+            if riseProgress >= 1.0 {
+                transitionTo(.idle)
+            }
+            
+        case .idle:
+            // Check if frog is approaching
+            let dx = frogPosition.x - position.x
+            let dy = frogPosition.y - position.y
+            let distance = sqrt(dx * dx + dy * dy)
+            
+            // Show ride indicator when frog is nearby
+            rideIndicator.isHidden = distance > detectionRadius * 1.5
+            
+            // If frog is close and approaching from below (frog is behind/below the crocodile), start fleeing
+            // dy < 0 means frog is below (behind) the crocodile, approaching from downstream
+            if distance < detectionRadius && dy < 50 {
+                transitionTo(.fleeing)
+            }
+            
+            // Gentle bobbing animation
+            let bobOffset = sin(stateTimer * 2) * 5  // Slightly bigger bob for bigger croc
+            bodySprite.position.y = CGFloat(bobOffset)
+            
+        case .fleeing:
+            // Swim upstream (positive Y direction) - FAST!
+            position.y += fleeSpeed
+            
+            // Slight side-to-side motion while fleeing
+            let wiggle = sin(stateTimer * 8) * 4
+            position.x += CGFloat(wiggle) * 0.5
+            
+            // Constrain to river
+            constrainToRiver()
+            
+            // Check if frog is still chasing
+            let dx = frogPosition.x - position.x
+            let dy = frogPosition.y - position.y
+            let distance = sqrt(dx * dx + dy * dy)
+            
+            // If frog is far away or frog is now ahead of crocodile (croc escaped), return to idle
+            // dy > 0 means frog is now ABOVE (ahead of) the crocodile - we escaped!
+            if distance > detectionRadius * 2.5 || dy > 100 {
+                if stateTimer > 1.5 {
+                    transitionTo(.idle)
+                }
+            }
+            
+        case .carrying:
+            carryTimer += dt
+            
+            // Swim upstream while carrying - good speed for the ride!
+            position.y += swimSpeed * 1.5
+            SoundManager.shared.play("crocodileMashing")
+
+            // Apply player steering
+            let steerSpeed: CGFloat = 4.0
+            position.x += steerDirection * steerSpeed
+            
+            // Decay steering input (requires continuous tapping)
+            steerDirection *= 0.9
+            
+            constrainToRiver()
+            
+            // Show remaining time via indicator color
+            let progress = carryTimer / Crocodile.carryDuration
+            let green = CGFloat(1.0 - progress)
+            let red = CGFloat(progress)
+            rideIndicator.strokeColor = UIColor(red: red, green: green, blue: 0, alpha: 1)
+            rideIndicator.fillColor = UIColor(red: red, green: green, blue: 0, alpha: 0.2)
+            rideIndicator.isHidden = false
+        }
+    }
+    
+    private func transitionTo(_ newState: CrocodileState) {
+        state = newState
+        stateTimer = 0
+        
+        switch newState {
+        case .submerged:
+            self.alpha = 0
+            rideIndicator.isHidden = true
+            
+        case .rising:
+            // Play a subtle ripple effect could be added here
+            break
+            
+        case .idle:
+            self.alpha = 1.0
+            bodySprite.zRotation = 0
+            
+        case .fleeing:
+            // Point upstream (facing up)
+            rideIndicator.isHidden = true
+            
+        case .carrying:
+            carryTimer = 0
+            isCarryingFrog = true
+            rideIndicator.isHidden = false
+            rideIndicator.strokeColor = .green
+            rideIndicator.fillColor = .green.withAlphaComponent(0.2)
+            
+            // Start the carrying animation (cycling through crocodile1-5)
+            startCarryingAnimation()
+        }
+    }
+    
+    private func startCarryingAnimation() {
+        // Stop any existing animation
+        bodySprite.removeAction(forKey: carryingAnimationKey)
+        
+        // Create animation action cycling through crocodile1-5 frames
+        let animateAction = SKAction.animate(with: Crocodile.carryingTextures, timePerFrame: 0.15)
+        let repeatAnimation = SKAction.repeatForever(animateAction)
+        bodySprite.run(repeatAnimation, withKey: carryingAnimationKey)
+    }
+    
+    private func stopCarryingAnimation() {
+        // Stop the animation and return to default texture
+        bodySprite.removeAction(forKey: carryingAnimationKey)
+        bodySprite.texture = Crocodile.crocodileTexture
+    }
+    
+    /// Called when frog lands on the crocodile
+    func startCarrying() {
+        transitionTo(.carrying)
+    }
+    
+    /// Steer the crocodile left or right while riding
+    /// - Parameter direction: -1 for left, 1 for right
+    func steer(_ direction: CGFloat) {
+        guard state == .carrying else { return }
+        steerDirection = direction
+    }
+    
+    /// Called when ride is complete or frog jumps off
+    func stopCarrying() -> Bool {
+        let wasCarrying = isCarryingFrog
+        let rideComplete = carryTimer >= Crocodile.carryDuration
+        
+        isCarryingFrog = false
+        carryTimer = 0
+        stopCarryingAnimation()
+        transitionTo(.idle)
+        
+        return wasCarrying && rideComplete
+    }
+    
+    /// Check if the ride duration is complete
+    func isRideComplete() -> Bool {
+        return state == .carrying && carryTimer >= Crocodile.carryDuration
+    }
+    
+    /// Returns remaining ride time
+    func remainingRideTime() -> TimeInterval {
+        return max(0, Crocodile.carryDuration - carryTimer)
+    }
+    
+    /// Makes the crocodile submerge underwater and disappear
+    func submergeAndDisappear() {
+        state = .submerged
+        isCarryingFrog = false
+        rideIndicator.isHidden = true
+        stopCarryingAnimation()
+        
+        // Animate sinking and fading out
+        let sink = SKAction.moveBy(x: 0, y: -20, duration: 0.5)
+        let fadeOut = SKAction.fadeOut(withDuration: 0.5)
+        let group = SKAction.group([sink, fadeOut])
+        let remove = SKAction.removeFromParent()
+        
+        run(SKAction.sequence([group, remove]))
+    }
 }

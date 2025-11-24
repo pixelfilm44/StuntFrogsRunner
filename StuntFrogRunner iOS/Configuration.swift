@@ -8,8 +8,8 @@ struct Configuration {
         static let gravityZ: CGFloat = 0.6
         static let frictionGround: CGFloat = 0.8
         static let frictionAir: CGFloat = 0.99
-        static let baseJumpZ: CGFloat = 4.0
-        static let maxDragDistance: CGFloat = 250.0
+        static let baseJumpZ: CGFloat = 2.0
+        static let maxDragDistance: CGFloat = 150.0
         
         static func dragPower(level: Int) -> CGFloat {
             return 0.08 + (CGFloat(level) * 0.0075)
@@ -18,8 +18,15 @@ struct Configuration {
     
     struct Dimensions {
         static let riverWidth: CGFloat = 600.0
-        static let padRadius: CGFloat = 45.0
+        static let minPadRadius: CGFloat = 45.0
+        static let maxPadRadius: CGFloat = 65.0
+        static let padSpacing: CGFloat = 10.0  // Minimum gap between lily pads
         static let frogRadius: CGFloat = 20.0
+        
+        /// Generates a random pad radius between min and max
+        static func randomPadRadius() -> CGFloat {
+            return CGFloat.random(in: minPadRadius...maxPadRadius)
+        }
     }
     
     struct Colors {
@@ -32,10 +39,10 @@ struct Configuration {
     struct GameRules {
         static let coinsForUpgradeTrigger = 10
         static let rocketDuration: TimeInterval = 7.0
-        static let rocketLandingDuration: TimeInterval = 3.0
+        static let rocketLandingDuration: TimeInterval = 5.0
         static let bootsDuration: TimeInterval = 5.0
         // NEW: SuperJump Duration
-        static let superJumpDuration: TimeInterval = 5.0
+        static let superJumpDuration: TimeInterval = 10.0
     }
     
     /// Progressive difficulty settings - scales every 500m traveled
@@ -51,11 +58,11 @@ struct Configuration {
         // MARK: - Enemy Spawning
         
         /// Base probability of spawning an enemy (at level 0)
-        static let baseEnemyProbability: Double = 0.05
+        static let baseEnemyProbability: Double = 0.25
         /// Additional enemy probability per difficulty level
-        static let enemyProbabilityPerLevel: Double = 0.05
+        static let enemyProbabilityPerLevel: Double = 0.65
         /// Maximum enemy spawn probability
-        static let maxEnemyProbability: Double = 0.5
+        static let maxEnemyProbability: Double = 0.85
         
         static func enemyProbability(forLevel level: Int) -> Double {
             return min(maxEnemyProbability, baseEnemyProbability + (Double(level) * enemyProbabilityPerLevel))
@@ -107,6 +114,34 @@ struct Configuration {
             let effectiveLevel = level - shrinkingPadStartLevel
             return min(0.35, 0.05 + (Double(effectiveLevel) * 0.05))
         }
+        
+        // MARK: - Crocodile Spawning
+        
+        /// Minimum score before crocodiles can appear
+        static let crocodileMinScore: Int = 2500
+        /// Maximum number of crocodiles that can appear in a single run
+        static let crocodileMaxPerRun: Int = 2
+        /// Probability of spawning a crocodile near a water lily pad
+        static let crocodileSpawnProbability: Double = 0.05
+        
+        // MARK: - Snake Spawning
+        
+        /// Difficulty level when snakes start appearing (level 2 = 1000m)
+        static let snakeStartLevel: Int = 2
+        /// Base probability of spawning a snake (once unlocked)
+        static let baseSnakeProbability: Double = 0.08
+        /// Additional snake probability per level after unlock
+        static let snakeProbabilityPerLevel: Double = 0.03
+        /// Maximum snake spawn probability
+        static let maxSnakeProbability: Double = 0.25
+        /// Maximum snakes on screen at once
+        static let snakeMaxOnScreen: Int = 3
+        
+        static func snakeProbability(forLevel level: Int) -> Double {
+            guard level >= snakeStartLevel else { return 0.0 }
+            let effectiveLevel = level - snakeStartLevel
+            return min(maxSnakeProbability, baseSnakeProbability + (Double(effectiveLevel) * snakeProbabilityPerLevel))
+        }
     }
     
     struct Shop {
@@ -122,6 +157,8 @@ struct Configuration {
         }
         
         static let logJumperCost = 300
+        static let superJumpCost = 500
+        static let rocketJumpCost = 500
     }
     
     struct GameCenter {

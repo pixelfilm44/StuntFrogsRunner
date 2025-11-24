@@ -1,15 +1,76 @@
 import UIKit
+import SpriteKit
 
 class LoadingViewController: UIViewController {
     
     weak var coordinator: GameCoordinator?
+    
+    // MARK: - Asset Lists
+    
+    /// All visual assets to preload
+    private let visualAssets: [String] = [
+        // UI Assets
+        "loadingScreen",
+        "star",
+        "heart",
+        
+        // Frog Assets
+        "frogSit",
+        "frogLeap",
+        "frogJump",
+        "rocketRide",
+        
+        // Lilypad Assets
+        "lilypadDay",
+        "lilypadNight",
+        "lilypadRain",
+        "lilypadIce",
+        "lilypadSnow",
+        "lilypadGrave",
+        "lilypadShrink",
+        "lilypadWater",
+        "lilypadWaterNight",
+        "lilypadWaterRain",
+        "lilypadWaterSnow",
+        
+        // Object Assets
+        "log",
+        
+        // Enemy Assets
+        "bee",
+        "dragonfly",
+        "ghostFrog",
+        
+        // VFX Assets
+        "spark",
+        "firefly"
+    ]
+    
+    /// All audio assets to preload (sound effects)
+    private let audioAssets: [String] = [
+        "jump",
+        "land",
+        "coin",
+        "hit",
+        "splash"
+    ]
+    
+    /// All music assets to preload
+    private let musicAssets: [String] = [
+        "menu_music",
+        "day_music",
+        "night_music",
+        "rain_music",
+        "winter_music"
+    ]
     
     // MARK: - UI Elements
     
     private lazy var backgroundImageView: UIImageView = {
         // Loads "loadingScreen.png"
         let imageView = UIImageView(image: UIImage(named: "loadingScreen"))
-        imageView.contentMode = .scaleAspectFill
+        imageView.contentMode = .scaleAspectFit
+        imageView.backgroundColor = .black  // Fill letterbox areas with black
         imageView.clipsToBounds = true
         imageView.translatesAutoresizingMaskIntoConstraints = false
         return imageView
@@ -68,10 +129,75 @@ class LoadingViewController: UIViewController {
         super.viewDidAppear(animated)
         
         loadingIndicator.startAnimating()
+        preloadAllAssets()
+    }
+    
+    // MARK: - Asset Preloading
+    
+    private func preloadAllAssets() {
+        Task {
+            // Update status
+            await updateStatus("Loading textures...")
+            
+            // Preload visual assets using SpriteKit's texture preloading
+            await preloadVisualAssets()
+            
+            // Update status
+            await updateStatus("Loading sounds...")
+            
+            // Preload audio assets
+            preloadAudioAssets()
+            
+            // Update status
+            await updateStatus("Loading music...")
+            
+            // Preload music assets
+            preloadMusicAssets()
+            
+            // Complete loading
+            await updateStatus("Ready!")
+            
+            // Small delay to show "Ready!" status
+            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+            
+            await MainActor.run {
+                loadingIndicator.stopAnimating()
+                coordinator?.didFinishLoading()
+            }
+        }
+    }
+    
+    @MainActor
+    private func updateStatus(_ text: String) {
+        statusLabel.text = text
+    }
+    
+    private func preloadVisualAssets() async {
+        // Create SKTextures for all visual assets
+        let textures = visualAssets.map { SKTexture(imageNamed: $0) }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            self?.loadingIndicator.stopAnimating()
-            self?.coordinator?.didFinishLoading()
+        // Use SpriteKit's built-in texture preloading
+        await withCheckedContinuation { continuation in
+            SKTexture.preload(textures) {
+                continuation.resume()
+            }
+        }
+    }
+    
+    private func preloadAudioAssets() {
+        // Preload sound effects through SoundManager
+        SoundManager.shared.preloadSounds()
+    }
+    
+    private func preloadMusicAssets() {
+        // Preload music tracks by initializing AVAudioPlayers
+        // This ensures the files are loaded into memory for faster playback
+        for musicName in musicAssets {
+            if let url = Bundle.main.url(forResource: musicName, withExtension: "mp3") {
+                // Just verify the file exists and is accessible
+                // The actual AVAudioPlayer will be created when music plays
+                _ = try? Data(contentsOf: url, options: .mappedIfSafe)
+            }
         }
     }
     

@@ -2,20 +2,21 @@ import UIKit
 import SpriteKit
 
 enum GameState {
-    case loading, menu, shop, initialUpgrade, playing, paused, upgradeSelection, gameOver
+    case loading, menu, shop, challenges, initialUpgrade, playing, paused, upgradeSelection, gameOver
 }
 
 protocol GameCoordinatorDelegate: AnyObject {
     func didRequestResume()
     func didSelectUpgrade(_ upgradeId: String)
     func gameDidEnd(score: Int, coins: Int)
-    func triggerUpgradeMenu()
+    func triggerUpgradeMenu(hasFullHealth: Bool)
     func showShop()
     func didFinishLoading()
     func pauseGame()
     // NEW:
     func authenticateGameCenter()
     func showLeaderboard()
+    func showChallenges()
 }
 
 class GameCoordinator: GameCoordinatorDelegate {
@@ -72,6 +73,15 @@ class GameCoordinator: GameCoordinatorDelegate {
         GameCenterManager.shared.showLeaderboard(presentingVC: rootVC, leaderboardID: Configuration.GameCenter.leaderboardID)
     }
     
+    func showChallenges() {
+        currentState = .challenges
+        let challengesVC = ChallengesViewController()
+        challengesVC.coordinator = self
+        UIView.transition(with: window!, duration: 0.3, options: .transitionFlipFromRight, animations: {
+            self.window?.rootViewController = challengesVC
+        }, completion: nil)
+    }
+    
     // ... (Shop, Start Game, Launch Game, Trigger Upgrade, Pause logic same as previous) ...
     
     func showShop() {
@@ -88,6 +98,8 @@ class GameCoordinator: GameCoordinatorDelegate {
         currentState = .initialUpgrade
         let upgradeVC = UpgradeViewController()
         upgradeVC.coordinator = self
+        // At game start, the frog always has full health, so don't offer heart refill
+        upgradeVC.hasFullHealth = true
         upgradeVC.modalPresentationStyle = .overFullScreen
         upgradeVC.modalTransitionStyle = .crossDissolve
         window?.rootViewController?.present(upgradeVC, animated: false)
@@ -113,11 +125,12 @@ class GameCoordinator: GameCoordinatorDelegate {
         }, completion: nil)
     }
     
-    func triggerUpgradeMenu() {
+    func triggerUpgradeMenu(hasFullHealth: Bool) {
         guard currentState == .playing else { return }
         currentState = .upgradeSelection
         let upgradeVC = UpgradeViewController()
         upgradeVC.coordinator = self
+        upgradeVC.hasFullHealth = hasFullHealth
         upgradeVC.modalPresentationStyle = .overFullScreen
         upgradeVC.modalTransitionStyle = .crossDissolve
         window?.rootViewController?.present(upgradeVC, animated: false)
@@ -152,6 +165,10 @@ class GameCoordinator: GameCoordinatorDelegate {
         guard currentState != .gameOver else { return }
         currentState = .gameOver
         
+        // Stop all sound effects when game ends
+        SoundManager.shared.stopAllSoundEffects()
+        SoundManager.shared.stopWeatherSFX()
+        
         let isNewHigh = PersistenceManager.shared.saveScore(score)
         PersistenceManager.shared.addCoins(coins)
         
@@ -174,4 +191,5 @@ class GameCoordinator: GameCoordinatorDelegate {
 
 extension Notification.Name {
     static let didSelectUpgrade = Notification.Name("didSelectUpgrade")
+    static let challengeCompleted = Notification.Name("challengeCompleted")
 }

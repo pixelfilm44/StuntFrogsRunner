@@ -4,25 +4,39 @@ import CoreHaptics
 import SpriteKit
 
 // MARK: - Sound Manager
-class SoundManager {
+class SoundManager: NSObject, AVAudioPlayerDelegate {
     static let shared = SoundManager()
     private var players: [String: AVAudioPlayer] = [:]
     private var musicPlayer: AVAudioPlayer?
     private var currentMusic: String?
+    private var weatherSFXPlayer: AVAudioPlayer?
+    private var currentWeatherSFX: String?
     
     // Music track names
     enum Music: String, CaseIterable {
         case menu = "menu_music"
-        case day = "day_music"
-        case night = "night_music"
-        case rain = "rain_music"
-        case winter = "winter_music"
+        case gameplay = "gameplay_music"
+        case gameplay2 = "gameplay_music2"
+        case rocketFlight = "rocket_flight_music"
+        case crocRomp = "crocRomp"
     }
     
-    private init() {}
+    // Track to play after current track finishes (for sequential playback)
+    private var nextMusic: Music?
+    
+    // Weather ambient sound effects
+    enum WeatherSFX: String {
+        case rain = "rain"
+        case night = "night"
+        case winter = "wind"
+    }
+    
+    private override init() {
+        super.init()
+    }
     
     func preloadSounds() {
-        let sounds = ["jump", "land", "coin", "hit", "splash"]
+        let sounds = ["jump", "land", "coin", "hit", "splash", "rocket", "ghost", "crocodileMashing", "crocodileRide", "thunder"]
         for sound in sounds {
             if let url = Bundle.main.url(forResource: sound, withExtension: "mp3") {
                 if let player = try? AVAudioPlayer(contentsOf: url) {
@@ -31,6 +45,10 @@ class SoundManager {
                 }
             }
         }
+    }
+    
+    func playThunder() {
+        play("thunder")
     }
     
     func play(_ name: String) {
@@ -65,7 +83,20 @@ class SoundManager {
         
         do {
             musicPlayer = try AVAudioPlayer(contentsOf: url)
-            musicPlayer?.numberOfLoops = -1 // Loop indefinitely
+            musicPlayer?.delegate = self
+            
+            // Set up sequential playback: gameplay_music -> gameplay_music2
+            if name == Music.gameplay.rawValue {
+                musicPlayer?.numberOfLoops = 0 // Play once, then trigger next track
+                nextMusic = .gameplay2
+            } else if name == Music.gameplay2.rawValue {
+                musicPlayer?.numberOfLoops = -1 // Loop indefinitely
+                nextMusic = nil
+            } else {
+                musicPlayer?.numberOfLoops = -1 // Loop indefinitely
+                nextMusic = nil
+            }
+            
             musicPlayer?.volume = 0
             musicPlayer?.prepareToPlay()
             musicPlayer?.play()
@@ -78,8 +109,18 @@ class SoundManager {
         }
     }
     
+    // MARK: - AVAudioPlayerDelegate
+    
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        // Check if this was the music player and we have a next track queued
+        if player === musicPlayer, let next = nextMusic {
+            startMusic(name: next.rawValue, fadeDuration: 0.5)
+        }
+    }
+    
     func stopMusic(fadeDuration: TimeInterval = 0.5) {
         guard let player = musicPlayer, player.isPlaying else { return }
+        nextMusic = nil  // Clear any queued track
         fadeOut(player: player, duration: fadeDuration) { [weak self] in
             self?.musicPlayer?.stop()
             self?.currentMusic = nil
@@ -96,6 +137,90 @@ class SoundManager {
     
     func setMusicVolume(_ volume: Float) {
         musicPlayer?.volume = max(0, min(1, volume))
+    }
+    
+    // MARK: - Stop All Sounds
+    
+    func stopAllSoundEffects() {
+        for player in players.values {
+            player.stop()
+            player.currentTime = 0
+        }
+    }
+    
+    func stopAll(fadeDuration: TimeInterval = 0.5) {
+        stopAllSoundEffects()
+        stopWeatherSFX(fadeDuration: fadeDuration)
+        stopMusic(fadeDuration: fadeDuration)
+    }
+    
+    // MARK: - Weather Sound Effects
+    
+    func playWeatherSFX(_ sfx: WeatherSFX?, fadeDuration: TimeInterval = 0.5) {
+        let name = sfx?.rawValue
+        
+        // Don't restart if already playing the same SFX
+        guard currentWeatherSFX != name else { return }
+        
+        // Fade out current weather SFX if playing
+        if let currentPlayer = weatherSFXPlayer, currentPlayer.isPlaying {
+            fadeOut(player: currentPlayer, duration: fadeDuration) { [weak self] in
+                if let sfxName = name {
+                    self?.startWeatherSFX(name: sfxName, fadeDuration: fadeDuration)
+                } else {
+                    self?.weatherSFXPlayer = nil
+                    self?.currentWeatherSFX = nil
+                }
+            }
+        } else if let sfxName = name {
+            startWeatherSFX(name: sfxName, fadeDuration: fadeDuration)
+        } else {
+            currentWeatherSFX = nil
+        }
+    }
+    
+    private func startWeatherSFX(name: String, fadeDuration: TimeInterval) {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "mp3") else {
+            print("Weather SFX file not found: \(name).mp3")
+            return
+        }
+        
+        do {
+            weatherSFXPlayer = try AVAudioPlayer(contentsOf: url)
+            weatherSFXPlayer?.numberOfLoops = -1 // Loop indefinitely
+            weatherSFXPlayer?.volume = 0
+            weatherSFXPlayer?.prepareToPlay()
+            weatherSFXPlayer?.play()
+            currentWeatherSFX = name
+            
+            // Fade in (lower volume than music so it doesn't overpower)
+            fadeIn(player: weatherSFXPlayer, duration: fadeDuration, targetVolume: 0.4)
+        } catch {
+            print("Failed to load weather SFX: \(error.localizedDescription)")
+        }
+    }
+    
+    func stopWeatherSFX(fadeDuration: TimeInterval = 0.5) {
+        guard let player = weatherSFXPlayer, player.isPlaying else {
+            currentWeatherSFX = nil
+            return
+        }
+        fadeOut(player: player, duration: fadeDuration) { [weak self] in
+            self?.weatherSFXPlayer?.stop()
+            self?.currentWeatherSFX = nil
+        }
+    }
+    
+    func pauseWeatherSFX() {
+        weatherSFXPlayer?.pause()
+    }
+    
+    func resumeWeatherSFX() {
+        weatherSFXPlayer?.play()
+    }
+    
+    func setWeatherSFXVolume(_ volume: Float) {
+        weatherSFXPlayer?.volume = max(0, min(1, volume))
     }
     
     // MARK: - Fade Effects
@@ -166,7 +291,134 @@ class HapticsManager {
 class VFXManager {
     static let shared = VFXManager()
     
+    private var thunderTimer: Timer?
+    private weak var currentScene: SKScene?
+    private var lightningOverlay: SKSpriteNode?
+    
     private init() {}
+    
+    // MARK: - Thunder & Lightning
+    
+    /// Starts the thunder and lightning effect cycle for rain weather.
+    /// Lightning strikes occur at random intervals with screen flashes and thunder sounds.
+    /// - Parameters:
+    ///   - scene: The scene to display lightning effects in
+    ///   - minInterval: Minimum seconds between lightning strikes (default 4)
+    ///   - maxInterval: Maximum seconds between lightning strikes (default 12)
+    func startThunderCycle(in scene: SKScene, minInterval: TimeInterval = 4, maxInterval: TimeInterval = 12) {
+        stopThunderCycle()
+        currentScene = scene
+        scheduleNextThunder(minInterval: minInterval, maxInterval: maxInterval)
+    }
+    
+    /// Stops the thunder and lightning cycle.
+    func stopThunderCycle() {
+        thunderTimer?.invalidate()
+        thunderTimer = nil
+        lightningOverlay?.removeFromParent()
+        lightningOverlay = nil
+        currentScene = nil
+    }
+    
+    private func scheduleNextThunder(minInterval: TimeInterval, maxInterval: TimeInterval) {
+        let interval = TimeInterval.random(in: minInterval...maxInterval)
+        thunderTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            self?.triggerLightning()
+            self?.scheduleNextThunder(minInterval: minInterval, maxInterval: maxInterval)
+        }
+    }
+    
+    /// Triggers a single lightning strike with flash and thunder sound.
+    func triggerLightning() {
+        guard let scene = currentScene else { return }
+        
+        // Create or reuse the lightning overlay
+        if lightningOverlay == nil {
+            let overlay = SKSpriteNode(color: .white, size: scene.size)
+            overlay.position = CGPoint(x: scene.size.width / 2, y: scene.size.height / 2)
+            overlay.zPosition = 9999 // Above everything
+            overlay.alpha = 0
+            overlay.blendMode = .add
+            scene.addChild(overlay)
+            lightningOverlay = overlay
+        }
+        
+        guard let overlay = lightningOverlay else { return }
+        
+        // Lightning flash sequence - multiple quick flashes for realism
+        let flash1 = SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.8, duration: 0.05),
+            SKAction.fadeAlpha(to: 0.2, duration: 0.05),
+        ])
+        let flash2 = SKAction.sequence([
+            SKAction.fadeAlpha(to: 1.0, duration: 0.03),
+            SKAction.fadeAlpha(to: 0.3, duration: 0.08),
+        ])
+        let flash3 = SKAction.sequence([
+            SKAction.fadeAlpha(to: 0.6, duration: 0.04),
+            SKAction.fadeOut(withDuration: 0.3),
+        ])
+        
+        let fullFlash = SKAction.sequence([flash1, flash2, flash3])
+        overlay.run(fullFlash)
+        
+        // Play thunder sound with a slight delay (light travels faster than sound)
+        let thunderDelay = TimeInterval.random(in: 0.1...0.5)
+        DispatchQueue.main.asyncAfter(deadline: .now() + thunderDelay) {
+            SoundManager.shared.playThunder()
+            // Haptic feedback for thunder rumble
+            HapticsManager.shared.playImpact(.heavy)
+        }
+    }
+    
+    /// Creates a lightning bolt sprite effect (optional visual enhancement).
+    /// - Parameters:
+    ///   - startPoint: Top point of the lightning bolt
+    ///   - endPoint: Bottom point of the lightning bolt
+    ///   - scene: The scene to add the bolt to
+    func createLightningBolt(from startPoint: CGPoint, to endPoint: CGPoint, in scene: SKScene) {
+        let path = createLightningPath(from: startPoint, to: endPoint)
+        
+        let bolt = SKShapeNode(path: path)
+        bolt.strokeColor = .white
+        bolt.lineWidth = 3
+        bolt.glowWidth = 8
+        bolt.zPosition = 9998
+        bolt.alpha = 1.0
+        
+        scene.addChild(bolt)
+        
+        // Quick flash and fade
+        let fadeOut = SKAction.sequence([
+            SKAction.wait(forDuration: 0.1),
+            SKAction.fadeOut(withDuration: 0.2),
+            SKAction.removeFromParent()
+        ])
+        bolt.run(fadeOut)
+    }
+    
+    private func createLightningPath(from start: CGPoint, to end: CGPoint) -> CGPath {
+        let path = CGMutablePath()
+        path.move(to: start)
+        
+        let segments = 8
+        let dx = (end.x - start.x) / CGFloat(segments)
+        let dy = (end.y - start.y) / CGFloat(segments)
+        
+        var currentPoint = start
+        for i in 1..<segments {
+            let offsetX = CGFloat.random(in: -30...30)
+            let nextPoint = CGPoint(
+                x: start.x + dx * CGFloat(i) + offsetX,
+                y: start.y + dy * CGFloat(i)
+            )
+            path.addLine(to: nextPoint)
+            currentPoint = nextPoint
+        }
+        path.addLine(to: end)
+        
+        return path
+    }
     
     func spawnSplash(at position: CGPoint, in scene: SKScene) {
         let emitter = SKEmitterNode()
@@ -228,7 +480,7 @@ class VFXManager {
     
     func createFirefliesEmitter(width: CGFloat, height: CGFloat) -> SKEmitterNode {
         let node = SKEmitterNode()
-        node.particleTexture = SKTexture(imageNamed: "spark")
+        node.particleTexture = SKTexture(imageNamed: "firefly")
         node.particleBirthRate = 5
         node.particleLifetime = 5.0
         // Emit mainly from top, but fireflies linger
@@ -244,8 +496,219 @@ class VFXManager {
         node.particleAlphaSequence = sequence
         
         node.particleScale = 0.15
-        node.particleColor = UIColor(red: 241/255, green: 196/255, blue: 15/255, alpha: 1) // Yellow
+        node.particleColor = UIColor(red: 1.0, green: 1.0, blue: 0.0, alpha: 1) // Bright yellow
         node.particleColorBlendFactor = 1.0
         return node
+    }
+    
+    /// Spawns a performant debris explosion effect when crocodile destroys objects.
+    /// Uses GPU-accelerated particles for smooth performance.
+    /// - Parameters:
+    ///   - position: World position where debris spawns
+    ///   - scene: The scene to add the effect to
+    ///   - color: Primary color of the debris (green for lily pads, brown for logs)
+    ///   - intensity: Scale factor for the effect (1.0 = normal, higher = more particles)
+    func spawnDebris(at position: CGPoint, in scene: SKScene, color: UIColor = .green, intensity: CGFloat = 1.0) {
+        // Main debris emitter - chunks flying outward
+        let debrisEmitter = SKEmitterNode()
+        debrisEmitter.particleTexture = SKTexture(imageNamed: "spark")
+        debrisEmitter.position = position
+        debrisEmitter.zPosition = Layer.item + 5
+        
+        // Burst of particles
+        debrisEmitter.particleBirthRate = 200 * intensity
+        debrisEmitter.numParticlesToEmit = Int(25 * intensity)
+        debrisEmitter.particleLifetime = 0.8
+        debrisEmitter.particleLifetimeRange = 0.3
+        
+        // Explode outward in all directions
+        debrisEmitter.particleSpeed = 200
+        debrisEmitter.particleSpeedRange = 100
+        debrisEmitter.emissionAngleRange = CGFloat.pi * 2  // Full 360 degrees
+        
+        // Arc and fall with gravity
+        debrisEmitter.yAcceleration = -400
+        
+        // Spin the debris chunks
+        debrisEmitter.particleRotationSpeed = 5.0
+        debrisEmitter.particleRotationRange = CGFloat.pi * 2
+        
+        // Size variation for chunks
+        debrisEmitter.particleScale = 0.4
+        debrisEmitter.particleScaleRange = 0.3
+        debrisEmitter.particleScaleSpeed = -0.3  // Shrink as they fly
+        
+        // Color and fade
+        debrisEmitter.particleColor = color
+        debrisEmitter.particleColorBlendFactor = 1.0
+        debrisEmitter.particleAlpha = 1.0
+        debrisEmitter.particleAlphaSpeed = -1.0
+        
+        scene.addChild(debrisEmitter)
+        
+        // Secondary splash/spray emitter for water effect
+        let splashEmitter = SKEmitterNode()
+        splashEmitter.particleTexture = SKTexture(imageNamed: "spark")
+        splashEmitter.position = position
+        splashEmitter.zPosition = Layer.item + 4
+        
+        splashEmitter.particleBirthRate = 150 * intensity
+        splashEmitter.numParticlesToEmit = Int(20 * intensity)
+        splashEmitter.particleLifetime = 0.5
+        splashEmitter.particleLifetimeRange = 0.2
+        
+        // Spray upward and outward
+        splashEmitter.particleSpeed = 150
+        splashEmitter.particleSpeedRange = 80
+        splashEmitter.emissionAngle = CGFloat.pi / 2  // Upward
+        splashEmitter.emissionAngleRange = CGFloat.pi / 2  // Wide spray
+        
+        splashEmitter.yAcceleration = -300
+        
+        splashEmitter.particleScale = 0.15
+        splashEmitter.particleScaleRange = 0.1
+        
+        // Water-colored droplets
+        splashEmitter.particleColor = .white
+        splashEmitter.particleColorBlendFactor = 1.0
+        splashEmitter.particleAlpha = 0.7
+        splashEmitter.particleAlphaSpeed = -1.5
+        
+        scene.addChild(splashEmitter)
+        
+        // Auto-cleanup after effects complete
+        let cleanup = SKAction.sequence([
+            SKAction.wait(forDuration: 1.5),
+            SKAction.removeFromParent()
+        ])
+        debrisEmitter.run(cleanup)
+        splashEmitter.run(cleanup)
+    }
+    
+    /// Spawns a larger, more dramatic debris effect for when crocodile is actively eating.
+    /// Creates a continuous chomping effect with debris flying in the crocodile's movement direction.
+    func spawnChompDebris(at position: CGPoint, in scene: SKScene, movementDirection: CGVector) {
+        // Calculate the angle based on movement (debris flies backward from direction of travel)
+        let movementAngle = atan2(movementDirection.dy, movementDirection.dx)
+        let debrisAngle = movementAngle + CGFloat.pi  // Opposite direction
+        
+        // Chunky debris flying backward
+        let chunkEmitter = SKEmitterNode()
+        chunkEmitter.particleTexture = SKTexture(imageNamed: "spark")
+        chunkEmitter.position = position
+        chunkEmitter.zPosition = Layer.item + 5
+        
+        chunkEmitter.particleBirthRate = 80
+        chunkEmitter.numParticlesToEmit = 12
+        chunkEmitter.particleLifetime = 0.6
+        chunkEmitter.particleLifetimeRange = 0.2
+        
+        // Spray backward from movement direction
+        chunkEmitter.particleSpeed = 180
+        chunkEmitter.particleSpeedRange = 60
+        chunkEmitter.emissionAngle = debrisAngle
+        chunkEmitter.emissionAngleRange = CGFloat.pi / 3  // ~60 degree spread
+        
+        chunkEmitter.yAcceleration = -350
+        
+        chunkEmitter.particleRotationSpeed = 8.0
+        chunkEmitter.particleRotationRange = CGFloat.pi * 2
+        
+        chunkEmitter.particleScale = 0.35
+        chunkEmitter.particleScaleRange = 0.25
+        chunkEmitter.particleScaleSpeed = -0.4
+        
+        // Mix of green/brown colors for organic debris
+        chunkEmitter.particleColor = UIColor(red: 0.4, green: 0.6, blue: 0.2, alpha: 1.0)
+        chunkEmitter.particleColorBlendFactor = 1.0
+        chunkEmitter.particleColorRedRange = 0.3
+        chunkEmitter.particleColorGreenRange = 0.2
+        chunkEmitter.particleAlpha = 1.0
+        chunkEmitter.particleAlphaSpeed = -1.2
+        
+        scene.addChild(chunkEmitter)
+        
+        // Quick cleanup
+        let cleanup = SKAction.sequence([
+            SKAction.wait(forDuration: 1.0),
+            SKAction.removeFromParent()
+        ])
+        chunkEmitter.run(cleanup)
+    }
+    
+    /// Spawns celebratory sparkle particles for treasure chest openings.
+    /// Creates a golden burst effect with expanding and fading particles.
+    func spawnSparkles(at position: CGPoint, in scene: SKScene) {
+        // Golden sparkle burst emitter
+        let sparkleEmitter = SKEmitterNode()
+        sparkleEmitter.particleTexture = SKTexture(imageNamed: "spark")
+        sparkleEmitter.position = position
+        sparkleEmitter.zPosition = Layer.item + 10
+        
+        // Burst of sparkles
+        sparkleEmitter.particleBirthRate = 200
+        sparkleEmitter.numParticlesToEmit = 40
+        sparkleEmitter.particleLifetime = 1.0
+        sparkleEmitter.particleLifetimeRange = 0.3
+        
+        // Explode outward in all directions
+        sparkleEmitter.particleSpeed = 120
+        sparkleEmitter.particleSpeedRange = 60
+        sparkleEmitter.emissionAngleRange = CGFloat.pi * 2  // Full 360 degrees
+        
+        // Float upward slightly
+        sparkleEmitter.yAcceleration = 50
+        
+        // Sparkle and fade
+        sparkleEmitter.particleScale = 0.3
+        sparkleEmitter.particleScaleRange = 0.15
+        sparkleEmitter.particleScaleSpeed = -0.2
+        
+        // Golden yellow color
+        sparkleEmitter.particleColor = UIColor(red: 1.0, green: 0.85, blue: 0.2, alpha: 1.0)
+        sparkleEmitter.particleColorBlendFactor = 1.0
+        sparkleEmitter.particleColorRedRange = 0.1
+        sparkleEmitter.particleColorGreenRange = 0.2
+        
+        // Twinkle effect with alpha
+        let alphaSequence = SKKeyframeSequence(keyframeValues: [0.0, 1.0, 0.5, 1.0, 0.0], times: [0, 0.1, 0.5, 0.7, 1.0])
+        sparkleEmitter.particleAlphaSequence = alphaSequence
+        
+        scene.addChild(sparkleEmitter)
+        
+        // Add a secondary ring burst for extra flair
+        let ringEmitter = SKEmitterNode()
+        ringEmitter.particleTexture = SKTexture(imageNamed: "spark")
+        ringEmitter.position = position
+        ringEmitter.zPosition = Layer.item + 9
+        
+        ringEmitter.particleBirthRate = 150
+        ringEmitter.numParticlesToEmit = 20
+        ringEmitter.particleLifetime = 0.6
+        ringEmitter.particleLifetimeRange = 0.2
+        
+        // Expand outward in a ring
+        ringEmitter.particleSpeed = 200
+        ringEmitter.particleSpeedRange = 20
+        ringEmitter.emissionAngleRange = CGFloat.pi * 2
+        
+        ringEmitter.particleScale = 0.2
+        ringEmitter.particleScaleSpeed = 0.3  // Grow as they expand
+        
+        // White/yellow glow
+        ringEmitter.particleColor = .white
+        ringEmitter.particleColorBlendFactor = 1.0
+        ringEmitter.particleAlpha = 0.8
+        ringEmitter.particleAlphaSpeed = -1.5
+        
+        scene.addChild(ringEmitter)
+        
+        // Auto-cleanup
+        let cleanup = SKAction.sequence([
+            SKAction.wait(forDuration: 1.5),
+            SKAction.removeFromParent()
+        ])
+        sparkleEmitter.run(cleanup)
+        ringEmitter.run(cleanup)
     }
 }
