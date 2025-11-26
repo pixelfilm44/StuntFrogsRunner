@@ -297,6 +297,8 @@ struct Configuration {
         static let logJumperCost = 300
         static let superJumpCost = 500
         static let rocketJumpCost = 500
+        static let lifevest4PackCost = 500
+        static let honey4PackCost = 500
     }
     
     struct GameCenter {

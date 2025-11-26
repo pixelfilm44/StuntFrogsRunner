@@ -110,7 +110,7 @@ class ShopViewController: UIViewController {
         ])
     }
     
-    enum UpgradeType { case jump, health, logJumper, superJump, rocketJump }
+    enum UpgradeType { case jump, health, logJumper, superJump, rocketJump, lifevestPack, honeyPack }
     
     private func createItemView(type: UpgradeType) -> UIView {
         let cardView = UIView()
@@ -146,9 +146,9 @@ class ShopViewController: UIViewController {
         buyButton.translatesAutoresizingMaskIntoConstraints = false
         
         // Logic Setup
-        let currentLevel: Int
+        var currentLevel: Int
         let cost: Int
-        let maxLevel: Int
+        var maxLevel: Int
         var isPurchased = false
         var isUnlockItem = false  // NEW: Track if this unlocks upgrade menu options
         
@@ -188,6 +188,20 @@ class ShopViewController: UIViewController {
             isUnlockItem = true
             title.text = "Rocket 🚀"
             desc.text = "Fly for 7 seconds"
+        case .lifevestPack:
+            let currentItems = PersistenceManager.shared.vestItems
+            currentLevel = currentItems
+            cost = Configuration.Shop.lifevest4PackCost
+            maxLevel = -1 // Indicates no max level
+            title.text = "Life Vest (4-Pack)"
+            desc.text = "Get 4 Life Vests. You have: \(currentItems)"
+        case .honeyPack:
+            let currentItems = PersistenceManager.shared.honeyItems
+            currentLevel = currentItems
+            cost = Configuration.Shop.honey4PackCost
+            maxLevel = -1 // Indicates no max level
+            title.text = "Honey Jars (4-Pack)"
+            desc.text = "Get 4 Honey Jars. You have: \(currentItems)"
         }
         
         let userCoins = PersistenceManager.shared.totalCoins
@@ -210,14 +224,24 @@ class ShopViewController: UIViewController {
             buyButton.isEnabled = false
             buyButton.backgroundColor = .gray
             buyButton.setTitle("OWNED", for: .normal)
-        } else if !isUnlockItem && type != .logJumper && currentLevel >= maxLevel {
+        } else if !isUnlockItem && type != .logJumper && currentLevel >= maxLevel && maxLevel != -1 {
             costLabel.text = "MAXED"
             buyButton.isEnabled = false
             buyButton.backgroundColor = .gray
             buyButton.setTitle("MAXED", for: .normal)
         } else {
             costLabel.text = "\(cost) Coins"
-            buyButton.setTitle(isUnlockItem ? "UNLOCK" : "UPGRADE", for: .normal)
+            
+            let buttonTitle: String
+            switch type {
+            case .lifevestPack, .honeyPack:
+                buttonTitle = "BUY"
+            case .logJumper, .superJump, .rocketJump:
+                buttonTitle = isPurchased ? "OWNED" : "UNLOCK"
+            default:
+                buttonTitle = "UPGRADE"
+            }
+            buyButton.setTitle(buttonTitle, for: .normal)
             
             // Check affordability
             if userCoins < cost {
@@ -357,6 +381,11 @@ class ShopViewController: UIViewController {
         stackView.addArrangedSubview(createSectionHeader(title: "UPGRADE MENU UNLOCKS"))
         stackView.addArrangedSubview(createItemView(type: .superJump))
         stackView.addArrangedSubview(createItemView(type: .rocketJump))
+        
+        // Section: Consumables
+        stackView.addArrangedSubview(createSectionHeader(title: "CONSUMABLES"))
+        stackView.addArrangedSubview(createItemView(type: .lifevestPack))
+        stackView.addArrangedSubview(createItemView(type: .honeyPack))
     }
     
     private func attemptPurchase(type: UpgradeType, cost: Int) {
@@ -370,6 +399,8 @@ class ShopViewController: UIViewController {
             case .logJumper: PersistenceManager.shared.unlockLogJumper()
             case .superJump: PersistenceManager.shared.unlockSuperJump()
             case .rocketJump: PersistenceManager.shared.unlockRocketJump()
+            case .lifevestPack: PersistenceManager.shared.addVestItems(4)
+            case .honeyPack: PersistenceManager.shared.addHoneyItems(4)
             }
             
             refreshData()

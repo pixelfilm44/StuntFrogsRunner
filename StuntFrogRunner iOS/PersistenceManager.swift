@@ -14,6 +14,8 @@ class PersistenceManager {
         static let superJump = "sf_upgrade_super_jump"
         static let rocketJump = "sf_upgrade_rocket_jump"
         static let hasSeenHelp = "sf_has_seen_help"
+        static let honeyItems = "sf_consumable_honey_items"
+        static let vestItems = "sf_consumable_vest_items"
     }
     
     private init() {}
@@ -33,6 +35,42 @@ class PersistenceManager {
         if totalCoins >= amount {
             let newTotal = totalCoins - amount
             defaults.set(newTotal, forKey: Keys.totalCoins)
+            return true
+        }
+        return false
+    }
+    
+    // MARK: - Consumables
+    
+    var honeyItems: Int {
+        return defaults.integer(forKey: Keys.honeyItems)
+    }
+
+    func addHoneyItems(_ amount: Int) {
+        let newTotal = honeyItems + amount
+        defaults.set(newTotal, forKey: Keys.honeyItems)
+    }
+
+    func useHoneyItem() -> Bool {
+        if honeyItems > 0 {
+            defaults.set(honeyItems - 1, forKey: Keys.honeyItems)
+            return true
+        }
+        return false
+    }
+
+    var vestItems: Int {
+        return defaults.integer(forKey: Keys.vestItems)
+    }
+
+    func addVestItems(_ amount: Int) {
+        let newTotal = vestItems + amount
+        defaults.set(newTotal, forKey: Keys.vestItems)
+    }
+
+    func useVestItem() -> Bool {
+        if vestItems > 0 {
+            defaults.set(vestItems - 1, forKey: Keys.vestItems)
             return true
         }
         return false

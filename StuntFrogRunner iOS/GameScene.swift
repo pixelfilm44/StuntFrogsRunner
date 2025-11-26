@@ -825,6 +825,15 @@ class GameScene: SKScene, CollisionManagerDelegate {
         frog.currentHealth = frog.maxHealth
         frog.rocketState = .none
         frog.buffs = Frog.Buffs()
+        
+        // Apply starting consumables from inventory
+        if PersistenceManager.shared.useVestItem() {
+            frog.buffs.vest += 1
+        }
+        if PersistenceManager.shared.useHoneyItem() {
+            frog.buffs.honey += 1
+        }
+        
         frog.isFloating = false
         frog.isWearingBoots = false
         frog.canJumpLogs = PersistenceManager.shared.hasLogJumper
@@ -2468,6 +2477,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Apply SuperJump multiplier (same as touchesEnded)
         if isSuperJumping {
             simVel.dx *= superJumpMultiplier
+            simVel.dy *= superJumpMultiplier
         }
         
         // Start from ground level for grounded jumps
