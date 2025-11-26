@@ -5,24 +5,34 @@ enum GameState {
     case loading, menu, shop, challenges, initialUpgrade, playing, paused, upgradeSelection, gameOver
 }
 
+enum GameMode {
+    case endless
+    case beatTheBoat
+}
+
+enum RaceResult {
+    case win, lose
+}
+
 protocol GameCoordinatorDelegate: AnyObject {
     func didRequestResume()
     func didSelectUpgrade(_ upgradeId: String)
-    func gameDidEnd(score: Int, coins: Int)
+    func gameDidEnd(score: Int, coins: Int, raceResult: RaceResult?)
     func triggerUpgradeMenu(hasFullHealth: Bool)
     func showShop()
     func didFinishLoading()
     func pauseGame()
-    // NEW:
     func authenticateGameCenter()
     func showLeaderboard()
     func showChallenges()
+    func startRace()
 }
 
 class GameCoordinator: GameCoordinatorDelegate {
     
     weak var window: UIWindow?
     var currentState: GameState = .loading
+    private var pendingGameMode: GameMode = .endless
     
     let storage = UserDefaults.standard
     
@@ -95,6 +105,7 @@ class GameCoordinator: GameCoordinatorDelegate {
     }
     
     func startGame() {
+        pendingGameMode = .endless
         currentState = .initialUpgrade
         let upgradeVC = UpgradeViewController()
         upgradeVC.coordinator = self
@@ -105,12 +116,24 @@ class GameCoordinator: GameCoordinatorDelegate {
         window?.rootViewController?.present(upgradeVC, animated: false)
     }
     
-    private func launchGame(with initialUpgradeId: String?) {
+    func startRace() {
+        pendingGameMode = .beatTheBoat
+        currentState = .initialUpgrade
+        let upgradeVC = UpgradeViewController()
+        upgradeVC.coordinator = self
+        upgradeVC.hasFullHealth = true
+        upgradeVC.modalPresentationStyle = .overFullScreen
+        upgradeVC.modalTransitionStyle = .crossDissolve
+        window?.rootViewController?.present(upgradeVC, animated: false)
+    }
+    
+    private func launchGame(with initialUpgradeId: String?, gameMode: GameMode) {
         currentState = .playing
         let skView = SKView(frame: window?.bounds ?? .zero)
         let scene = GameScene(size: skView.bounds.size)
         scene.scaleMode = .aspectFill
         scene.coordinator = self
+        scene.gameMode = gameMode
         
         if let upgradeId = initialUpgradeId {
             scene.initialUpgrade = upgradeId
@@ -152,7 +175,7 @@ class GameCoordinator: GameCoordinatorDelegate {
     
     func didSelectUpgrade(_ upgradeId: String) {
         if currentState == .initialUpgrade {
-            launchGame(with: upgradeId)
+            launchGame(with: upgradeId, gameMode: pendingGameMode)
         } else {
             window?.rootViewController?.dismiss(animated: false, completion: {
                 NotificationCenter.default.post(name: .didSelectUpgrade, object: nil, userInfo: ["id": upgradeId])
@@ -161,7 +184,7 @@ class GameCoordinator: GameCoordinatorDelegate {
         }
     }
     
-    func gameDidEnd(score: Int, coins: Int) {
+    func gameDidEnd(score: Int, coins: Int, raceResult: RaceResult?) {
         guard currentState != .gameOver else { return }
         currentState = .gameOver
         
@@ -169,18 +192,22 @@ class GameCoordinator: GameCoordinatorDelegate {
         SoundManager.shared.stopAllSoundEffects()
         SoundManager.shared.stopWeatherSFX()
         
-        let isNewHigh = PersistenceManager.shared.saveScore(score)
-        PersistenceManager.shared.addCoins(coins)
-        
-        // NEW: Submit to Game Center if new high score
-        if isNewHigh {
-            GameCenterManager.shared.submitScore(score, leaderboardID: Configuration.GameCenter.leaderboardID)
+        var isNewHigh = false
+        if raceResult == nil {
+            isNewHigh = PersistenceManager.shared.saveScore(score)
+            // NEW: Submit to Game Center if new high score
+            if isNewHigh {
+                GameCenterManager.shared.submitScore(score, leaderboardID: Configuration.GameCenter.leaderboardID)
+            }
         }
+        
+        PersistenceManager.shared.addCoins(coins)
         
         let gameOverVC = GameOverViewController()
         gameOverVC.score = score
         gameOverVC.runCoins = coins
         gameOverVC.isNewHighScore = isNewHigh
+        gameOverVC.raceResult = raceResult
         gameOverVC.coordinator = self
         gameOverVC.modalPresentationStyle = .overFullScreen
         gameOverVC.modalTransitionStyle = .crossDissolve

@@ -8,6 +8,15 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private let collisionManager = CollisionManager()
     var initialUpgrade: String?
     
+    // MARK: - Game Mode
+    var gameMode: GameMode = .endless
+    private var raceResult: RaceResult?
+    
+    // MARK: - Race Components
+    private var boat: Boat?
+    private var finishLineNode = SKShapeNode()
+    private let raceProgressNode = SKNode()
+    
     // MARK: - Nodes
     private let cam = SKCameraNode()
     private let worldNode = SKNode()
@@ -17,19 +26,22 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private let slingshotDot = SKShapeNode(circleOfRadius: 8)
     private let crosshairNode = SKShapeNode(circleOfRadius: 10)
     private let weatherNode = SKNode()
+    private let leafNode = SKNode()
     private let waterLinesNode = SKNode()
+    private let waterTilesNode = SKNode()
+    private let flotsamNode = SKNode()
     
     // Air Jump Direction Arrows
     private let airJumpArrowsNode = SKNode()
     private var airJumpArrows: [String: SKNode] = [:]
     
     // MARK: - HUD Elements
-    private let scoreLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
-    private let coinLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
+    private let scoreLabel = SKLabelNode(fontNamed: Configuration.Fonts.primaryBold)
+    private let coinLabel = SKLabelNode(fontNamed: Configuration.Fonts.primaryBold)
     private let coinIcon = SKSpriteNode(imageNamed: "star")
     private var heartNodes: [SKSpriteNode] = []
     private let buffsNode = SKNode()
-    private let descendButton = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+    private let descendButton = SKLabelNode(fontNamed: Configuration.Fonts.primaryHeavy)
     private let descendBg = SKShapeNode(rectOf: CGSize(width: 200, height: 60), cornerRadius: 30)
     private let pauseBg = SKShapeNode(circleOfRadius: 25)
     private let hudMargin: CGFloat = 20.0
@@ -47,6 +59,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private var crocodiles: [Crocodile] = []
     private var treasureChests: [TreasureChest] = []
     private var snakes: [Snake] = []
+    private var flies: [Fly] = []
+    private var flotsam: [Flotsam] = []
     
     // MARK: - State
     private var dragStartOffset: CGPoint?  // Offset from frog position when drag began
@@ -76,6 +90,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         setupHUD()
         setupAchievementCard()
         setupInput()
+        startSpawningLeaves()
+        startSpawningFlotsam()
         collisionManager.delegate = self
         startGame()
         if let starter = initialUpgrade { applyUpgrade(id: starter) }
@@ -84,14 +100,27 @@ class GameScene: SKScene, CollisionManagerDelegate {
     }
 
     private func setupScene() {
-        backgroundColor = Configuration.Colors.sunny
+        backgroundColor = .clear  // Transparent background, water tiles will show
         addChild(cam)
         camera = cam
         addChild(worldNode)
-        waterLinesNode.zPosition = -50
-        cam.addChild(waterLinesNode)
-        createWaterLines()
+        
+        // Add tiled water background - attached to worldNode so it moves with the world
+        waterTilesNode.zPosition = -100
+        worldNode.addChild(waterTilesNode)
+        createWaterTiles()
+        
+        // Weather effects (rain, snow, etc.)
         cam.addChild(weatherNode)
+        
+        // Add leaf effect node
+        leafNode.zPosition = Layer.water + 1 // Float on water, below pads
+        worldNode.addChild(leafNode)
+        
+        // Add flotsam node
+        flotsamNode.zPosition = Layer.water + 2 // Above leaves, below pads
+        worldNode.addChild(flotsamNode)
+        
         uiNode.zPosition = Layer.ui
         cam.addChild(uiNode)
         
@@ -186,6 +215,110 @@ class GameScene: SKScene, CollisionManagerDelegate {
         return arrowNode
     }
     
+    private func startSpawningLeaves() {
+        let spawnAction = SKAction.run { [weak self] in
+            self?.spawnLeaf()
+        }
+        // Spawn a leaf on average every 1.5 seconds
+        let waitAction = SKAction.wait(forDuration: 9.5, withRange: 1.0)
+        let sequence = SKAction.sequence([spawnAction, waitAction])
+        let repeatForever = SKAction.repeatForever(sequence)
+        
+        // Run on the scene itself, not the node, to avoid being removed
+        run(repeatForever, withKey: "spawnLeaves")
+    }
+
+    private func spawnLeaf() {
+        let leafImages = ["leaf1", "leaf2", "leaf3"]
+        guard let leafImage = leafImages.randomElement() else { return }
+
+        let leaf = SKSpriteNode(imageNamed: leafImage)
+
+        // --- Visuals ---
+        let randomScale = CGFloat.random(in: 0.1...0.3)
+        leaf.setScale(randomScale)
+        leaf.alpha = CGFloat.random(in: 0.6...0.9)
+        leaf.zRotation = CGFloat.random(in: 0...(2 * .pi))
+        leaf.zPosition = 0 // Relative to leafNode
+
+        // --- Positioning (in world coordinates) ---
+        // Spawn ahead of the camera's view and within river bounds
+        let spawnY = cam.position.y + (size.height / 2) + 100
+        let spawnX = CGFloat.random(in: 20...(Configuration.Dimensions.riverWidth - 20))
+        leaf.position = CGPoint(x: spawnX, y: spawnY)
+
+        // Destination is behind the camera's current view
+        let endY = cam.position.y - (size.height / 2) - 100
+        let endX = spawnX + CGFloat.random(in: -150...150)
+        let endPos = CGPoint(x: endX, y: endY)
+        
+        leafNode.addChild(leaf)
+
+        // --- Animation for floating on water ---
+        let driftDuration = TimeInterval.random(in: 15.0...25.0)
+
+        // 1. Main drift action
+        let moveAction = SKAction.move(to: endPos, duration: driftDuration)
+        let removeAction = SKAction.removeFromParent()
+
+        // 2. Gentle rotation (rocking)
+        let rotationAmount = CGFloat.random(in: -0.5...0.5)
+        let rotationDuration = TimeInterval.random(in: 2.0...4.0)
+        let rotate1 = SKAction.rotate(byAngle: rotationAmount, duration: rotationDuration)
+        rotate1.timingMode = .easeInEaseOut
+        let rotate2 = rotate1.reversed()
+        let rockSequence = SKAction.sequence([rotate1, rotate2])
+        let rockForever = SKAction.repeatForever(rockSequence)
+
+        // 3. Gentle swaying (side-to-side drift)
+        let swayAmount = CGFloat.random(in: 20...50)
+        let swayDuration = TimeInterval.random(in: 2.5...4.0)
+        let swayLeft = SKAction.moveBy(x: -swayAmount, y: 0, duration: swayDuration)
+        swayLeft.timingMode = .easeInEaseOut
+        let swayRight = swayLeft.reversed()
+        let swaySequence = SKAction.sequence([swayLeft, swayRight])
+        let swayForever = SKAction.repeatForever(swaySequence)
+
+        // Group and run all actions together
+        leaf.run(SKAction.sequence([
+            SKAction.group([moveAction, rockForever, swayForever]),
+            removeAction
+        ]))
+    }
+    
+    private func startSpawningFlotsam() {
+        let spawnAction = SKAction.run { [weak self] in
+            self?.spawnFlotsam()
+        }
+        // Spawn debris less frequently to avoid clutter
+        let waitAction = SKAction.wait(forDuration: 12.0, withRange: 5.0)
+        let sequence = SKAction.sequence([spawnAction, waitAction])
+        run(SKAction.repeatForever(sequence), withKey: "spawnFlotsam")
+    }
+
+    private func spawnFlotsam() {
+        // Determine spawn edge (left or right, outside main play area)
+        let riverEdgeMargin: CGFloat = 40.0
+        let spawnX: CGFloat
+        if Bool.random() {
+            // Left edge
+            spawnX = CGFloat.random(in: 0...riverEdgeMargin)
+        } else {
+            // Right edge
+            spawnX = CGFloat.random(in: (Configuration.Dimensions.riverWidth - riverEdgeMargin)...Configuration.Dimensions.riverWidth)
+        }
+        
+        // Spawn ahead of the camera's view
+        let spawnY = cam.position.y + (size.height / 2) + 150
+        
+        let flotsamItem = Flotsam(position: CGPoint(x: spawnX, y: spawnY))
+        flotsamNode.addChild(flotsamItem)
+        flotsam.append(flotsamItem)
+        
+        // Start the floating animation
+        flotsamItem.float()
+    }
+    
     private func updateAirJumpArrows() {
         if frog.canPerformAirJump() && !isDragging {
             airJumpArrowsNode.isHidden = false
@@ -197,47 +330,154 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
     }
     
-    // ... (Helper methods: createWaterLines, updateWaterVisuals, setupHUD, drawHearts same as before) ...
-    
-    private func createWaterLines() {
-        let count = 80
-        for _ in 0..<count {
-            let width = CGFloat.random(in: 10...50)
-            let path = UIBezierPath()
-            path.move(to: CGPoint(x: -width / 2, y: 0))
-            path.addLine(to: CGPoint(x: width / 2, y: 0))
-            let line = SKShapeNode(path: path.cgPath)
-            line.strokeColor = .white
-            line.alpha = CGFloat.random(in: 0.05...0.15)
-            line.lineWidth = 2
-            line.lineCap = .round
-            line.name = "waterLine"
-            let randomX = CGFloat.random(in: -size.width/2...size.width/2)
-            let randomY = CGFloat.random(in: -size.height/2...size.height/2)
-            line.position = CGPoint(x: randomX, y: randomY)
-            waterLinesNode.addChild(line)
+    /// Creates a seamless tiled water background using water.png (or waterNight.png for night weather)
+    private func createWaterTiles() {
+        // Choose texture based on current weather
+        let textureName = getWaterTextureName()
+        let waterTexture = SKTexture(imageNamed: textureName)
+        
+        // Check if the texture is valid (has non-zero size)
+        if waterTexture.size().width == 0 || waterTexture.size().height == 0 {
+            print("Warning: \(textureName) not found, falling back to solid color")
+            backgroundColor = Configuration.Colors.sunny
+            return
         }
-    }
-    
-    private func updateWaterVisuals() {
-        let flowSpeed: CGFloat = 2.0
-        let limitX = size.width / 2 + 50
-        let resetX = -size.width / 2 - 50
-        waterLinesNode.children.forEach { node in
-            node.position.x += flowSpeed
-            if node.position.x > limitX {
-                node.position.x = resetX
-                node.position.y = CGFloat.random(in: -size.height/2...size.height/2)
+        
+        // Assume water.png is reasonably sized (e.g., 128x128, 256x256, etc.)
+        let tileSize = CGSize(width: waterTexture.size().width, height: waterTexture.size().height)
+        
+        // Calculate how many tiles we need to cover the screen + buffer for scrolling
+        let bufferMultiplier: CGFloat = 3.0  // Extra tiles for smooth scrolling
+        let tilesWide = Int(ceil(size.width / tileSize.width * bufferMultiplier))
+        let tilesHigh = Int(ceil(size.height / tileSize.height * bufferMultiplier))
+        
+        // Create a grid of water tiles
+        for row in 0..<tilesHigh {
+            for col in 0..<tilesWide {
+                let tile = SKSpriteNode(texture: waterTexture)
+                tile.size = tileSize
+                
+                // Position tiles in a grid, centered around origin
+                let xPos = (CGFloat(col) * tileSize.width) - (size.width * bufferMultiplier / 2)
+                let yPos = (CGFloat(row) * tileSize.height) - (size.height * bufferMultiplier / 2)
+                tile.position = CGPoint(x: xPos, y: yPos)
+                tile.anchorPoint = CGPoint(x: 0, y: 0)
+                tile.name = "waterTile"
+                tile.colorBlendFactor = 0.3  // Allow weather tinting
+                
+                // Set initial color based on current weather
+                tile.color = getTargetColor()
+                
+                waterTilesNode.addChild(tile)
             }
         }
     }
     
+    /// Returns the appropriate water texture name based on current weather
+    private func getWaterTextureName() -> String {
+        switch currentWeather {
+        case .night:
+            return "waterNight"
+        default:
+            return "water"
+        }
+    }
+    
+    /// Updates water tiles to match current weather with smooth color transition
+    private func updateWaterTilesColor() {
+        let targetColor = getTargetColor()
+        
+        waterTilesNode.enumerateChildNodes(withName: "waterTile") { node, _ in
+            guard let tile = node as? SKSpriteNode else { return }
+            
+            // Smoothly transition tile color
+            if tile.color != targetColor {
+                let colorAction = SKAction.colorize(with: targetColor, colorBlendFactor: 0.3, duration: 2.0)
+                tile.run(colorAction)
+            }
+        }
+    }
+    
+    private func updateWaterVisuals() {
+        // Update water tile positions to follow camera (infinite tiling effect)
+        // Get all water tiles from the waterTilesNode
+        var tiles: [SKSpriteNode] = []
+        waterTilesNode.enumerateChildNodes(withName: "waterTile") { node, _ in
+            if let tile = node as? SKSpriteNode {
+                tiles.append(tile)
+            }
+        }
+        
+        guard !tiles.isEmpty, let firstTile = tiles.first else { return }
+        
+        let tileSize = firstTile.size
+        let cameraPos = cam.position
+        
+        // Calculate the grid dimensions (should match createWaterTiles)
+        let tilesWide = Int(ceil(size.width / tileSize.width)) + 4
+        let tilesHigh = Int(ceil(size.height / tileSize.height)) + 4
+        
+        // Calculate the top-left corner of the tile grid relative to camera
+        let startX = floor((cameraPos.x - size.width / 2 - tileSize.width * 2) / tileSize.width) * tileSize.width
+        let startY = floor((cameraPos.y - size.height / 2 - tileSize.height * 2) / tileSize.height) * tileSize.height
+        
+        // Position each tile in the grid
+        for (index, tile) in tiles.enumerated() {
+            let col = index % tilesWide
+            let row = index / tilesWide
+            
+            let xPos = startX + (CGFloat(col) * tileSize.width) + tileSize.width / 2
+            let yPos = startY + (CGFloat(row) * tileSize.height) + tileSize.height / 2
+            
+            tile.position = CGPoint(x: xPos, y: yPos)
+        }
+    }
+    
+    /// Spawns animated water ripples at the specified position
+    /// Spawns water ripples parented to a pad so they follow moving pads
+    /// Uses GPU-accelerated SKAction animations for optimal performance
+    private func spawnWaterRipple(for pad: Pad) {
+        // Adjust color based on weather
+        let rippleColor: UIColor = switch currentWeather {
+        case .sunny: .white.withAlphaComponent(0.7)
+        case .rain: .cyan.withAlphaComponent(0.8)
+        case .night: .cyan.withAlphaComponent(0.5)
+        case .winter: .white.withAlphaComponent(0.6)
+        }
+        
+        // Use the new parented ripple effect from VFXManager
+        // Ripples are now children of the pad, so they follow moving pads automatically
+        VFXManager.shared.spawnRippleEffect(
+            parentedTo: pad,
+            color: rippleColor,
+            rippleCount: 3
+        )
+    }
+    
+    /// Spawns water ripples parented to any node (for crocodiles, etc.)
+    private func spawnWaterRipple(for node: SKNode) {
+        // Adjust color based on weather
+        let rippleColor: UIColor = switch currentWeather {
+        case .sunny: .white.withAlphaComponent(0.7)
+        case .rain: .cyan.withAlphaComponent(0.8)
+        case .night: .cyan.withAlphaComponent(0.5)
+        case .winter: .white.withAlphaComponent(0.6)
+        }
+        
+        // Use the new parented ripple effect from VFXManager
+        VFXManager.shared.spawnRippleEffect(
+            parentedTo: node,
+            color: rippleColor,
+            rippleCount: 3
+        )
+    }
+    
     private func setupHUD() {
         scoreLabel.text = "0m"
-        scoreLabel.fontSize = 36
+        scoreLabel.fontSize = Configuration.Fonts.hudScore.size
         scoreLabel.fontColor = .white
         scoreLabel.position = CGPoint(x: 0, y: (size.height / 2) - 110)
-        let scoreShadow = SKLabelNode(fontNamed: "AvenirNext-Bold")
+        let scoreShadow = SKLabelNode(fontNamed: Configuration.Fonts.primaryBold)
         scoreShadow.fontColor = .black
         scoreShadow.alpha = 0.5
         scoreShadow.position = CGPoint(x: 2, y: -2)
@@ -250,7 +490,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         uiNode.addChild(coinIcon)
         
         coinLabel.text = "0"
-        coinLabel.fontSize = 24
+        coinLabel.fontSize = Configuration.Fonts.hudCoins.size
         coinLabel.fontColor = .yellow
         coinLabel.horizontalAlignmentMode = .left
         coinLabel.position = CGPoint(x: (size.width / 2) - hudMargin - 30, y: (size.height / 2) - 100)
@@ -267,7 +507,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         descendBg.isHidden = true
         uiNode.addChild(descendBg)
         descendButton.text = "DESCEND!"
-        descendButton.fontSize = 24
+        descendButton.fontSize = Configuration.Fonts.descendButton.size
         descendButton.verticalAlignmentMode = .center
         descendButton.fontColor = .white
         descendBg.addChild(descendButton)
@@ -277,15 +517,54 @@ class GameScene: SKScene, CollisionManagerDelegate {
         pauseBg.lineWidth = 2
         pauseBg.position = CGPoint(x: 0, y: -(size.height / 2) + 60)
         let pauseIcon = SKLabelNode(text: "II")
-        pauseIcon.fontName = "AvenirNext-Heavy"
-        pauseIcon.fontSize = 24
+        pauseIcon.fontName = Configuration.Fonts.pauseIcon.name
+        pauseIcon.fontSize = Configuration.Fonts.pauseIcon.size
         pauseIcon.verticalAlignmentMode = .center
         pauseIcon.horizontalAlignmentMode = .center
         pauseIcon.fontColor = .white
         pauseBg.addChild(pauseIcon)
         uiNode.addChild(pauseBg)
+
+        setupRaceHUD()
     }
     
+    private func setupRaceHUD() {
+        guard gameMode == .beatTheBoat else { return }
+        
+        raceProgressNode.position = CGPoint(x: 0, y: scoreLabel.position.y - 600)
+        uiNode.addChild(raceProgressNode)
+        
+        let barWidth: CGFloat = 200
+        let bar = SKShapeNode(rectOf: CGSize(width: barWidth, height: 8), cornerRadius: 4)
+        bar.fillColor = .black.withAlphaComponent(0.5)
+        bar.strokeColor = .white
+        bar.lineWidth = 1
+        raceProgressNode.addChild(bar)
+        
+        // Finish line icon on the bar
+        let finishIcon = SKLabelNode(text: "🏁")
+        finishIcon.fontSize = 16
+        finishIcon.position = CGPoint(x: barWidth / 2 + 10, y: 0)
+        finishIcon.verticalAlignmentMode = .center
+        raceProgressNode.addChild(finishIcon)
+        
+        let frogIcon = SKLabelNode(text: "🐸")
+        frogIcon.fontSize = 20
+        frogIcon.name = "frogIcon"
+        frogIcon.position = CGPoint(x: -barWidth / 2, y: 0)
+        frogIcon.verticalAlignmentMode = .center
+        frogIcon.zPosition = 1
+        raceProgressNode.addChild(frogIcon)
+        
+        let boatIcon = SKLabelNode(text: "⛵️")
+        boatIcon.fontSize = 20
+        boatIcon.name = "boatIcon"
+        boatIcon.position = CGPoint(x: -barWidth / 2, y: 0)
+        boatIcon.verticalAlignmentMode = .center
+        boatIcon.zPosition = 1
+        raceProgressNode.addChild(boatIcon)
+    }
+
     private func setupAchievementCard() {
         // Card starts off-screen at the bottom
         let cardHeight: CGFloat = 80
@@ -308,9 +587,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         achievementCard.addChild(trophySprite)
         
         // Title label
-        let titleLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+        let titleLabel = SKLabelNode(fontNamed: Configuration.Fonts.achievementTitle.name)
         titleLabel.text = "Achievement Unlocked!"
-        titleLabel.fontSize = 16
+        titleLabel.fontSize = Configuration.Fonts.achievementTitle.size
         titleLabel.fontColor = .yellow
         titleLabel.horizontalAlignmentMode = .left
         titleLabel.position = CGPoint(x: -(size.width / 2) + 100, y: 12)
@@ -318,9 +597,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         achievementCard.addChild(titleLabel)
         
         // Achievement name label
-        let nameLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
+        let nameLabel = SKLabelNode(fontNamed: Configuration.Fonts.achievementName.name)
         nameLabel.text = ""
-        nameLabel.fontSize = 18
+        nameLabel.fontSize = Configuration.Fonts.achievementName.size
         nameLabel.fontColor = .white
         nameLabel.horizontalAlignmentMode = .left
         nameLabel.position = CGPoint(x: -(size.width / 2) + 100, y: -12)
@@ -416,9 +695,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
                bg.lineWidth = 2
                bg.position = CGPoint(x: 60, y: yOffset)
                
-               let lbl = SKLabelNode(fontNamed: "AvenirNext-Bold")
+               let lbl = SKLabelNode(fontNamed: Configuration.Fonts.buffIndicator.name)
                lbl.text = text
-               lbl.fontSize = 14
+               lbl.fontSize = Configuration.Fonts.buffIndicator.size
                lbl.fontColor = .white
                lbl.verticalAlignmentMode = .center
                lbl.position = CGPoint(x: 0, y: 0)
@@ -487,17 +766,27 @@ class GameScene: SKScene, CollisionManagerDelegate {
         crocodiles.forEach { $0.removeFromParent() }
         treasureChests.forEach { $0.removeFromParent() }
         snakes.forEach { $0.removeFromParent() }
+        flies.forEach { $0.removeFromParent() }
+        flotsam.forEach { $0.removeFromParent() }
         pads.removeAll()
         enemies.removeAll()
         coins.removeAll()
         crocodiles.removeAll()
         treasureChests.removeAll()
         snakes.removeAll()
+        flies.removeAll()
+        flotsam.removeAll()
         ridingCrocodile = nil
         trajectoryNode.path = nil
         slingshotNode.path = nil
         slingshotDot.isHidden = true
         crosshairNode.isHidden = true
+        
+        // Reset race-specific elements
+        boat?.removeFromParent()
+        boat = nil
+        finishLineNode.removeFromParent()
+        raceResult = nil
         
         frog.position = CGPoint(x: Configuration.Dimensions.riverWidth / 2, y: 0)
         frog.zHeight = 0
@@ -525,8 +814,40 @@ class GameScene: SKScene, CollisionManagerDelegate {
         descendBg.isHidden = true
         setWeather(.sunny, duration: 0.0)
         SoundManager.shared.playMusic(.gameplay)
+
+        if gameMode == .beatTheBoat {
+            setupRace()
+        }
     }
     
+    private func setupRace() {
+        // Spawn the boat just behind the starting line
+        let boatInstance = Boat(position: CGPoint(x: Configuration.Dimensions.riverWidth / 2 - 250, y: -50), wakeTargetNode: worldNode)
+        worldNode.addChild(boatInstance)
+        self.boat = boatInstance
+        
+        // Create the finish line
+        let finishY = Configuration.GameRules.boatRaceFinishY
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 0, y: finishY))
+        path.addLine(to: CGPoint(x: Configuration.Dimensions.riverWidth, y: finishY))
+        
+        let lineNode = SKShapeNode(path: path)
+        lineNode.strokeColor = .yellow
+        lineNode.lineWidth = 15
+        lineNode.zPosition = Layer.pad - 1 // Below pads
+        
+        // Add checkered flag pattern if the texture exists
+        if let texture = SKTexture(imageNamed: "checkered") as SKTexture? {
+            texture.filteringMode = .nearest
+            lineNode.strokeTexture = texture
+            lineNode.strokeColor = .white
+        }
+        
+        self.finishLineNode = lineNode
+        worldNode.addChild(finishLineNode)
+    }
+
     private func spawnInitialPads() {
         var yPos: CGFloat = 0
         for _ in 0..<5 {
@@ -553,6 +874,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         for crocodile in crocodiles { 
             crocodile.update(dt: dt, frogPosition: frog.position, frogZHeight: frog.zHeight)
         }
+        for fly in flies { fly.update(dt: dt) }
         
         // Update snakes - check if any reached the right edge and need respawning
         var snakesToRespawn: [Snake] = []
@@ -573,9 +895,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
             frog.velocity = .zero
         }
         
-        collisionManager.update(frog: frog, pads: pads, enemies: enemies, coins: coins, crocodiles: crocodiles, treasureChests: treasureChests, snakes: snakes)
+        collisionManager.update(frog: frog, pads: pads, enemies: enemies, coins: coins, crocodiles: crocodiles, treasureChests: treasureChests, snakes: snakes, flies: flies, boat: boat)
         updateWeather(dt: dt)
         updateWaterVisuals()
+        updateRaceState(dt: dt)
         
         if frog.rocketState == .landing {
             descendBg.isHidden = false
@@ -601,20 +924,128 @@ class GameScene: SKScene, CollisionManagerDelegate {
         cleanupOffscreenEntities()
     }
     
+    private func updateRaceState(dt: TimeInterval) {
+        guard gameMode == .beatTheBoat, let boat = boat, !isGameEnding else { return }
+        
+        boat.update(dt: dt)
+        checkBoatCollisions()
+        
+        // Update HUD
+        let finishY = Configuration.GameRules.boatRaceFinishY
+        let frogProgress = min(1.0, frog.position.y / finishY)
+        let boatProgress = min(1.0, boat.position.y / finishY)
+        
+        let barWidth: CGFloat = 200
+        if let frogIcon = raceProgressNode.childNode(withName: "frogIcon") {
+            frogIcon.position.x = (-barWidth / 2) + (barWidth * frogProgress)
+        }
+        if let boatIcon = raceProgressNode.childNode(withName: "boatIcon") {
+            boatIcon.position.x = (-barWidth / 2) + (barWidth * boatProgress)
+        }
+        
+        // Check for winner
+        if frog.position.y >= finishY {
+            endRace(didWin: true)
+        } else if boat.position.y >= finishY {
+            endRace(didWin: false)
+        }
+    }
+    
+    private func checkBoatCollisions() {
+        guard let boat = boat else { return }
+
+        for pad in pads {
+            // The boat only interacts with circular lily pads, not logs or graves.
+            guard pad.type != .log && pad.type != .grave else { continue }
+            
+            // More precise circle-rectangle collision check
+            if boatCollidesWithPad(boat: boat, pad: pad) {
+                boatDidCollide(with: pad, boat: boat)
+            }
+        }
+    }
+
+    /// Checks for collision between a rectangular boat and a circular lily pad.
+    private func boatCollidesWithPad(boat: Boat, pad: Pad) -> Bool {
+        // Boat properties
+        let boatCenter = boat.position
+        let boatHalfWidth = boat.size.width / 3
+        let boatHalfHeight = boat.size.height / 3
+        
+        // Pad properties
+        let padCenter = pad.position
+        let padRadius = pad.scaledRadius
+        
+        // Find the closest point on the boat's rectangle to the pad's center
+        let closestX = max(boatCenter.x - boatHalfWidth, min(padCenter.x, boatCenter.x + boatHalfWidth))
+        let closestY = max(boatCenter.y - boatHalfHeight, min(padCenter.y, boatCenter.y + boatHalfHeight))
+        
+        // Calculate the distance squared between the closest point and the pad's center
+        let distanceX = padCenter.x - closestX
+        let distanceY = padCenter.y - closestY
+        let distanceSquared = (distanceX * distanceX) + (distanceY * distanceY)
+        
+        // If the distance is less than the pad's radius, they are colliding
+        return distanceSquared < (padRadius * padRadius)
+    }
+
+    private func boatDidCollide(with pad: Pad, boat: Boat) {
+        // Calculate push direction away from the boat's center
+        let pushDx = pad.position.x - boat.position.x
+        let pushDy = pad.position.y - boat.position.y
+        let distance = sqrt(pushDx * pushDx + pushDy * pushDy)
+        
+        let pushStrength: CGFloat = 2.0 // A moderate push force
+
+        if distance > 0 {
+            let normalizedPush = CGVector(dx: pushDx / distance, dy: pushDy / distance)
+            // Add velocity to the pad. This will be handled in Pad.update()
+            pad.velocity.dx += normalizedPush.dx * pushStrength
+            pad.velocity.dy += normalizedPush.dy * pushStrength
+        } else {
+            // If somehow they are at the exact same spot, push upwards.
+            pad.velocity.dy += pushStrength
+        }
+
+        // Play sound and haptic feedback for the nudge
+        SoundManager.shared.play("hit")
+        HapticsManager.shared.playImpact(.light) // Lighter impact for a nudge
+    }
+    
+    private func endRace(didWin: Bool) {
+        guard !isGameEnding else { return }
+        isGameEnding = true
+        
+        var coinsWon = coinsCollectedThisRun
+        if didWin {
+            raceResult = .win
+            coinsWon += Configuration.GameRules.boatRaceReward
+            SoundManager.shared.play("coin") // TODO: Add a proper victory sound
+        } else {
+            raceResult = .lose
+            SoundManager.shared.play("gameOver")
+        }
+        
+        isUserInteractionEnabled = false
+        
+        let delay = SKAction.wait(forDuration: 1.5)
+        let showGameOver = SKAction.run { [weak self] in
+            guard let self = self else { return }
+            self.reportChallengeProgress()
+            self.coordinator?.gameDidEnd(score: self.score, coins: coinsWon, raceResult: self.raceResult)
+        }
+        run(SKAction.sequence([delay, showGameOver]))
+    }
+    
     private func updateWeather(dt: TimeInterval) {
         weatherTimer += dt
         if weatherTimer >= weatherDuration {
             weatherTimer = 0
             advanceWeather()
         }
-        if let currentColor = self.backgroundColor.cgColor.components,
-           let targetColor = getTargetColor().cgColor.components {
-            let lerp: CGFloat = 0.01
-            let r = currentColor[0] + (targetColor[0] - currentColor[0]) * lerp
-            let g = currentColor[1] + (targetColor[1] - currentColor[1]) * lerp
-            let b = currentColor[2] + (targetColor[2] - currentColor[2]) * lerp
-            self.backgroundColor = UIColor(red: r, green: g, blue: b, alpha: 1.0)
-        }
+        
+        // Update water tiles color smoothly (called every frame for smooth transitions)
+        updateWaterTilesColor()
     }
     private func advanceWeather() {
         let all = WeatherType.allCases
@@ -623,6 +1054,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         setWeather(all[nextIdx], duration: 1.0)
     }
     private func setWeather(_ type: WeatherType, duration: TimeInterval) {
+        // Check if we need to swap water textures (when switching to/from night)
+        let needsWaterTextureSwap = (currentWeather == .night && type != .night) || 
+                                     (currentWeather != .night && type == .night)
+        
         if currentWeather == .rain {
             frog.isWearingBoots = false
             VFXManager.shared.stopThunderCycle()
@@ -635,6 +1070,12 @@ class GameScene: SKScene, CollisionManagerDelegate {
                 HapticsManager.shared.playNotification(.success)
             }
         }
+        
+        // If we need to swap water textures, recreate the tiles
+        if needsWaterTextureSwap {
+            recreateWaterTiles()
+        }
+        
         weatherNode.removeAllChildren()
         let w = size.width
         let h = size.height
@@ -654,12 +1095,25 @@ class GameScene: SKScene, CollisionManagerDelegate {
         case .night:
             let flies = VFXManager.shared.createFirefliesEmitter(width: w, height: h)
             flies.position = .zero
+            flies.zPosition = 11
             weatherNode.addChild(flies)
             SoundManager.shared.playWeatherSFX(.night)
         case .sunny:
             SoundManager.shared.playWeatherSFX(nil)
         }
         for pad in pads { pad.updateColor(weather: type) }
+        
+        // Update water tiles to match new weather (color tint)
+        updateWaterTilesColor()
+    }
+    
+    /// Recreates water tiles with the appropriate texture for current weather
+    private func recreateWaterTiles() {
+        // Remove all existing water tiles
+        waterTilesNode.removeAllChildren()
+        
+        // Recreate with the new texture
+        createWaterTiles()
     }
     private func getTargetColor() -> UIColor {
         switch currentWeather {
@@ -682,6 +1136,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         enemies.removeAll { if $0.position.y < thresholdY { $0.removeFromParent(); return true }; return false }
         coins.removeAll { if $0.position.y < thresholdY { $0.removeFromParent(); return true }; return false }
         treasureChests.removeAll { if $0.position.y < thresholdY { $0.removeFromParent(); return true }; return false }
+        flies.removeAll { if $0.position.y < thresholdY { $0.removeFromParent(); return true }; return false }
+        flotsam.removeAll { if $0.position.y < thresholdY { $0.removeFromParent(); return true }; return false }
         // Cleanup snakes that have fallen behind the frog (passed/despawned)
         snakes.removeAll { snake in
             if snake.position.y < thresholdY || snake.isDestroyed {
@@ -787,6 +1243,15 @@ class GameScene: SKScene, CollisionManagerDelegate {
             coin.zHeight = 20
             worldNode.addChild(coin)
             coins.append(coin)
+        }
+        
+        // Fly spawning - 5% chance on normal lily pads
+        // Flies buzz around the pad and heal the frog when collected
+        let canSpawnFly = (type == .normal || type == .moving || type == .waterLily)
+        if canSpawnFly && Double.random(in: 0...1) < 0.05 {
+            let fly = Fly(position: pad.position)
+            worldNode.addChild(fly)
+            flies.append(fly)
         }
         
         // Treasure Chest spawning - rare but valuable!
@@ -950,6 +1415,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // Visual and haptic feedback
         pad.playLandingSquish()
+        spawnWaterRipple(for: pad)  // Ripples now parent to pad and follow it!
         HapticsManager.shared.playImpact(.light)
         
         // Track for challenges
@@ -1006,6 +1472,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         drawHearts()
         frog.hit()
         if frog.currentHealth <= 0 {
+            if gameMode == .beatTheBoat {
+                endRace(didWin: false)
+                return
+            }
             isGameEnding = true
             
             // Create dramatic drowning sequence before game over
@@ -1024,7 +1494,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         frog.zHeight = 0
         
         // Create expanding water ripples at the splash point
-        spawnDrowningRipples(at: frog.position)
+        spawnDrowningRipples()  // Ripples now parent to frog
         
         // Create water splash particles going upward
         spawnDrowningSplash(at: frog.position)
@@ -1038,35 +1508,46 @@ class GameScene: SKScene, CollisionManagerDelegate {
             let showGameOver = SKAction.run { [weak self] in
                 guard let self = self else { return }
                 self.reportChallengeProgress()
-                self.coordinator?.gameDidEnd(score: self.score, coins: self.coinsCollectedThisRun)
+                self.coordinator?.gameDidEnd(score: self.score, coins: self.coinsCollectedThisRun, raceResult: self.raceResult)
+            }
+            self.run(SKAction.sequence([delay, showGameOver]))
+        }
+    }
+    
+    /// Plays the dramatic enemy death sequence with spinning and falling off screen
+    private func playEnemyDeathSequence() {
+        // Stop all frog movement immediately
+        frog.velocity = .zero
+        frog.zVelocity = 0
+        
+        // Play the game over sound
+        SoundManager.shared.play("gameOver")
+        
+        // Play the frog's death animation (spins and falls)
+        frog.playDeathAnimation { [weak self] in
+            guard let self = self else { return }
+            
+            // Small delay after frog disappears before showing game over
+            let delay = SKAction.wait(forDuration: 0.4)
+            let showGameOver = SKAction.run { [weak self] in
+                guard let self = self else { return }
+                self.reportChallengeProgress()
+                self.coordinator?.gameDidEnd(score: self.score, coins: self.coinsCollectedThisRun, raceResult: self.raceResult)
             }
             self.run(SKAction.sequence([delay, showGameOver]))
         }
     }
     
     /// Creates expanding concentric ripples at the drowning location
-    private func spawnDrowningRipples(at position: CGPoint) {
-        let rippleCount = 4
-        let delayBetweenRipples: TimeInterval = 0.15
-        
-        for i in 0..<rippleCount {
-            let ripple = SKShapeNode(circleOfRadius: 20)
-            ripple.strokeColor = SKColor.white.withAlphaComponent(0.8)
-            ripple.fillColor = .clear
-            ripple.lineWidth = 3
-            ripple.position = position
-            ripple.zPosition = Layer.frog - 1
-            worldNode.addChild(ripple)
-            
-            let delay = SKAction.wait(forDuration: delayBetweenRipples * Double(i))
-            let expand = SKAction.scale(to: 4.0 + CGFloat(i) * 0.5, duration: 0.8)
-            expand.timingMode = .easeOut
-            let fade = SKAction.fadeOut(withDuration: 0.8)
-            let expandAndFade = SKAction.group([expand, fade])
-            let remove = SKAction.removeFromParent()
-            
-            ripple.run(SKAction.sequence([delay, expandAndFade, remove]))
-        }
+    /// Ripples are parented to the frog node so they stay at the drowning location
+    private func spawnDrowningRipples() {
+        // Use the new parented dramatic ripples from VFXManager
+        // Parent to frog so ripples stay at drowning location even if frog node moves during animation
+        VFXManager.shared.spawnDramaticRipples(
+            parentedTo: frog,
+            color: .white,
+            rippleCount: 4
+        )
     }
     
     /// Creates upward splash particles when frog hits the water
@@ -1228,19 +1709,42 @@ class GameScene: SKScene, CollisionManagerDelegate {
             updateBuffsHUD()
             return
         }
-        SoundManager.shared.play("hit")
+        SoundManager.shared.play("ouch")
         HapticsManager.shared.playImpact(.heavy)
         frog.currentHealth -= 1
         drawHearts()
         frog.hit()
         if frog.currentHealth <= 0 {
+            if gameMode == .beatTheBoat {
+                endRace(didWin: false)
+                return
+            }
             isGameEnding = true
-            reportChallengeProgress()
-            coordinator?.gameDidEnd(score: score, coins: coinsCollectedThisRun)
+            
+            // Play dramatic death animation with spinning and falling
+            playEnemyDeathSequence()
         } else {
             frog.velocity.dx *= -0.7
             frog.velocity.dy *= -0.7
         }
+    }
+    
+    func didCrash(into boat: Boat) {
+        guard !isGameEnding, !frog.isInvincible else { return }
+        
+        // Trigger the boat's veering behavior
+        boat.hitByFrog(frogPosition: frog.position)
+        
+        // Play feedback
+        HapticsManager.shared.playImpact(.heavy)
+        SoundManager.shared.play("hit")
+        
+        // Put frog into a "hit" state (for invincibility frames)
+        frog.hit()
+        
+        // Bounce the frog toward the nearest safe lilypad, just like falling in water.
+        // This gives the player a chance to recover instead of getting stuck.
+        bounceTowardNearestPad()
     }
     
     func didCrash(into snake: Snake) {
@@ -1262,15 +1766,20 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
         
         // Snake hits the frog - damage!
-        SoundManager.shared.play("hit")
+        SoundManager.shared.play("ouch")
         HapticsManager.shared.playImpact(.heavy)
         frog.currentHealth -= 1
         drawHearts()
         frog.hit()
         if frog.currentHealth <= 0 {
+            if gameMode == .beatTheBoat {
+                endRace(didWin: false)
+                return
+            }
             isGameEnding = true
-            reportChallengeProgress()
-            coordinator?.gameDidEnd(score: score, coins: coinsCollectedThisRun)
+            
+            // Play dramatic death animation with spinning and falling
+            playEnemyDeathSequence()
         } else {
             frog.velocity.dx *= -0.7
             frog.velocity.dy *= -0.7
@@ -1298,6 +1807,58 @@ class GameScene: SKScene, CollisionManagerDelegate {
             }
             run(SKAction.sequence([wait, trigger]))
         }
+    }
+    
+    func didCollect(fly: Fly) {
+        guard !isGameEnding else { return }
+        
+        // Only heal if the frog has an empty heart slot
+        if frog.currentHealth < frog.maxHealth {
+            frog.currentHealth += 1
+            drawHearts()
+            
+            // Play healing sound and haptics
+            SoundManager.shared.play("coin")  // Use coin sound or create a unique "heal" sound
+            HapticsManager.shared.playNotification(.success)
+            
+            // Show healing indicator
+            showHealingIndicator(at: fly.position)
+        } else {
+            // Already at full health - still play feedback but no heal
+            SoundManager.shared.play("coin")
+            HapticsManager.shared.playNotification(.success)
+        }
+        
+        // Animate the fly collection and remove it
+        fly.collect { [weak self] in
+            guard let self = self else { return }
+            if let idx = self.flies.firstIndex(of: fly) {
+                self.flies.remove(at: idx)
+            }
+        }
+    }
+    
+    /// Shows a floating "+❤️" indicator when the frog is healed by a fly
+    private func showHealingIndicator(at position: CGPoint) {
+        let healLabel = SKLabelNode(fontNamed: Configuration.Fonts.healingIndicator.name)
+        healLabel.text = "+❤️"
+        healLabel.fontSize = Configuration.Fonts.healingIndicator.size
+        healLabel.fontColor = .red
+        healLabel.position = CGPoint(x: position.x, y: position.y + 20)
+        healLabel.zPosition = Layer.ui
+        
+        worldNode.addChild(healLabel)
+        
+        // Animate: float up and fade out
+        let moveUp = SKAction.moveBy(x: 0, y: 60, duration: 1.0)
+        let fadeOut = SKAction.fadeOut(withDuration: 1.0)
+        let scale = SKAction.scale(to: 1.3, duration: 0.3)
+        let scaleBack = SKAction.scale(to: 1.0, duration: 0.7)
+        let scaleSequence = SKAction.sequence([scale, scaleBack])
+        
+        let group = SKAction.group([moveUp, fadeOut, scaleSequence])
+        let remove = SKAction.removeFromParent()
+        healLabel.run(SKAction.sequence([group, remove]))
     }
     
     func didCollect(treasureChest: TreasureChest) {
@@ -1344,9 +1905,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
     
     private func showTreasureChestReward(_ reward: TreasureChest.Reward, at position: CGPoint) {
         // Create reward notification label
-        let rewardLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+        let rewardLabel = SKLabelNode(fontNamed: Configuration.Fonts.treasureReward.name)
         rewardLabel.text = "\(reward.icon) \(reward.displayName)"
-        rewardLabel.fontSize = 24
+        rewardLabel.fontSize = Configuration.Fonts.treasureReward.size
         rewardLabel.fontColor = .yellow
         rewardLabel.position = CGPoint(x: position.x, y: position.y + 30)
         rewardLabel.zPosition = Layer.ui
@@ -1395,6 +1956,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         frog.isFloating = false
         frog.position = crocodile.position
         
+        // Visual and audio feedback
+        spawnWaterRipple(for: crocodile)  // Ripples parent to crocodile and follow it!
         SoundManager.shared.play("crocodileRide")
         HapticsManager.shared.playImpact(.medium)
         
@@ -1820,7 +2383,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Apply SuperJump multiplier (same as touchesEnded)
         if isSuperJumping {
             simVel.dx *= superJumpMultiplier
-            simVel.dy *= superJumpMultiplier
         }
         
         // Start from ground level for grounded jumps

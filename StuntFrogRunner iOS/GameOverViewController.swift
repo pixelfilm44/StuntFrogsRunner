@@ -6,6 +6,7 @@ class GameOverViewController: UIViewController {
     var score: Int = 0
     var runCoins: Int = 0
     var isNewHighScore: Bool = false
+    var raceResult: RaceResult?
     
     weak var coordinator: GameCoordinator?
     
@@ -105,16 +106,34 @@ class GameOverViewController: UIViewController {
     }
     
     private func configureData() {
-        scoreLabel.text = "\(score)m"
-        
-        if isNewHighScore {
-            highScoreLabel.isHidden = false
-            // Simple animation
-            UIView.animate(withDuration: 0.5, delay: 0, options: [.autoreverse, .repeat], animations: {
-                self.highScoreLabel.transform = CGAffineTransform(scaleX: 1.1, y: 1.1)
-            }, completion: nil)
-        } else {
+        if let result = raceResult {
+            // Race mode UI
             highScoreLabel.isHidden = true
+            retryButton.setTitle("RACE AGAIN", for: .normal)
+            
+            switch result {
+            case .win:
+                titleLabel.text = "YOU WIN!"
+                titleLabel.textColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1) // Green
+                scoreLabel.text = "You beat the boat!"
+            case .lose:
+                titleLabel.text = "TOO SLOW!"
+                titleLabel.textColor = UIColor(red: 231/255, green: 76/255, blue: 60/255, alpha: 1) // Red
+                scoreLabel.text = "The boat won."
+            }
+        } else {
+            // Endless mode UI
+            titleLabel.text = "WIPEOUT!"
+            scoreLabel.text = "\(score)m"
+            retryButton.setTitle("TRY AGAIN", for: .normal)
+            
+            highScoreLabel.isHidden = !isNewHighScore
+            if isNewHighScore {
+                // Simple animation
+                UIView.animate(withDuration: 0.5, delay: 0, options: [.autoreverse, .repeat], animations: {
+                    self.highScoreLabel.transform = CGAffineTransform(scaleX: 1.1, y: 1.1)
+                }, completion: nil)
+            }
         }
         
         let total = PersistenceManager.shared.totalCoins
@@ -162,7 +181,11 @@ class GameOverViewController: UIViewController {
     @objc private func handleRetry() {
         HapticsManager.shared.playImpact(.medium)
         dismiss(animated: true) {
-            self.coordinator?.startGame()
+            if self.raceResult != nil {
+                self.coordinator?.startRace()
+            } else {
+                self.coordinator?.startGame()
+            }
         }
     }
     

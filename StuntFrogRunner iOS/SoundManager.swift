@@ -36,7 +36,7 @@ class SoundManager: NSObject, AVAudioPlayerDelegate {
     }
     
     func preloadSounds() {
-        let sounds = ["jump", "land", "coin", "hit", "splash", "rocket", "ghost", "crocodileMashing", "crocodileRide", "thunder"]
+        let sounds = ["jump", "land", "coin", "hit", "splash", "rocket", "ghost", "crocodileMashing", "crocodileRide", "thunder", "gameOver", "ouch"]
         for sound in sounds {
             if let url = Bundle.main.url(forResource: sound, withExtension: "mp3") {
                 if let player = try? AVAudioPlayer(contentsOf: url) {
@@ -710,5 +710,86 @@ class VFXManager {
         ])
         sparkleEmitter.run(cleanup)
         ringEmitter.run(cleanup)
+    }
+    
+    // MARK: - Water Ripple Effects (Optimized for Multiple Simultaneous Ripples)
+    
+    /// Spawns animated water ripples parented to a lily pad or other node.
+    /// Uses GPU-accelerated SKAction animations for optimal performance.
+    /// The ripples will automatically follow the parent node's position if it moves.
+    /// Optimized to allow many ripples to play simultaneously without performance impact.
+    /// - Parameters:
+    ///   - parentNode: The node to parent the ripples to (e.g., a lily pad)
+    ///   - color: The color of the ripples (adjust based on weather/environment)
+    ///   - rippleCount: Number of concentric ripples to spawn (default 3)
+    ///   - offset: Optional position offset from the parent's center (default .zero means center of parent)
+    func spawnRippleEffect(parentedTo parentNode: SKNode, color: UIColor = .white, rippleCount: Int = 3, offset: CGPoint = .zero) {
+        // Create ripples directly on the parent node without an intermediate container
+        // This reduces node count and improves performance for multiple simultaneous ripples
+        for i in 0..<rippleCount {
+            let ripple = SKShapeNode(circleOfRadius: 25)
+            ripple.strokeColor = color.withAlphaComponent(0.7)
+            ripple.fillColor = .clear
+            ripple.lineWidth = 3
+            ripple.position = offset  // Position relative to parent
+            ripple.zPosition = -5  // Below the lily pad (relative to parent's zPosition)
+            ripple.alpha = 0  // Start invisible for fade-in effect
+            
+            // Add directly to parent node
+            parentNode.addChild(ripple)
+            
+            // Stagger the ripples slightly for a wave effect
+            let delay = Double(i) * 0.15
+            
+            // Animate the ripple expanding and fading out
+            let fadeIn = SKAction.fadeAlpha(to: 1.0, duration: 0.1)
+            let expand = SKAction.scale(to: 5.0, duration: 1.0)
+            let fadeOut = SKAction.fadeOut(withDuration: 1.0)
+            let group = SKAction.group([expand, fadeOut])
+            
+            let sequence = SKAction.sequence([
+                SKAction.wait(forDuration: delay),
+                fadeIn,
+                group,
+                SKAction.removeFromParent()  // Auto-cleanup
+            ])
+            
+            ripple.run(sequence)
+        }
+    }
+    
+    /// Spawns larger, more dramatic ripples for drowning or splash events.
+    /// Parented to a node so they follow movement if needed.
+    /// Optimized for multiple simultaneous ripples.
+    /// - Parameters:
+    ///   - parentNode: The node to parent the ripples to
+    ///   - color: The color of the ripples
+    ///   - rippleCount: Number of concentric ripples (default 4 for more drama)
+    ///   - offset: Optional position offset from parent's center
+    func spawnDramaticRipples(parentedTo parentNode: SKNode, color: UIColor = .white, rippleCount: Int = 4, offset: CGPoint = .zero) {
+        let delayBetweenRipples: TimeInterval = 0.15
+        
+        for i in 0..<rippleCount {
+            let ripple = SKShapeNode(circleOfRadius: 20)
+            ripple.strokeColor = color.withAlphaComponent(0.8)
+            ripple.fillColor = .clear
+            ripple.lineWidth = 3
+            ripple.position = offset
+            ripple.zPosition = -5  // Below parent
+            ripple.alpha = 0
+            
+            // Add directly to parent node for performance
+            parentNode.addChild(ripple)
+            
+            let delay = SKAction.wait(forDuration: delayBetweenRipples * Double(i))
+            let fadeIn = SKAction.fadeAlpha(to: 1.0, duration: 0.05)
+            let expand = SKAction.scale(to: 4.0 + CGFloat(i) * 0.5, duration: 0.8)
+            expand.timingMode = .easeOut
+            let fade = SKAction.fadeOut(withDuration: 0.8)
+            let expandAndFade = SKAction.group([expand, fade])
+            let remove = SKAction.removeFromParent()
+            
+            ripple.run(SKAction.sequence([delay, fadeIn, expandAndFade, remove]))
+        }
     }
 }

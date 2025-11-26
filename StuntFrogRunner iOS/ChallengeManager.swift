@@ -84,8 +84,8 @@ class ChallengeManager {
             Challenge(
                 id: "distance_100",
                 title: "First Steps",
-                description: "Travel 100m in a single run",
-                requirement: 100,
+                description: "Travel 200m in a single run",
+                requirement: 200,
                 reward: .coins(50),
                 type: .singleRunScore,
                 progress: 0,
@@ -95,8 +95,8 @@ class ChallengeManager {
             Challenge(
                 id: "distance_500",
                 title: "Getting There",
-                description: "Travel 500m in a single run",
-                requirement: 500,
+                description: "Travel 1000m in a single run",
+                requirement: 1000,
                 reward: .coins(100),
                 type: .singleRunScore,
                 progress: 0,
@@ -104,9 +104,9 @@ class ChallengeManager {
                 isRewardClaimed: false
             ),
             Challenge(
-                id: "distance_1000",
+                id: "distance_5000",
                 title: "Marathon Frog",
-                description: "Travel 1000m in a single run",
+                description: "Travel 5000m in a single run",
                 requirement: 1000,
                 reward: .coins(300),
                 type: .singleRunScore,
@@ -115,10 +115,10 @@ class ChallengeManager {
                 isRewardClaimed: false
             ),
             Challenge(
-                id: "distance_total_5000",
+                id: "distance_total_15000",
                 title: "World Traveler",
-                description: "Travel 5000m total across all runs",
-                requirement: 5000,
+                description: "Travel 15,000m total across all runs",
+                requirement: 15000,
                 reward: .coins(500),
                 type: .totalScore,
                 progress: 0,

@@ -17,6 +17,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         print("🚀 AppDelegate: didFinishLaunchingWithOptions called")
         
+        
+        for family in UIFont.familyNames {
+            print("Family: \(family)")
+            for name in UIFont.fontNames(forFamilyName: family) {
+                print("  - \(name)")
+            }
+        }
+
         // Preload assets as early as possible to prevent lag during gameplay start
         SoundManager.shared.preloadSounds()
         print("✅ AppDelegate: Sounds preloaded")

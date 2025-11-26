@@ -19,7 +19,7 @@ class MenuViewController: UIViewController {
         let label = UILabel()
         label.text = "STUNT FROG\nSUPERSTAR"
         label.numberOfLines = 2
-        label.font = UIFont.systemFont(ofSize: 48, weight: .heavy)
+        label.font = UIFont(name: "Fredoka-Bold", size: 60)
         label.textColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
         label.textAlignment = .center
         label.layer.shadowColor = UIColor.black.cgColor
@@ -48,7 +48,7 @@ class MenuViewController: UIViewController {
     private lazy var playButton: UIButton = {
         let button = UIButton(type: .system)
         button.setTitle("PLAY", for: .normal)
-        button.titleLabel?.font = UIFont.systemFont(ofSize: 36, weight: .bold)
+        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 36)
         button.setTitleColor(UIColor(red: 211/255, green: 84/255, blue: 0/255, alpha: 1), for: .normal)
         button.backgroundColor = UIColor(red: 241/255, green: 196/255, blue: 15/255, alpha: 1)
         button.layer.cornerRadius = 37
@@ -59,10 +59,24 @@ class MenuViewController: UIViewController {
         return button
     }()
     
+    private lazy var raceButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("RACE", for: .normal)
+        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 24)
+        button.setTitleColor(.white, for: .normal)
+        button.backgroundColor = UIColor(red: 26/255, green: 188/255, blue: 156/255, alpha: 1) // Teal color
+        button.layer.cornerRadius = 25
+        button.layer.borderWidth = 4
+        button.layer.borderColor = UIColor.white.cgColor
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(handleRace), for: .touchUpInside)
+        return button
+    }()
+    
     private lazy var shopButton: UIButton = {
         let button = UIButton(type: .system)
         button.setTitle("SHOP", for: .normal)
-        button.titleLabel?.font = UIFont.systemFont(ofSize: 24, weight: .bold)
+        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 24)
         button.setTitleColor(.white, for: .normal)
         button.backgroundColor = UIColor(red: 52/255, green: 152/255, blue: 219/255, alpha: 1)
         button.layer.cornerRadius = 25
@@ -76,7 +90,7 @@ class MenuViewController: UIViewController {
     private lazy var leaderboardButton: UIButton = {
         let button = UIButton(type: .system)
         button.setTitle("LEADERS", for: .normal)
-        button.titleLabel?.font = UIFont.systemFont(ofSize: 24, weight: .bold)
+        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 24)
         button.setTitleColor(.white, for: .normal)
         button.backgroundColor = UIColor(red: 155/255, green: 89/255, blue: 182/255, alpha: 1) // Purple
         button.layer.cornerRadius = 25
@@ -90,7 +104,7 @@ class MenuViewController: UIViewController {
     private lazy var challengesButton: UIButton = {
         let button = UIButton(type: .system)
         button.setTitle("CHALLENGES", for: .normal)
-        button.titleLabel?.font = UIFont.systemFont(ofSize: 24, weight: .bold)
+        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 24) 
         button.setTitleColor(.white, for: .normal)
         button.backgroundColor = UIColor(red: 230/255, green: 126/255, blue: 34/255, alpha: 1) // Orange
         button.layer.cornerRadius = 25
@@ -159,6 +173,7 @@ class MenuViewController: UIViewController {
         view.addSubview(titleLabel)
         view.addSubview(statsLabel)
         view.addSubview(playButton)
+        view.addSubview(raceButton)
         view.addSubview(shopButton)
         view.addSubview(leaderboardButton)
         view.addSubview(challengesButton)
@@ -173,7 +188,7 @@ class MenuViewController: UIViewController {
             backgroundImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             
             titleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -180),
+            titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -210),
             
             statsLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 20),
             statsLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
@@ -183,8 +198,13 @@ class MenuViewController: UIViewController {
             playButton.widthAnchor.constraint(equalToConstant: 300),
             playButton.heightAnchor.constraint(equalToConstant: 90),
             
+            raceButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            raceButton.topAnchor.constraint(equalTo: playButton.bottomAnchor, constant: 15),
+            raceButton.widthAnchor.constraint(equalToConstant: 200),
+            raceButton.heightAnchor.constraint(equalToConstant: 60),
+            
             shopButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            shopButton.topAnchor.constraint(equalTo: playButton.bottomAnchor, constant: 15),
+            shopButton.topAnchor.constraint(equalTo: raceButton.bottomAnchor, constant: 15),
             shopButton.widthAnchor.constraint(equalToConstant: 200),
             shopButton.heightAnchor.constraint(equalToConstant: 60),
             
@@ -226,6 +246,11 @@ class MenuViewController: UIViewController {
         } else {
             coordinator?.startGame()
         }
+    }
+    
+    @objc private func handleRace() {
+        HapticsManager.shared.playImpact(.light)
+        coordinator?.startRace()
     }
     
     @objc private func handleShop() {

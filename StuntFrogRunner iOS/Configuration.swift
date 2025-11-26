@@ -5,21 +5,21 @@ import SpriteKit
 struct Configuration {
     
     struct Physics {
-        static let gravityZ: CGFloat = 0.6
+        static let gravityZ: CGFloat = 0.8
         static let frictionGround: CGFloat = 0.8
-        static let frictionAir: CGFloat = 0.99
-        static let baseJumpZ: CGFloat = 2.0
-        static let maxDragDistance: CGFloat = 150.0
+        static let frictionAir: CGFloat = 0.90
+        static let baseJumpZ: CGFloat = 4.0
+        static let maxDragDistance: CGFloat = 150.0  // Reduced from 150 - shorter drag needed for full power
         
         static func dragPower(level: Int) -> CGFloat {
-            return 0.08 + (CGFloat(level) * 0.0075)
+            return 0.12 + (CGFloat(level) * 0.0075)  // 0.08 orig
         }
     }
     
     struct Dimensions {
         static let riverWidth: CGFloat = 600.0
         static let minPadRadius: CGFloat = 45.0
-        static let maxPadRadius: CGFloat = 65.0
+        static let maxPadRadius: CGFloat = 85.0
         static let padSpacing: CGFloat = 10.0  // Minimum gap between lily pads
         static let frogRadius: CGFloat = 20.0
         
@@ -36,13 +36,151 @@ struct Configuration {
         static let winter = SKColor(red: 160/255, green: 190/255, blue: 220/255, alpha: 1)
     }
     
+    /// Centralized font configuration for all UI elements
+    ///
+    /// Usage examples:
+    /// ```swift
+    /// // SpriteKit (SKLabelNode)
+    /// let label = SKLabelNode(fontNamed: Configuration.Fonts.hudScore.name)
+    /// label.fontSize = Configuration.Fonts.hudScore.size
+    ///
+    /// // UIKit
+    /// label.font = Configuration.Fonts.menuTitle
+    /// button.titleLabel?.font = Configuration.Fonts.shopBackButton
+    /// ```
+    struct Fonts {
+        // MARK: - Font Names
+        static let primaryBold = "Nunito-Bold"
+        static let primaryHeavy = "Fredoka-Bold"
+        
+        
+        // MARK: - SpriteKit Fonts (SKLabelNode)
+        
+        /// Primary HUD score display
+        static let hudScore: (name: String, size: CGFloat) = (primaryBold, 36)
+        
+        /// Coin counter in HUD
+        static let hudCoins: (name: String, size: CGFloat) = (primaryBold, 24)
+        
+        /// Descend button
+        static let descendButton: (name: String, size: CGFloat) = (primaryBold, 24)
+        
+        /// Pause icon
+        static let pauseIcon: (name: String, size: CGFloat) = (primaryHeavy, 24)
+        
+        /// Achievement card title
+        static let achievementTitle: (name: String, size: CGFloat) = (primaryHeavy, 16)
+        
+        /// Achievement card name
+        static let achievementName: (name: String, size: CGFloat) = (primaryBold, 18)
+        
+        /// Power-up/buff indicator labels
+        static let buffIndicator: (name: String, size: CGFloat) = (primaryBold, 14)
+        
+        /// Healing indicator (+❤️)
+        static let healingIndicator: (name: String, size: CGFloat) = (primaryHeavy, 28)
+        
+        /// Treasure chest reward display
+        static let treasureReward: (name: String, size: CGFloat) = (primaryHeavy, 24)
+        
+        /// Coin collection reward (+⭐️)
+        static let coinReward: (name: String, size: CGFloat) = (primaryHeavy, 28)
+        
+        // MARK: - UIKit Fonts
+        
+        /// Menu screen title (STUNT FROG SUPERSTAR)
+        static let menuTitle: (name: String, size: CGFloat) = (primaryBold, 46)
+        
+        /// Menu screen stats text
+        static let menuStats = UIFont.systemFont(ofSize: 16, weight: .medium)
+        
+        /// Play button
+        static let menuPlayButton: (name: String, size: CGFloat) = (primaryBold, 36)
+        
+        /// Shop, Leaderboard, Challenges buttons
+        static let menuSecondaryButton = UIFont.systemFont(ofSize: 24, weight: .bold)
+        
+        /// Challenge badge notification
+        static let menuChallengeBadge: (name: String, size: CGFloat) = (primaryBold, 14)
+        
+        /// Help button
+        static let menuHelpButton = UIFont.systemFont(ofSize: 24, weight: .bold)
+        
+        /// Shop header (FROG SHOP)
+        static let shopHeader: (name: String, size: CGFloat) = (primaryHeavy, 36)
+        
+        /// Shop coins counter
+        static let shopCoins = UIFont.systemFont(ofSize: 20, weight: .bold)
+        
+        /// Shop upgrade card title
+        static let shopCardTitle: (name: String, size: CGFloat) = (primaryHeavy, 20)
+        
+        /// Shop upgrade card cost
+        static let shopCardCost = UIFont.systemFont(ofSize: 18, weight: .heavy)
+        
+        /// Shop upgrade button
+        static let shopUpgradeButton = UIFont.systemFont(ofSize: 14, weight: .bold)
+        
+        /// Shop badge (NEW, OWNED)
+        static let shopBadge = UIFont.systemFont(ofSize: 10, weight: .bold)
+        
+        /// Shop level indicator
+        static let shopLevelIndicator = UIFont.systemFont(ofSize: 9, weight: .bold)
+        
+        /// Shop section title
+        static let shopSectionTitle = UIFont.systemFont(ofSize: 16, weight: .heavy)
+        
+        /// Shop back button
+        static let shopBackButton = UIFont.systemFont(ofSize: 18, weight: .bold)
+        
+        /// Challenges screen title
+        static let challengesTitle : (name: String, size: CGFloat) = (primaryHeavy, 32)
+        
+        /// Challenges back button
+        static let challengesBackButton = UIFont.systemFont(ofSize: 20, weight: .bold)
+        
+        /// Challenge card title
+        static let challengeCardTitle = UIFont.systemFont(ofSize: 18, weight: .bold)
+        
+        /// Challenge card description
+        static let challengeCardDescription = UIFont.systemFont(ofSize: 14, weight: .regular)
+        
+        /// Challenge card progress
+        static let challengeCardProgress = UIFont.systemFont(ofSize: 12, weight: .medium)
+        
+        /// Challenge card reward
+        static let challengeCardReward = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        
+        /// Challenge claim badge
+        static let challengeClaimBadge = UIFont.systemFont(ofSize: 12, weight: .heavy)
+        
+        /// Game over screen title (WIPEOUT!)
+        static let gameOverTitle : (name: String, size: CGFloat) = (primaryHeavy, 42)
+        
+        /// Game over score display
+        static let gameOverScore = UIFont.systemFont(ofSize: 32, weight: .bold)
+        
+        /// Game over high score banner
+        static let gameOverHighScore = UIFont.systemFont(ofSize: 18, weight: .bold)
+        
+        /// Game over coins display
+        static let gameOverCoins = UIFont.systemFont(ofSize: 18, weight: .medium)
+        
+        /// Game over retry/menu buttons
+        static let gameOverButton = UIFont.systemFont(ofSize: 20, weight: .bold)
+    }
+    
     struct GameRules {
         static let coinsForUpgradeTrigger = 10
         static let rocketDuration: TimeInterval = 7.0
         static let rocketLandingDuration: TimeInterval = 5.0
         static let bootsDuration: TimeInterval = 5.0
-        // NEW: SuperJump Duration
         static let superJumpDuration: TimeInterval = 10.0
+        
+        // MARK: - Beat the Boat Challenge
+        static let boatRaceFinishY: CGFloat = 20000.0 // 2000m * 10 score units/meter
+        static let boatSpeed: CGFloat = 2.8 // Adjust for balanced difficulty
+        static let boatRaceReward: Int = 100
     }
     
     /// Progressive difficulty settings - scales every 500m traveled
@@ -60,7 +198,7 @@ struct Configuration {
         /// Base probability of spawning an enemy (at level 0)
         static let baseEnemyProbability: Double = 0.25
         /// Additional enemy probability per difficulty level
-        static let enemyProbabilityPerLevel: Double = 0.65
+        static let enemyProbabilityPerLevel: Double = 0.45
         /// Maximum enemy spawn probability
         static let maxEnemyProbability: Double = 0.85
         

@@ -84,9 +84,9 @@ class LoadingViewController: UIViewController {
     
     private lazy var titleLabel: UILabel = {
         let label = UILabel()
-        label.text = "STUNT FROG\nSUPERSTAR"
+        label.text = "Loading..."
         label.numberOfLines = 2
-        label.font = UIFont.systemFont(ofSize: 42, weight: .heavy)
+        label.font = UIFont(name: "Fredoka-Bold", size: 44) 
         label.textColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
         label.textAlignment = .center
         label.layer.shadowColor = UIColor.black.cgColor
@@ -234,3 +234,4 @@ class LoadingViewController: UIViewController {
         ])
     }
 }
+

@@ -21,6 +21,7 @@ enum FrogAnimationState {
     case sitting
     case leaping     // Beginning of jump / end of jump
     case jumping     // Midway through jump (peak)
+    case recoiling   // Hit by enemy
 }
 
 // MARK: - Base Entity
@@ -30,11 +31,15 @@ class GameEntity: SKSpriteNode {
     var zVelocity: CGFloat = 0.0
     
     func constrainToRiver() {
-        if position.x < Configuration.Dimensions.frogRadius {
-            position.x = Configuration.Dimensions.frogRadius
+        constrainToRiver(radius: Configuration.Dimensions.frogRadius)
+    }
+    
+    func constrainToRiver(radius: CGFloat) {
+        if position.x < radius {
+            position.x = radius
             velocity.dx *= -0.6
-        } else if position.x > Configuration.Dimensions.riverWidth - Configuration.Dimensions.frogRadius {
-            position.x = Configuration.Dimensions.riverWidth - Configuration.Dimensions.frogRadius
+        } else if position.x > Configuration.Dimensions.riverWidth - radius {
+            position.x = Configuration.Dimensions.riverWidth - radius
             velocity.dx *= -0.6
         }
     }
@@ -64,6 +69,7 @@ class Frog: GameEntity {
     var currentHealth: Int = 3
     var isInvincible: Bool = false
     var invincibilityTimer: Int = 0
+    var recoilTimer: Int = 0  // Timer for recoil animation duration
     
     var onPad: Pad?
     var isFloating: Bool = false
@@ -98,11 +104,13 @@ class Frog: GameEntity {
     private static let sitTexture = SKTexture(imageNamed: "frogSit")
     private static let leapTexture = SKTexture(imageNamed: "frogLeap")
     private static let jumpTexture = SKTexture(imageNamed: "frogJump")
+    private static let recoilTexture = SKTexture(imageNamed: "frogRecoil")
     
     // Target heights for frog sprite (aspect ratio preserved automatically)
     private static let frogSitHeight: CGFloat = 40
     private static let frogLeapHeight: CGFloat = 80
     private static let frogJumpHeight: CGFloat = 80
+    private static let frogRecoilHeight: CGFloat = 60
     
     /// Sets the frog sprite texture while preserving the image's aspect ratio
     private func setFrogTexture(_ texture: SKTexture, height: CGFloat) {
@@ -188,6 +196,11 @@ class Frog: GameEntity {
             isInvincible = false
         }
         
+        // Update recoil timer
+        if recoilTimer > 0 {
+            recoilTimer -= 1
+        }
+        
         vestNode.isHidden = (buffs.vest == 0)
         
         if rocketState != .none {
@@ -218,7 +231,7 @@ class Frog: GameEntity {
                     let isRain = (weather == .rain)
                     let isIce = (pad.type == .ice)
                     if (isRain || isIce) && !isWearingBoots {
-                        currentFriction = 0.94
+                        currentFriction = 0.93
                     }
                 }
                 velocity.dx *= currentFriction
@@ -242,6 +255,7 @@ class Frog: GameEntity {
     func hit() {
         invincibilityTimer = 120
         isInvincible = true
+        recoilTimer = 20  // Show recoil animation for ~0.33 seconds (20 frames at 60fps)
     }
     
     /// Plays a drowning animation where the frog sinks underwater and disappears.
@@ -288,6 +302,57 @@ class Frog: GameEntity {
         // Run animations
         shadowNode.run(shadowAnimation)
         bodyNode.run(bodyAnimation) {
+            completion()
+        }
+    }
+    
+    /// Plays a death animation where the frog spins around and falls off the screen (for enemy deaths).
+    /// - Parameter completion: Called when the animation finishes
+    func playDeathAnimation(completion: @escaping () -> Void) {
+        // Stop all movement
+        velocity = .zero
+        zVelocity = 0
+        
+        // Disable physics updates during animation
+        isInvincible = true
+        
+        // Create the dramatic spinning fall animation
+        let duration: TimeInterval = 1.5
+        
+        // Rapid spinning (multiple full rotations)
+        let spinCount: CGFloat = 4  // 4 full spins
+        let spin = SKAction.rotate(byAngle: spinCount * CGFloat.pi * 2, duration: duration)
+        spin.timingMode = .easeIn
+        
+        // Fall down off the screen
+        let fallDistance: CGFloat = 600
+        let fall = SKAction.moveBy(x: 0, y: -fallDistance, duration: duration)
+        fall.timingMode = .easeIn
+        
+        // Scale down as falling (getting further away)
+        let scaleDown = SKAction.scale(to: 0.2, duration: duration)
+        scaleDown.timingMode = .easeIn
+        
+        // Fade out near the end
+        let wait = SKAction.wait(forDuration: duration * 0.6)
+        let fadeOut = SKAction.fadeOut(withDuration: duration * 0.4)
+        let fadeSequence = SKAction.sequence([wait, fadeOut])
+        
+        // Combine all animations for the main frog node
+        let mainAnimation = SKAction.group([fall, scaleDown, fadeSequence])
+        
+        // Combine spin with the main animation on the body
+        let bodyAnimation = SKAction.group([spin])
+        
+        // Shadow fades quickly as frog falls
+        let shadowFade = SKAction.fadeOut(withDuration: duration * 0.3)
+        let shadowScale = SKAction.scale(to: 0.1, duration: duration * 0.3)
+        let shadowAnimation = SKAction.group([shadowFade, shadowScale])
+        
+        // Run animations
+        shadowNode.run(shadowAnimation)
+        bodyNode.run(bodyAnimation)
+        self.run(mainAnimation) {
             completion()
         }
     }
@@ -404,27 +469,32 @@ class Frog: GameEntity {
     private func updateAnimationState() {
         let newState: FrogAnimationState
         
-        // Calculate horizontal speed
-        let horizontalSpeed = sqrt(velocity.dx * velocity.dx + velocity.dy * velocity.dy)
-        
-        // Determine animation state based on jump phase and movement
-        if zHeight <= 0.1 && abs(zVelocity) < 0.1 {
-            // On ground / lilypad - use sitting if idle, leaping if sliding
-            if horizontalSpeed < 0.5 {
-                newState = .sitting
-            } else {
-                // Sliding on ice or moving - still show sitting pose when grounded
-                newState = .sitting
-            }
-        } else if zVelocity > jumpStartZVelocity * 0.3 {
-            // Rising phase - just started jumping (first ~30% of upward velocity)
-            newState = .leaping
-        } else if zVelocity > -jumpStartZVelocity * 0.3 {
-            // Peak phase - midway through jump
-            newState = .jumping
+        // Priority 1: Show recoil animation if hit recently
+        if recoilTimer > 0 {
+            newState = .recoiling
         } else {
-            // Falling phase - about to land
-            newState = .leaping
+            // Calculate horizontal speed
+            let horizontalSpeed = sqrt(velocity.dx * velocity.dx + velocity.dy * velocity.dy)
+            
+            // Determine animation state based on jump phase and movement
+            if zHeight <= 0.1 && abs(zVelocity) < 0.1 {
+                // On ground / lilypad - use sitting if idle, leaping if sliding
+                if horizontalSpeed < 0.5 {
+                    newState = .sitting
+                } else {
+                    // Sliding on ice or moving - still show sitting pose when grounded
+                    newState = .sitting
+                }
+            } else if zVelocity > jumpStartZVelocity * 0.3 {
+                // Rising phase - just started jumping (first ~30% of upward velocity)
+                newState = .leaping
+            } else if zVelocity > -jumpStartZVelocity * 0.3 {
+                // Peak phase - midway through jump
+                newState = .jumping
+            } else {
+                // Falling phase - about to land
+                newState = .leaping
+            }
         }
         
         // Only update texture if state changed (performance optimization)
@@ -438,6 +508,8 @@ class Frog: GameEntity {
                 setFrogTexture(Frog.leapTexture, height: Frog.frogLeapHeight)
             case .jumping:
                 setFrogTexture(Frog.jumpTexture, height: Frog.frogJumpHeight)
+            case .recoiling:
+                setFrogTexture(Frog.recoilTexture, height: Frog.frogRecoilHeight)
             }
         }
     }
@@ -697,6 +769,25 @@ class Pad: GameEntity {
             self.xScale = CGFloat(s)
             self.yScale = CGFloat(s)
         }
+        
+        // Handle velocity from being pushed
+        if velocity != .zero {
+            position.x += velocity.dx
+            position.y += velocity.dy
+            
+            // Apply friction
+            let friction: CGFloat = 0.95
+            velocity.dx *= friction
+            velocity.dy *= friction
+            
+            // Stop movement when slow enough
+            if abs(velocity.dx) < 0.1 && abs(velocity.dy) < 0.1 {
+                velocity = .zero
+            }
+            
+            // Constrain to river bounds
+            constrainToRiver(radius: self.scaledRadius)
+        }
     }
 }
 
@@ -884,7 +975,7 @@ class TreasureChest: GameEntity {
         setupVisuals()
     }
     
-    required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not be implemented") }
     
     private func setupVisuals() {
         // Add glow behind chest
@@ -967,7 +1058,7 @@ class Snake: GameEntity {
         startAnimation()
     }
     
-    required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not be implemented") }
     
     private func setupVisuals() {
         // Shadow
@@ -1109,7 +1200,7 @@ class Crocodile: GameEntity {
         setupVisuals()
     }
     
-    required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not be implemented") }
     
     private func setupVisuals() {
        
@@ -1323,5 +1414,139 @@ class Crocodile: GameEntity {
         let remove = SKAction.removeFromParent()
         
         run(SKAction.sequence([group, remove]))
+    }
+}
+
+// MARK: - Flotsam (Floating Debris)
+class Flotsam: GameEntity {
+    
+    // Note: You will need to add these images to your asset catalog.
+    private static let debrisImages = ["bottle", "boot", "twig"]
+    
+    init(position: CGPoint) {
+        // Choose a random texture for the debris
+        let imageName = Flotsam.debrisImages.randomElement() ?? "twig"
+        let texture = SKTexture(imageNamed: imageName)
+        
+        super.init(texture: texture, color: .clear, size: texture.size())
+        
+        self.position = position
+        self.zPosition = 0 // Relative to its parent node
+        
+        // Randomize appearance for variety
+        self.setScale(CGFloat.random(in: 0.4...0.6))
+        self.zRotation = CGFloat.random(in: 0...CGFloat.pi * 2)
+        self.alpha = CGFloat.random(in: 0.7...0.9)
+    }
+    
+    required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not be implemented") }
+    
+    /// Sets the debris floating downstream with a gentle animation.
+    func float() {
+        // Animate floating a very long distance downstream.
+        // The GameScene's cleanup logic will handle removing it when it's far off-screen.
+        let moveAction = SKAction.moveBy(x: CGFloat.random(in: -40...40), y: -4000, duration: TimeInterval.random(in: 80...120))
+        
+        // Animate a slow, gentle rotation.
+        let rotateAmount = CGFloat.random(in: -2.0...2.0)
+        let rotateAction = SKAction.rotate(byAngle: rotateAmount, duration: moveAction.duration)
+        
+        // Run both animations at the same time.
+        let group = SKAction.group([moveAction, rotateAction])
+        self.run(group)
+    }
+}
+
+// MARK: - Boat (for Race Mode)
+class Boat: GameEntity {
+    
+    // Assumes "boat.png" exists in the asset catalog
+    private let boatSprite = SKSpriteNode(imageNamed: "boat")
+    
+    // Veering state
+    private var veerTimer: TimeInterval = 0
+    private var veerDirection: CGFloat = 0
+    // Increased veer speed for a more noticeable reaction to being hit.
+    private let veerSpeed: CGFloat = 300.0
+    private let originalX: CGFloat
+    
+    // Wake particle emitter
+    private var wakeEmitter: SKEmitterNode?
+    
+    init(position: CGPoint, wakeTargetNode: SKNode? = nil) {
+        self.originalX = position.x
+        super.init(texture: nil, color: .clear, size: CGSize(width: 80, height: 150))
+        self.position = position
+        self.zPosition = Layer.pad + 2 // Above pads, but can be behind frog
+        
+        setupVisuals()
+        setupWakeEmitter(targetNode: wakeTargetNode)
+    }
+    
+    required init?(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func setupVisuals() {
+        boatSprite.size = self.size
+        addChild(boatSprite)
+        
+        // Add a subtle bobbing animation
+        let moveUp = SKAction.moveBy(x: 0, y: 3, duration: 1.2)
+        moveUp.timingMode = .easeInEaseOut
+        let moveDown = moveUp.reversed()
+        let bob = SKAction.sequence([moveUp, moveDown])
+        run(SKAction.repeatForever(bob))
+    }
+    
+    /// Sets up the wake particle emitter.
+    private func setupWakeEmitter(targetNode: SKNode?) {
+        guard let target = targetNode,
+              let emitter = SKEmitterNode(fileNamed: "BoatWake.sks") else {
+            return
+        }
+        
+        // The targetNode makes particles emit into the world space,
+        // leaving a trail behind the moving boat.
+        emitter.targetNode = target
+        
+        // Position the emitter at the back of the boat.
+        emitter.position = CGPoint(x: 0, y: -size.height / 2 + 10)
+        emitter.zPosition = -1 // Behind the boat sprite but in front of water
+        
+        // Store and add the emitter
+        self.wakeEmitter = emitter
+        addChild(emitter)
+    }
+    
+    func update(dt: TimeInterval) {
+        // The boat moves at a constant speed upstream
+        position.y += Configuration.GameRules.boatSpeed
+        
+        // Handle veering logic
+        if veerTimer > 0 {
+            position.x += veerDirection * veerSpeed * CGFloat(dt)
+            veerTimer -= dt
+        } else {
+            // Smoothly return to original path
+            let returnSpeed: CGFloat = 0.05
+            position.x += (originalX - position.x) * returnSpeed
+        }
+        
+        // Constrain to river bounds
+        let halfWidth = size.width / 2
+        if position.x < halfWidth {
+            position.x = halfWidth
+        } else if position.x > Configuration.Dimensions.riverWidth - halfWidth {
+            position.x = Configuration.Dimensions.riverWidth - halfWidth
+        }
+    }
+    
+    /// Triggers the boat to veer off course when hit by the frog.
+    func hitByFrog(frogPosition: CGPoint) {
+        veerTimer = 1.0 // Veer for 1 second
+        
+        // Veer away from the frog's horizontal position
+        veerDirection = (self.position.x > frogPosition.x) ? 1.0 : -1.0
     }
 }
