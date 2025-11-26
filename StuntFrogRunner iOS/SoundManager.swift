@@ -19,6 +19,7 @@ class SoundManager: NSObject, AVAudioPlayerDelegate {
         case gameplay2 = "gameplay_music2"
         case rocketFlight = "rocket_flight_music"
         case crocRomp = "crocRomp"
+        case race = "race"
     }
     
     // Track to play after current track finishes (for sequential playback)

@@ -11,6 +11,13 @@ class GameScene: SKScene, CollisionManagerDelegate {
     // MARK: - Game Mode
     var gameMode: GameMode = .endless
     private var raceResult: RaceResult?
+    private enum RaceState {
+        case none
+        case countdown
+        case racing
+        case finished
+    }
+    private var raceState: RaceState = .none
     
     // MARK: - Race Components
     private var boat: Boat?
@@ -45,6 +52,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private let descendBg = SKShapeNode(rectOf: CGSize(width: 200, height: 60), cornerRadius: 30)
     private let pauseBg = SKShapeNode(circleOfRadius: 25)
     private let hudMargin: CGFloat = 20.0
+    private let countdownLabel = SKLabelNode(fontNamed: Configuration.Fonts.primaryHeavy)
     
     // Achievement Notification Card
     private let achievementCard = SKNode()
@@ -77,6 +85,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private var previousRocketState: RocketState = .none
     private var ridingCrocodile: Crocodile? = nil  // Currently riding crocodile
     private var crocRideVignetteNode: SKSpriteNode?  // Vignette overlay for croc ride
+    private var baseMusic: SoundManager.Music = .gameplay
     
     // MARK: - Challenge Tracking
     private var padsLandedThisRun: Int = 0
@@ -88,10 +97,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
     override func didMove(to view: SKView) {
         setupScene()
         setupHUD()
+        setupCountdownLabel()
         setupAchievementCard()
         setupInput()
         startSpawningLeaves()
-        startSpawningFlotsam()
+        //startSpawningFlotsam()
         collisionManager.delegate = self
         startGame()
         if let starter = initialUpgrade { applyUpgrade(id: starter) }
@@ -171,8 +181,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let directions: [(String, CGPoint, CGFloat)] = [
             ("up", CGPoint(x: 0, y: arrowDistance), 0),
             ("down", CGPoint(x: 0, y: -arrowDistance), .pi),
-            ("left", CGPoint(x: -arrowDistance, y: 0), -.pi / 2),
-            ("right", CGPoint(x: arrowDistance, y: 0), .pi / 2)
+            ("left", CGPoint(x: arrowDistance, y: 0), -.pi / 2),
+            ("right", CGPoint(x: -arrowDistance, y: 0), .pi / 2)
         ]
         
         for (name, offset, rotation) in directions {
@@ -486,7 +496,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         uiNode.addChild(scoreLabel)
         
         coinIcon.size = CGSize(width: 24, height: 24)
-        coinIcon.position = CGPoint(x: (size.width / 2) - hudMargin - 50, y: (size.height / 2) - 100)
+        coinIcon.position = CGPoint(x: (size.width / 2) - hudMargin - 50, y: (size.height / 2) - 90)
         uiNode.addChild(coinIcon)
         
         coinLabel.text = "0"
@@ -563,6 +573,25 @@ class GameScene: SKScene, CollisionManagerDelegate {
         boatIcon.verticalAlignmentMode = .center
         boatIcon.zPosition = 1
         raceProgressNode.addChild(boatIcon)
+    }
+
+    private func setupCountdownLabel() {
+        countdownLabel.fontSize = 200
+        countdownLabel.fontColor = .white
+        countdownLabel.position = CGPoint(x: 0, y: 100) // A bit above center
+        countdownLabel.zPosition = Layer.ui + 100
+        countdownLabel.isHidden = true
+        
+        // Add a shadow for better visibility
+        let shadow = SKLabelNode(fontNamed: Configuration.Fonts.primaryHeavy)
+        shadow.fontSize = countdownLabel.fontSize
+        shadow.fontColor = .black.withAlphaComponent(0.7)
+        shadow.position = CGPoint(x: 5, y: -5)
+        shadow.zPosition = -1
+        shadow.name = "shadow" // To update text
+        countdownLabel.addChild(shadow)
+        
+        uiNode.addChild(countdownLabel)
     }
 
     private func setupAchievementCard() {
@@ -787,6 +816,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         boat = nil
         finishLineNode.removeFromParent()
         raceResult = nil
+        raceState = .none
         
         frog.position = CGPoint(x: Configuration.Dimensions.riverWidth / 2, y: 0)
         frog.zHeight = 0
@@ -813,10 +843,16 @@ class GameScene: SKScene, CollisionManagerDelegate {
         updateBuffsHUD()
         descendBg.isHidden = true
         setWeather(.sunny, duration: 0.0)
-        SoundManager.shared.playMusic(.gameplay)
 
         if gameMode == .beatTheBoat {
+            raceState = .countdown
+            isUserInteractionEnabled = false
             setupRace()
+            baseMusic = .race
+            SoundManager.shared.playMusic(baseMusic)
+        } else {
+            baseMusic = .gameplay
+            SoundManager.shared.playMusic(baseMusic)
         }
     }
     
@@ -846,6 +882,55 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         self.finishLineNode = lineNode
         worldNode.addChild(finishLineNode)
+        
+        startRaceCountdown()
+    }
+
+    private func startRaceCountdown() {
+        countdownLabel.isHidden = false
+
+        func updateLabelText(text: String, color: UIColor = .white) {
+            self.countdownLabel.text = text
+            self.countdownLabel.fontColor = color
+            if let shadow = self.countdownLabel.childNode(withName: "shadow") as? SKLabelNode {
+                shadow.text = text
+            }
+        }
+
+        let pulseAction = SKAction.sequence([
+            SKAction.group([.scale(to: 1.0, duration: 0.2), .fadeIn(withDuration: 0.2)]),
+            SKAction.wait(forDuration: 0.6),
+            SKAction.fadeOut(withDuration: 0.2)
+        ])
+        pulseAction.timingMode = .easeInEaseOut
+
+        func stepAction(text: String, sound: String, color: UIColor = .white) -> SKAction {
+            return SKAction.run {
+                updateLabelText(text: text, color: color)
+                self.countdownLabel.setScale(2.0)
+                self.countdownLabel.alpha = 0.0
+                self.countdownLabel.run(pulseAction)
+                SoundManager.shared.play(sound)
+            }
+        }
+
+        let wait = SKAction.wait(forDuration: 1.0)
+
+        let beginRace = SKAction.run {
+            self.countdownLabel.isHidden = true
+            self.raceState = .racing
+            self.isUserInteractionEnabled = true
+        }
+
+        let sequence = SKAction.sequence([
+            stepAction(text: "3", sound: "hit"), wait,
+            stepAction(text: "2", sound: "hit"), wait,
+            stepAction(text: "1", sound: "hit"), wait,
+            stepAction(text: "GO!", sound: "coin", color: .green), wait,
+            beginRace
+        ])
+
+        run(sequence)
     }
 
     private func spawnInitialPads() {
@@ -910,7 +995,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // Handle rocket music transitions
         if previousRocketState != .none && frog.rocketState == .none {
-            SoundManager.shared.playMusic(.gameplay)
+            SoundManager.shared.playMusic(baseMusic)
         }
         previousRocketState = frog.rocketState
         
@@ -925,7 +1010,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
     }
     
     private func updateRaceState(dt: TimeInterval) {
-        guard gameMode == .beatTheBoat, let boat = boat, !isGameEnding else { return }
+        guard gameMode == .beatTheBoat, raceState == .racing, let boat = boat, !isGameEnding else { return }
         
         boat.update(dt: dt)
         checkBoatCollisions()
@@ -2017,7 +2102,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         hideCrocRideVignette()
         
         // Resume gameplay music
-        SoundManager.shared.playMusic(.gameplay)
+        SoundManager.shared.playMusic(baseMusic)
         
         // Find the nearest lily pad and fling the frog to it
         flingFrogToNearestPad(from: frog.position)
@@ -2297,7 +2382,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
             _ = croc.stopCarrying()
             ridingCrocodile = nil
             hideCrocRideVignette()
-            SoundManager.shared.playMusic(.gameplay)
+            SoundManager.shared.playMusic(baseMusic)
         }
         
         // Normal grounded jump only - air jumps are handled in touchesBegan as directional taps

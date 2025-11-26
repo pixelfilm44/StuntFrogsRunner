@@ -7,7 +7,7 @@ class MenuViewController: UIViewController {
     // MARK: - Background
     private lazy var backgroundImageView: UIImageView = {
         // Loads "menuScreen.png" from Assets or Bundle
-        let imageView = UIImageView(image: UIImage(named: "menuScreen"))
+        let imageView = UIImageView(image: UIImage(named: "StuntFrogTitle"))
         imageView.contentMode = .scaleAspectFit
         imageView.backgroundColor = .black  // Fill letterbox areas with black
         imageView.clipsToBounds = true
@@ -17,7 +17,7 @@ class MenuViewController: UIViewController {
     
     private lazy var titleLabel: UILabel = {
         let label = UILabel()
-        label.text = "STUNT FROG\nSUPERSTAR"
+        label.text = ""
         label.numberOfLines = 2
         label.font = UIFont(name: "Fredoka-Bold", size: 60)
         label.textColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
@@ -145,6 +145,7 @@ class MenuViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
+        setupButtonAnimations()
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -188,7 +189,7 @@ class MenuViewController: UIViewController {
             backgroundImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             
             titleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -210),
+            titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -100),
             
             statsLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 20),
             statsLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
@@ -229,6 +230,28 @@ class MenuViewController: UIViewController {
             helpButton.widthAnchor.constraint(equalToConstant: 44),
             helpButton.heightAnchor.constraint(equalToConstant: 44)
         ])
+    }
+    
+    // MARK: - Button Animations
+    
+    private func setupButtonAnimations() {
+        let buttons = [playButton, raceButton, shopButton, leaderboardButton, challengesButton, helpButton]
+        for button in buttons {
+            button.addTarget(self, action: #selector(buttonPressed), for: .touchDown)
+            button.addTarget(self, action: #selector(buttonReleased), for: [.touchUpInside, .touchUpOutside, .touchCancel])
+        }
+    }
+    
+    @objc private func buttonPressed(_ sender: UIButton) {
+        UIView.animate(withDuration: 0.1, delay: 0.0, options: [.curveEaseOut, .allowUserInteraction]) {
+            sender.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
+        }
+    }
+    
+    @objc private func buttonReleased(_ sender: UIButton) {
+        UIView.animate(withDuration: 0.2, delay: 0, usingSpringWithDamping: 0.6, initialSpringVelocity: 2, options: [.curveEaseInOut, .allowUserInteraction]) {
+            sender.transform = .identity
+        }
     }
     
     private func updateStats() {

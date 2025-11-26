@@ -1434,7 +1434,7 @@ class Flotsam: GameEntity {
         self.zPosition = 0 // Relative to its parent node
         
         // Randomize appearance for variety
-        self.setScale(CGFloat.random(in: 0.4...0.6))
+        self.setScale(CGFloat.random(in: 0.2...0.3))
         self.zRotation = CGFloat.random(in: 0...CGFloat.pi * 2)
         self.alpha = CGFloat.random(in: 0.7...0.9)
     }
@@ -1467,7 +1467,7 @@ class Boat: GameEntity {
     private var veerTimer: TimeInterval = 0
     private var veerDirection: CGFloat = 0
     // Increased veer speed for a more noticeable reaction to being hit.
-    private let veerSpeed: CGFloat = 300.0
+    private let veerSpeed: CGFloat = 500.0
     private let originalX: CGFloat
     
     // Wake particle emitter
