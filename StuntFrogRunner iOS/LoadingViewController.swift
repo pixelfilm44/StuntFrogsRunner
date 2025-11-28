@@ -13,6 +13,8 @@ class LoadingViewController: UIViewController {
         "loadingScreen",
         "star",
         "heart",
+        "water",
+        "waterNight",
         
         // Frog Assets
         "frogSit",

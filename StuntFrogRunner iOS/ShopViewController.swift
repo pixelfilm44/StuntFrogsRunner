@@ -110,7 +110,7 @@ class ShopViewController: UIViewController {
         ])
     }
     
-    enum UpgradeType { case jump, health, logJumper, superJump, rocketJump, lifevestPack, honeyPack }
+    enum UpgradeType { case jump, health, logJumper, superJump, rocketJump, lifevestPack, honeyPack, cannonJump }
     
     private func createItemView(type: UpgradeType) -> UIView {
         let cardView = UIView()
@@ -172,6 +172,14 @@ class ShopViewController: UIViewController {
             currentLevel = isPurchased ? 1 : 0
             title.text = "Log Jumper"
             desc.text = "Land on Logs safely!"
+        case .cannonJump:
+            isPurchased = PersistenceManager.shared.hasCannonJump
+            cost = Configuration.Shop.cannonJumpCost
+            maxLevel = 1
+            currentLevel = isPurchased ? 1 : 0
+            title.text = "Cannon Jump"
+            desc.text = "Act as a cannon ball +3 times per run/race!"
+            
         case .superJump:
             isPurchased = PersistenceManager.shared.hasSuperJump
             cost = Configuration.Shop.superJumpCost
@@ -236,7 +244,7 @@ class ShopViewController: UIViewController {
             switch type {
             case .lifevestPack, .honeyPack:
                 buttonTitle = "BUY"
-            case .logJumper, .superJump, .rocketJump:
+            case .logJumper, .superJump, .rocketJump, .cannonJump:
                 buttonTitle = isPurchased ? "OWNED" : "UNLOCK"
             default:
                 buttonTitle = "UPGRADE"
@@ -376,6 +384,7 @@ class ShopViewController: UIViewController {
         stackView.addArrangedSubview(createItemView(type: .jump))
         stackView.addArrangedSubview(createItemView(type: .health))
         stackView.addArrangedSubview(createItemView(type: .logJumper))
+        stackView.addArrangedSubview(createItemView(type: .cannonJump))
         
         // Section: Upgrade Menu Unlocks
         stackView.addArrangedSubview(createSectionHeader(title: "UPGRADE MENU UNLOCKS"))
@@ -401,6 +410,7 @@ class ShopViewController: UIViewController {
             case .rocketJump: PersistenceManager.shared.unlockRocketJump()
             case .lifevestPack: PersistenceManager.shared.addVestItems(4)
             case .honeyPack: PersistenceManager.shared.addHoneyItems(4)
+            case .cannonJump: PersistenceManager.shared.unlockCannonJump()
             }
             
             refreshData()

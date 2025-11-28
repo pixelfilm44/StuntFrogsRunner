@@ -38,7 +38,7 @@ class GameOverViewController: UIViewController {
     
     private lazy var scoreLabel: UILabel = {
         let label = UILabel()
-        label.font = UIFont.systemFont(ofSize: 32, weight: .bold)
+        label.font = UIFont.systemFont(ofSize: 24, weight: .bold)
         label.textColor = .white
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -116,10 +116,19 @@ class GameOverViewController: UIViewController {
                 titleLabel.text = "YOU WIN!"
                 titleLabel.textColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1) // Green
                 scoreLabel.text = "You beat the boat!"
-            case .lose:
-                titleLabel.text = "TOO SLOW!"
+            case .lose(let reason):
                 titleLabel.textColor = UIColor(red: 231/255, green: 76/255, blue: 60/255, alpha: 1) // Red
-                scoreLabel.text = "The boat won."
+                switch reason {
+                case .outrun:
+                    titleLabel.text = "TOO SLOW!"
+                    scoreLabel.text = "The boat won."
+                case .outOfHealth:
+                    titleLabel.text = "WIPED OUT!"
+                    scoreLabel.text = "You lost all your hearts."
+                case .drowned:
+                    titleLabel.text = "SPLASH!"
+                    scoreLabel.text = "You drowned in the river."
+                }
             }
         } else {
             // Endless mode UI

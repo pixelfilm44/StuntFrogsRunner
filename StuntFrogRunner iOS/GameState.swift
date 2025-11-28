@@ -10,8 +10,15 @@ enum GameMode {
     case beatTheBoat
 }
 
-enum RaceResult {
-    case win, lose
+enum RaceLossReason {
+    case outrun
+    case outOfHealth
+    case drowned
+}
+
+enum RaceResult: Equatable {
+    case win
+    case lose(reason: RaceLossReason)
 }
 
 protocol GameCoordinatorDelegate: AnyObject {
@@ -122,6 +129,7 @@ class GameCoordinator: GameCoordinatorDelegate {
         let upgradeVC = UpgradeViewController()
         upgradeVC.coordinator = self
         upgradeVC.hasFullHealth = true
+        upgradeVC.isForRace = true // Prevent rockets from being an option in races
         upgradeVC.modalPresentationStyle = .overFullScreen
         upgradeVC.modalTransitionStyle = .crossDissolve
         window?.rootViewController?.present(upgradeVC, animated: false)

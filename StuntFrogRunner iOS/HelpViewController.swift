@@ -19,7 +19,7 @@ class HelpViewController: UIViewController {
     private let slides: [HelpSlide] = [
         HelpSlide(
             title: "Welcome!",
-            description: "You're a stunt frog superstar! Your goal is to run as far as you can while avoiding obstacles and collecting coins.",
+            description: "You're a stunt frog superstar! Your goal is to run as far as you can while avoiding obstacles and collecting coins and eating flies for hearts.",
             imageName: "stuntfrogProfile",
             emoji: ""
         ),

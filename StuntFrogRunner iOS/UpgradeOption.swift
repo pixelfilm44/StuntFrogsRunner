@@ -23,10 +23,13 @@ class UpgradeViewController: UIViewController {
     /// Set to true if the player currently has full health (currentHealth == maxHealth)
     var hasFullHealth: Bool = false
     
+    /// Set to true if the upgrade selection is for a race, to filter out certain items.
+    var isForRace: Bool = false
+    
     // Available Upgrades Pool
     private let baseOptions: [UpgradeOption] = [
         UpgradeOption(id: "HONEY", name: "Honey Jar", desc: "Block 1 Bee Attack", icon: "", iconImage: "honeyPot"),
-        UpgradeOption(id: "BOOTS", name: "Rain Boots", desc: "No Sliding for a rain season", icon: "👢"),
+        UpgradeOption(id: "BOOTS", name: "Rain Boots", desc: "No Sliding for a rain season", icon: "", iconImage: "rainboots"),
         UpgradeOption(id: "HEART", name: "Heart Container", desc: "+1 Max HP & Heal", icon: "❤️"),
         UpgradeOption(id: "HEARTBOOST", name: "Heart Boost", desc: "Refill All Hearts", icon: "", iconImage: "heartBoost"),
         UpgradeOption(id: "VEST", name: "Life Vest", desc: "Float on Water (1 Use)", icon: "", iconImage: "lifevest"),
@@ -38,6 +41,7 @@ class UpgradeViewController: UIViewController {
     // Purchasable Upgrades (only appear if unlocked in shop)
     private let superJumpOption = UpgradeOption(id: "SUPERJUMP", name: "Super Jump", desc: "Double Jump Range + Invincible", icon: "⚡️")
     private let rocketJumpOption = UpgradeOption(id: "ROCKET", name: "Rocket", desc: "Fly for 7s", icon: "🚀")
+    private let cannonBallOption = UpgradeOption(id: "CANNONBALL", name: "Cannon Ball", desc: "+1 Cannon Jump", icon: "💣")
     
     private var allOptions: [UpgradeOption] {
         var options = baseOptions
@@ -50,7 +54,8 @@ class UpgradeViewController: UIViewController {
         if PersistenceManager.shared.hasSuperJump {
             options.append(superJumpOption)
         }
-        if PersistenceManager.shared.hasRocketJump {
+        // Do not allow rockets as an initial upgrade for races
+        if PersistenceManager.shared.hasRocketJump && !isForRace {
             options.append(rocketJumpOption)
         }
         return options
@@ -131,16 +136,32 @@ class UpgradeViewController: UIViewController {
     }
     
     private func generateOptions() {
-        // Pick 2 distinct random options
-        let shuffled = allOptions.shuffled()
-        let option1 = shuffled[0]
-        let option2 = shuffled[1]
+        let options = allOptions
+        var option1: UpgradeOption
+        var option2: UpgradeOption
+        
+        // 20% chance to offer a Cannon Ball if the player has Cannon Jump unlocked
+        let shouldOfferCannonball = PersistenceManager.shared.hasCannonJump && Double.random(in: 0...1) < 0.2
+        
+        if shouldOfferCannonball {
+            option1 = cannonBallOption
+            // Get a second option from the main pool. Force unwrap is safe
+            // because `allOptions` will have many items.
+            option2 = options.shuffled().first!
+        } else {
+            // Pick 2 distinct random options
+            let shuffled = options.shuffled()
+            option1 = shuffled[0]
+            option2 = shuffled[1]
+        }
         
         let card1 = createCard(for: option1)
         let card2 = createCard(for: option2)
         
-        stackView.addArrangedSubview(card1)
-        stackView.addArrangedSubview(card2)
+        // Randomize the order so the cannonball isn't always on the left
+        let cards = [card1, card2].shuffled()
+        stackView.addArrangedSubview(cards[0])
+        stackView.addArrangedSubview(cards[1])
     }
     
     private func createCard(for option: UpgradeOption) -> UIView {

@@ -28,17 +28,13 @@ class GameScene: SKScene, CollisionManagerDelegate {
     
     // MARK: - Nodes
     private let cam = SKCameraNode()
-    let worldNode = SKNode()
+    private let worldNode = SKNode()
     private let uiNode = SKNode()
     private let trajectoryNode = SKShapeNode()
-    // --- Performance Improvement: Trajectory Dots ---
-    // Use a pool of sprites instead of a shape node for the trajectory.
-    private var trajectoryDots: [SKSpriteNode] = []
-    private let trajectoryDotCount = 20 // Number of dots in the trajectory line
     private let slingshotNode = SKShapeNode()
     private let slingshotDot = SKShapeNode(circleOfRadius: 8)
     private let crosshairNode = SKShapeNode(circleOfRadius: 10)
-    let weatherNode = SKNode()
+    private let weatherNode = SKNode()
     private let leafNode = SKNode()
     private let waterLinesNode = SKNode()
     private let waterTilesNode = SKNode()
@@ -53,17 +49,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private let coinIcon = SKSpriteNode(imageNamed: "star")
     private var heartNodes: [SKSpriteNode] = []
     private let buffsNode = SKNode()
-    // --- Performance Improvement: Pre-created Buff Nodes ---
-    // Create buff UI elements once and update them, instead of recreating every frame.
-    private var vestBuffNode: SKNode!
-    private var honeyBuffNode: SKNode!
-    private var axeBuffNode: SKNode!
-    private var swatterBuffNode: SKNode!
-    private var crossBuffNode: SKNode!
-    private var rocketBuffNode: SKNode!
-    private var superJumpBuffNode: SKNode!
-    private var bootsBuffNode: SKNode!
-    private var crocRideBuffNode: SKNode!
     private let descendButton = SKLabelNode(fontNamed: Configuration.Fonts.primaryHeavy)
     private let descendBg = SKShapeNode(rectOf: CGSize(width: 200, height: 60), cornerRadius: 30)
     private let pauseBg = SKShapeNode(circleOfRadius: 25)
@@ -73,8 +58,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private let cannonJumpButton = SKLabelNode(fontNamed: Configuration.Fonts.primaryHeavy)
     private let cannonJumpBg = SKShapeNode(rectOf: CGSize(width: 100, height: 60), cornerRadius: 30)
     private let cannonJumpIcon = SKSpriteNode(imageNamed: "helmet")
-    private let jumpPromptLabel = SKLabelNode(fontNamed: Configuration.Fonts.primaryHeavy)
-    private let jumpPromptBg = SKShapeNode(rectOf: CGSize(width: 300, height: 80), cornerRadius: 20)
     
     // Achievement Notification Card
     private let achievementCard = SKNode()
@@ -97,8 +80,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private var dragStartOffset: CGPoint?  // Offset from frog position when drag began
     private var dragCurrent: CGPoint?
     private var isDragging = false
-    private var lastHapticDragStep: Int = 0
-    private var hasTriggeredMaxPullHaptic: Bool = false
     private var lastUpdateTime: TimeInterval = 0
     private var score: Int = 0
     private var totalCoins: Int = 0
@@ -111,7 +92,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private var ridingCrocodile: Crocodile? = nil  // Currently riding crocodile
     private var crocRideVignetteNode: SKSpriteNode?  // Vignette overlay for croc ride
     private var baseMusic: SoundManager.Music = .gameplay
-    private var drowningGracePeriodTimer: TimeInterval?
     
     // MARK: - Challenge Tracking
     private var padsLandedThisRun: Int = 0
@@ -150,8 +130,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         worldNode.addChild(waterTilesNode)
         createWaterTiles()
         
-        // Weather effects (rain, snow, etc.) are parented to the camera for screen-space effects
-        weatherNode.zPosition = Layer.overlay - 1 // Just behind the full-screen overlay
+        // Weather effects (rain, snow, etc.)
         cam.addChild(weatherNode)
         
         // Add leaf effect node, attached to camera for screen-space effect
@@ -165,24 +144,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
         uiNode.zPosition = Layer.ui
         cam.addChild(uiNode)
         
-        // --- Performance Improvement: Hide old trajectory node ---
-        // The SKShapeNode for trajectory is inefficient to update every frame.
-        // We will use a pool of sprite nodes (trajectoryDots) instead.
         trajectoryNode.strokeColor = .white.withAlphaComponent(0.7)
         trajectoryNode.lineWidth = 4
         trajectoryNode.lineCap = .round
         trajectoryNode.zPosition = Layer.trajectory
-        trajectoryNode.isHidden = true // Hide the old node.
         worldNode.addChild(trajectoryNode)
-        
-        // --- Performance Improvement: Create trajectory dot pool ---
-        for _ in 0..<trajectoryDotCount {
-            let dot = SKSpriteNode(color: .white, size: CGSize(width: 8, height: 8))
-            dot.isHidden = true
-            dot.zPosition = Layer.trajectory
-            trajectoryDots.append(dot)
-            worldNode.addChild(dot)
-        }
         
         slingshotNode.strokeColor = .yellow
         slingshotNode.lineWidth = 2
@@ -214,9 +180,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
     }
     
     private func startSpawningLeaves() {
-        if currentWeather != .sunny {
-            return
-        }
         let spawnAction = SKAction.run { [weak self] in
             self?.spawnLeaf()
         }
@@ -227,11 +190,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // Run on the scene itself, not the node, to avoid being removed
         run(repeatForever, withKey: "spawnLeaves")
-    }
-
-    private func stopSpawningLeaves() {
-        removeAction(forKey: "spawnLeaves")
-        leafNode.removeAllChildren()
     }
 
     private func spawnLeaf() {
@@ -454,7 +412,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         VFXManager.shared.spawnRippleEffect(
             parentedTo: node,
             color: rippleColor,
-            rippleCount: 2
+            rippleCount: 3
         )
     }
     
@@ -485,49 +443,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
         drawHearts()
         buffsNode.position = CGPoint(x: -(size.width / 2) + hudMargin, y: (size.height / 2) - 140)
         uiNode.addChild(buffsNode)
-        
-        // --- Performance Improvement: Create buff indicators once ---
-        func createBuffIndicator(text: String, color: UIColor) -> SKNode {
-            let node = SKNode()
-            let bg = SKShapeNode(rectOf: CGSize(width: 120, height: 24), cornerRadius: 12)
-            bg.fillColor = .black.withAlphaComponent(0.5)
-            bg.strokeColor = color
-            bg.lineWidth = 2
-            bg.position = CGPoint(x: 60, y: 0)
-            
-            let lbl = SKLabelNode(fontNamed: Configuration.Fonts.buffIndicator.name)
-            lbl.text = text
-            lbl.fontSize = Configuration.Fonts.buffIndicator.size
-            lbl.fontColor = .white
-            lbl.verticalAlignmentMode = .center
-            lbl.position = CGPoint(x: 0, y: 0)
-            bg.addChild(lbl)
-            
-            node.addChild(bg)
-            node.isHidden = true
-            return node
-        }
-
-        vestBuffNode = createBuffIndicator(text: "VEST", color: .orange)
-        honeyBuffNode = createBuffIndicator(text: "HONEY", color: .yellow)
-        axeBuffNode = createBuffIndicator(text: "AXE", color: .brown)
-        swatterBuffNode = createBuffIndicator(text: "SWATTER", color: .green)
-        crossBuffNode = createBuffIndicator(text: "CROSS", color: .white)
-        rocketBuffNode = createBuffIndicator(text: "ROCKET", color: .red)
-        superJumpBuffNode = createBuffIndicator(text: "SUPER JUMP", color: .cyan)
-        bootsBuffNode = createBuffIndicator(text: "BOOTS", color: .blue)
-        crocRideBuffNode = createBuffIndicator(text: "CROC RIDE", color: .green)
-        
-        buffsNode.addChild(vestBuffNode)
-        buffsNode.addChild(honeyBuffNode)
-        buffsNode.addChild(axeBuffNode)
-        buffsNode.addChild(swatterBuffNode)
-        buffsNode.addChild(crossBuffNode)
-        buffsNode.addChild(rocketBuffNode)
-        buffsNode.addChild(superJumpBuffNode)
-        buffsNode.addChild(bootsBuffNode)
-        buffsNode.addChild(crocRideBuffNode)
-        // --- End performance improvement ---
         
         descendBg.fillColor = UIColor(red: 231/255, green: 76/255, blue: 60/255, alpha: 1)
         descendBg.strokeColor = .white
@@ -571,20 +486,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
         cannonJumpBg.addChild(cannonJumpIcon)
         
         setupRaceHUD()
-        
-        // Drowning Grace Period Prompt
-        jumpPromptBg.fillColor = .black.withAlphaComponent(0.7)
-        jumpPromptBg.strokeColor = .red
-        jumpPromptBg.lineWidth = 3
-        jumpPromptBg.position = CGPoint(x: 0, y: 0) // Centered
-        jumpPromptBg.isHidden = true
-        uiNode.addChild(jumpPromptBg)
-        
-        jumpPromptLabel.text = "JUMP NOW!"
-        jumpPromptLabel.fontSize = 32
-        jumpPromptLabel.fontColor = .white
-        jumpPromptLabel.verticalAlignmentMode = .center
-        jumpPromptBg.addChild(jumpPromptLabel)
     }
     
     private func setupRaceHUD() {
@@ -748,71 +649,61 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
     }
 
-    // --- Performance Improvement: Update existing HUD nodes ---
-    // This function now shows/hides and updates pre-created nodes
-    // instead of destroying and recreating them every frame.
     private func updateBuffsHUD() {
-        var yOffset: CGFloat = 0
-        let buffNodes: [SKNode?] = [
-            vestBuffNode, honeyBuffNode, axeBuffNode, swatterBuffNode,
-            crossBuffNode, rocketBuffNode, superJumpBuffNode,
-            bootsBuffNode, crocRideBuffNode
-        ]
-        
-        // Hide all nodes initially, we will un-hide the active ones.
-        buffNodes.forEach { $0?.isHidden = true }
-        
-        func updateAndPositionBuffNode(_ node: SKNode, text: String) {
-            if let label = node.children.first?.children.first as? SKLabelNode {
-                label.text = text
-            }
-            node.position.y = yOffset
-            node.isHidden = false
-            yOffset -= 30
-        }
-        
-        if frog.buffs.vest > 0 {
-            updateAndPositionBuffNode(vestBuffNode, text: "VEST x\(frog.buffs.vest)")
-        }
-        if frog.buffs.honey > 0 {
-            updateAndPositionBuffNode(honeyBuffNode, text: "HONEY x\(frog.buffs.honey)")
-        }
-        if frog.buffs.axe > 0 {
-            updateAndPositionBuffNode(axeBuffNode, text: "🪓 AXE x\(frog.buffs.axe)")
-        }
-        if frog.buffs.swatter > 0 {
-            updateAndPositionBuffNode(swatterBuffNode, text: "🏸 SWAT x\(frog.buffs.swatter)")
-        }
-        if frog.buffs.cross > 0 {
-            updateAndPositionBuffNode(crossBuffNode, text: "✝️ CROSS x\(frog.buffs.cross)")
-        }
-        
-        if frog.rocketTimer > 0 {
-            let sec = Int(ceil(Double(frog.rocketTimer) / 60.0))
-            updateAndPositionBuffNode(rocketBuffNode, text: "🚀 \(sec)s")
-        } else if frog.rocketState == .landing {
-            updateAndPositionBuffNode(rocketBuffNode, text: "⚠ DESCEND")
-        }
-        
-        if frog.buffs.superJumpTimer > 0 {
-            let sec = Int(ceil(Double(frog.buffs.superJumpTimer) / 60.0))
-            updateAndPositionBuffNode(superJumpBuffNode, text: "⚡️ \(sec)s")
-        }
-        
-        if frog.buffs.bootsCount > 0 {
-            let label = frog.isWearingBoots ? "👢 ACTIVE" : "👢 x\(frog.buffs.bootsCount)"
-            updateAndPositionBuffNode(bootsBuffNode, text: label)
-            if let bg = bootsBuffNode.children.first as? SKShapeNode {
-                bg.strokeColor = frog.isWearingBoots ? .green : .blue
-            }
-        }
-        
-        if let croc = ridingCrocodile, croc.isCarryingFrog {
-            let remaining = Int(ceil(croc.remainingRideTime()))
-            updateAndPositionBuffNode(crocRideBuffNode, text: "🐊 RIDE \(remaining)s")
-        }
-    }
-    
+           buffsNode.removeAllChildren()
+           var yOffset: CGFloat = 0
+           
+           func addBuffLabel(text: String, color: UIColor) {
+               // ... (same label style) ...
+               let bg = SKShapeNode(rectOf: CGSize(width: 120, height: 24), cornerRadius: 12)
+               bg.fillColor = .black.withAlphaComponent(0.5)
+               bg.strokeColor = color
+               bg.lineWidth = 2
+               bg.position = CGPoint(x: 60, y: yOffset)
+               
+               let lbl = SKLabelNode(fontNamed: Configuration.Fonts.buffIndicator.name)
+               lbl.text = text
+               lbl.fontSize = Configuration.Fonts.buffIndicator.size
+               lbl.fontColor = .white
+               lbl.verticalAlignmentMode = .center
+               lbl.position = CGPoint(x: 0, y: 0)
+               bg.addChild(lbl)
+               
+               buffsNode.addChild(bg)
+               yOffset -= 30
+           }
+           
+           if frog.buffs.vest > 0 { addBuffLabel(text: "VEST x\(frog.buffs.vest)", color: .orange) }
+           if frog.buffs.honey > 0 { addBuffLabel(text: "HONEY x\(frog.buffs.honey)", color: .yellow) }
+           if frog.buffs.axe > 0 { addBuffLabel(text: "🪓 AXE x\(frog.buffs.axe)", color: .brown) }
+           if frog.buffs.swatter > 0 { addBuffLabel(text: "🏸 SWAT x\(frog.buffs.swatter)", color: .green) }
+           if frog.buffs.cross > 0 { addBuffLabel(text: "✝️ CROSS x\(frog.buffs.cross)", color: .white) }
+           
+           if frog.rocketTimer > 0 {
+               let sec = Int(ceil(Double(frog.rocketTimer) / 60.0)) // FIX: Round Up
+               addBuffLabel(text: "🚀 \(sec)s", color: .red)
+           } else if frog.rocketState == .landing {
+                addBuffLabel(text: "⚠ DESCEND", color: .red)
+           }
+           
+           // FIX: SuperJump Timer with rounding
+           if frog.buffs.superJumpTimer > 0 {
+               let sec = Int(ceil(Double(frog.buffs.superJumpTimer) / 60.0))
+               addBuffLabel(text: "⚡️ \(sec)s", color: .cyan)
+           }
+           
+           if frog.buffs.bootsCount > 0 {
+               let label = frog.isWearingBoots ? "👢 ACTIVE" : "👢 x\(frog.buffs.bootsCount)"
+               let color: UIColor = frog.isWearingBoots ? .green : .blue
+               addBuffLabel(text: label, color: color)
+           }
+           
+           // Crocodile ride timer
+           if let croc = ridingCrocodile, croc.isCarryingFrog {
+               let remaining = Int(ceil(croc.remainingRideTime()))
+               addBuffLabel(text: "🐊 RIDE \(remaining)s", color: .green)
+           }
+       }
     private func updateHUDVisuals() {
         let currentScore = Int(frog.position.y / 10)
         if currentScore > score {
@@ -934,7 +825,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
         updateBuffsHUD()
         descendBg.isHidden = true
         setWeather(.sunny, duration: 0.0)
-        stopDrowningGracePeriod()
 
         if gameMode == .beatTheBoat {
             raceState = .countdown
@@ -1074,7 +964,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
         checkWeatherChange()
         updateWaterVisuals()
         updateRaceState(dt: dt)
-        updateDrowningGracePeriod(dt: dt)
         
         if frog.rocketState == .landing {
             descendBg.isHidden = false
@@ -1220,18 +1109,18 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let all = WeatherType.allCases
         guard let idx = all.firstIndex(of: currentWeather) else { return }
         let nextIdx = (idx + 1) % all.count
-        setWeather(all[nextIdx], duration: 60.0)
+        setWeather(all[nextIdx], duration: 1.0)
     }
     private func setWeather(_ type: WeatherType, duration: TimeInterval) {
-        let oldWeather = self.currentWeather
-        // No change if weather is the same, unless it's an instant setup (duration 0)
-        if oldWeather == type && duration > 0 { return }
-
-        // --- Game Logic ---
-        if oldWeather == .rain {
+        // Check if we need to swap water textures (when switching to/from night)
+        let needsWaterTextureSwap = (currentWeather == .night && type != .night) || 
+                                     (currentWeather != .night && type == .night)
+        
+        if currentWeather == .rain {
             frog.isWearingBoots = false
+            VFXManager.shared.stopThunderCycle()
         }
-        self.currentWeather = type
+        currentWeather = type
         if type == .rain {
             if frog.buffs.bootsCount > 0 {
                 frog.buffs.bootsCount -= 1
@@ -1240,108 +1129,62 @@ class GameScene: SKScene, CollisionManagerDelegate {
             }
         }
         
-        // --- Visual & Audio Transitions ---
-        VFXManager.shared.transitionWeather(from: oldWeather, to: type, in: self, duration: duration)
-        
-        // Handle leaf spawning based on weather change
-        if type == .sunny && oldWeather != .sunny {
-            startSpawningLeaves()
-        } else if type != .sunny && oldWeather == .sunny {
-            stopSpawningLeaves()
-        }
-        
-        let sfx: SoundManager.WeatherSFX? = switch type {
-        case .rain: .rain
-        case .winter: .winter
-        case .night: .night
-        case .sunny: nil
-        }
-        SoundManager.shared.playWeatherSFX(sfx)
-
-        // --- In-World Object Transitions ---
-        for pad in pads {
-            pad.updateColor(weather: type, duration: duration)
-        }
-
-        let needsWaterTextureSwap = (oldWeather == .night && type != .night) || (oldWeather != .night && type == .night)
-        transitionWaterColor(needsTextureSwap: needsWaterTextureSwap, duration: duration)
-    }
-    
-    private func transitionWaterColor(needsTextureSwap: Bool, duration: TimeInterval) {
-        if duration <= 0 {
-            if needsTextureSwap {
-                recreateWaterTiles()
-            } else {
-                let targetColor = getTargetColor()
-                waterTilesNode.enumerateChildNodes(withName: "waterTile") { node, _ in
-                    node.run(SKAction.colorize(with: targetColor, colorBlendFactor: 0.3, duration: 0))
-                }
-            }
+        // If we need to swap water textures, recreate the tiles
+        if needsWaterTextureSwap {
+            recreateWaterTiles()
         } else {
-            if needsTextureSwap {
-                let halfDuration = duration / 2.0
-                
-                // 1. Create an action to fade out all current tiles.
-                let fadeOutAction = SKAction.run { [weak self] in
-                    guard let self = self else { return }
-                    // We use the 'sunny' color as a neutral intermediate color for the transition.
-                    let colorize = SKAction.colorize(with: self.getTargetColor(for: .sunny), colorBlendFactor: 0.3, duration: halfDuration)
-                    self.waterTilesNode.enumerateChildNodes(withName: "waterTile") { node, _ in
-                        node.run(colorize)
-                    }
-                }
-
-                // 2. Wait for the fade-out animation to finish.
-                let waitAction = SKAction.wait(forDuration: halfDuration)
-
-                // 3. Swap the textures by recreating the tile nodes.
-                let swapTextureAction = SKAction.run { [weak self] in
-                    self?.recreateWaterTiles()
-                }
-
-                // 4. Fade the new tiles from the intermediate color to their final target color.
-                let fadeInAction = SKAction.run { [weak self] in
-                    guard let self = self else { return }
-                    let targetColor = self.getTargetColor()
-                    let colorize = SKAction.colorize(with: targetColor, colorBlendFactor: 0.3, duration: halfDuration)
-                    
-                    self.waterTilesNode.enumerateChildNodes(withName: "waterTile") { node, _ in
-                        // Set the starting color to the intermediate color before animating.
-                        if let tile = node as? SKSpriteNode {
-                            tile.color = self.getTargetColor(for: .sunny)
-                            tile.run(colorize)
-                        }
-                    }
-                }
-                
-                // Run the full sequence.
-                waterTilesNode.run(SKAction.sequence([fadeOutAction, waitAction, swapTextureAction, fadeInAction]))
-
-            } else {
-                let targetColor = getTargetColor()
-                let colorAction = SKAction.colorize(with: targetColor, colorBlendFactor: 0.3, duration: duration)
-                waterTilesNode.enumerateChildNodes(withName: "waterTile") { node, _ in
-                    node.run(colorAction)
-                }
+            // Otherwise, just update the color of existing tiles
+            let targetColor = getTargetColor()
+            let colorAction = SKAction.colorize(with: targetColor, colorBlendFactor: 0.3, duration: duration)
+            waterTilesNode.enumerateChildNodes(withName: "waterTile") { node, _ in
+                node.run(colorAction)
             }
         }
+        
+        weatherNode.removeAllChildren()
+        let w = size.width
+        let h = size.height
+        let pos = CGPoint(x: 0, y: h/2 + 50)
+        switch type {
+        case .rain:
+            let rain = VFXManager.shared.createRainEmitter(width: w)
+            rain.position = pos
+            weatherNode.addChild(rain)
+            SoundManager.shared.playWeatherSFX(.rain)
+            VFXManager.shared.startThunderCycle(in: self)
+        case .winter:
+            let snow = VFXManager.shared.createSnowEmitter(width: w)
+            snow.position = pos
+            weatherNode.addChild(snow)
+            SoundManager.shared.playWeatherSFX(.winter)
+        case .night:
+            let flies = VFXManager.shared.createFirefliesEmitter(width: w, height: h)
+            flies.position = .zero
+            flies.zPosition = 11
+            weatherNode.addChild(flies)
+            SoundManager.shared.playWeatherSFX(.night)
+        case .sunny:
+            SoundManager.shared.playWeatherSFX(nil)
+        }
+        for pad in pads { pad.updateColor(weather: type) }
     }
     
     /// Recreates water tiles with the appropriate texture for current weather
     private func recreateWaterTiles() {
+        // Remove all existing water tiles
         waterTilesNode.removeAllChildren()
+        
+        // Recreate with the new texture
         createWaterTiles()
     }
-    
-    private func getTargetColor(for weather: WeatherType? = nil) -> UIColor {
-        switch weather ?? currentWeather {
+    private func getTargetColor() -> UIColor {
+        switch currentWeather {
         case .sunny: return Configuration.Colors.sunny
         case .rain: return Configuration.Colors.rain
         case .night: return Configuration.Colors.night
         case .winter: return Configuration.Colors.winter
         }
     }
-    
     private func updateCamera() {
         let targetX = frog.position.x
         let targetY = frog.position.y + (size.height * 0.2)
@@ -1640,11 +1483,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
         frog.zHeight = 0
     }
     func didLand(on pad: Pad) {
-        // Stop the drowning grace period if it was active
-        if drowningGracePeriodTimer != nil {
-            stopDrowningGracePeriod()
-        }
-        
         // Check for cannon jump landing BEFORE landing logic
         if frog.isCannonJumping {
             frog.isCannonJumping = false
@@ -1681,20 +1519,19 @@ class GameScene: SKScene, CollisionManagerDelegate {
             enemies.append(ghost)
         }
     }
-    
     func didFallIntoWater() {
-        guard !isGameEnding, !frog.isFloating else { return }
-
-        // If the frog was riding a crocodile, this shouldn't happen, but handle it.
+        guard !isGameEnding else { return }
+        if frog.isFloating { return }
+        
+        // If frog was riding a crocodile, this shouldn't happen, but handle it
         if let croc = ridingCrocodile {
             _ = croc.stopCarrying()
             ridingCrocodile = nil
         }
         
-        // A fall always resets consecutive jumps.
+        // Reset consecutive jumps on fall
         consecutiveJumps = 0
-
-        // Vest has priority: consumes a vest and makes the frog float safely.
+        
         if frog.buffs.vest > 0 {
             frog.buffs.vest -= 1
             VFXManager.shared.spawnSplash(at: frog.position, in: self)
@@ -1703,78 +1540,28 @@ class GameScene: SKScene, CollisionManagerDelegate {
             frog.zHeight = 0
             frog.zVelocity = 0
             frog.onPad = nil
-            frog.isFloating = true // Start floating safely, allowing a jump out.
+            frog.isFloating = true
             updateBuffsHUD()
             return
         }
-
-        // No vest. Start the grace period drowning sequence.
         SoundManager.shared.play("splash")
         VFXManager.shared.spawnSplash(at: frog.position, in: self)
-        
-        // Lose a heart
-        frog.playWailingAnimation()
+        HapticsManager.shared.playNotification(.error)
         frog.currentHealth -= 1
         drawHearts()
-        HapticsManager.shared.playNotification(.warning)
-        
+        frog.hit()
         if frog.currentHealth <= 0 {
-            // No hearts left, game over.
+            if gameMode == .beatTheBoat {
+                endRace(result: .lose(reason: .drowned))
+                return
+            }
             isGameEnding = true
+            
+            // Create dramatic drowning sequence before game over
             playDrowningSequence()
         } else {
-            // Hearts remain, start grace period.
-            frog.velocity = .zero
-            frog.zHeight = 0
-            frog.zVelocity = 0
-            frog.onPad = nil
-            frog.isFloating = true // Allow jumping from water
-            startDrowningGracePeriod()
-        }
-    }
-    
-    private func startDrowningGracePeriod() {
-        drowningGracePeriodTimer = 3.0
-        jumpPromptBg.isHidden = false
-        jumpPromptBg.run(SKAction.repeatForever(
-            SKAction.sequence([
-                .fadeAlpha(to: 1.0, duration: 0.3),
-                .fadeAlpha(to: 0.7, duration: 0.3)
-            ])
-        ), withKey: "promptPulse")
-    }
-
-    private func stopDrowningGracePeriod() {
-        drowningGracePeriodTimer = nil
-        jumpPromptBg.isHidden = true
-        jumpPromptBg.removeAction(forKey: "promptPulse")
-    }
-    
-    private func updateDrowningGracePeriod(dt: TimeInterval) {
-        guard var timer = drowningGracePeriodTimer else { return }
-        
-        timer -= dt
-        drowningGracePeriodTimer = timer
-        
-        jumpPromptLabel.text = "JUMP! \(Int(ceil(timer)))"
-        
-        if timer <= 0 {
-            // Timer ran out, lose another heart.
-            HapticsManager.shared.playNotification(.error)
-            SoundManager.shared.play("ouch") // A sound to indicate damage
-            
-            frog.currentHealth -= 1
-            drawHearts()
-            
-            if frog.currentHealth <= 0 {
-                // Out of hearts, game over.
-                isGameEnding = true
-                stopDrowningGracePeriod()
-                playDrowningSequence()
-            } else {
-                // Reset timer for another chance.
-                drowningGracePeriodTimer = 3.0
-            }
+            // Bounce with guidance toward nearest lilypad
+            bounceTowardNearestPad()
         }
     }
     
@@ -1784,7 +1571,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
         frog.velocity = .zero
         frog.zVelocity = 0
         frog.zHeight = 0
-        frog.isFloating = false // Stop floating to allow sinking animation
         
         // Create expanding water ripples at the splash point
         spawnDrowningRipples()  // Ripples now parent to frog
@@ -1801,9 +1587,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
             let showGameOver = SKAction.run { [weak self] in
                 guard let self = self else { return }
                 self.reportChallengeProgress()
-                if self.gameMode == .beatTheBoat && self.raceResult == nil {
-                    self.raceResult = .lose(reason: .drowned)
-                }
                 self.coordinator?.gameDidEnd(score: self.score, coins: self.coinsCollectedThisRun, raceResult: self.raceResult)
             }
             self.run(SKAction.sequence([delay, showGameOver]))
@@ -2544,7 +2327,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         if frog.rocketState != .none {
             let dir: CGFloat = location.x < cam.position.x ? -1 : 1
-            frog.velocity.dx += dir * 1.5
+            frog.velocity.dx += dir * 0.8
             return
         }
         
@@ -2562,11 +2345,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
             // Store offset from frog, so slingshot follows moving platforms
             dragStartOffset = CGPoint(x: location.x - frog.position.x, y: location.y - frog.position.y)
             dragCurrent = location
-            
-            // Reset haptics for new drag
-            lastHapticDragStep = 0
-            hasTriggeredMaxPullHaptic = false
-            
             updateTrajectoryVisuals()
         }
     }
@@ -2577,26 +2355,14 @@ class GameScene: SKScene, CollisionManagerDelegate {
         updateTrajectoryVisuals()
     }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        trajectoryDots.forEach { $0.isHidden = true }
+        trajectoryNode.path = nil
         slingshotNode.path = nil
         slingshotDot.isHidden = true
         crosshairNode.isHidden = true
         frog.resetPullOffset()
-        
-        guard isDragging, let offset = dragStartOffset, let current = dragCurrent else {
-            if frog.rocketState == .none {
-                isDragging = false
-            }
-            return
-        }
-        
-        isDragging = false
-        // Reset haptics state
-        lastHapticDragStep = 0
-        hasTriggeredMaxPullHaptic = false
-
         if isGameEnding || frog.rocketState != .none { return }
-        
+        guard isDragging, let offset = dragStartOffset, let current = dragCurrent else { return }
+        isDragging = false
         // Calculate start relative to frog's current position
         let start = CGPoint(x: frog.position.x + offset.x, y: frog.position.y + offset.y)
         let dx = start.x - current.x
@@ -2639,48 +2405,24 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // Normal grounded jump only - air jumps are handled in touchesBegan as directional taps
         frog.jump(vector: launchVector, intensity: ratio)
-        
-        // If we just jumped out of the water, stop the grace period.
-        if frog.isFloating {
-            frog.isFloating = false
-            stopDrowningGracePeriod()
-        }
-        
-        // Play release haptic based on power
-        if ratio >= 0.95 {
-            HapticsManager.shared.playImpact(.heavy)
-        } else if ratio > 0.5 {
-            HapticsManager.shared.playImpact(.medium)
-        } else {
-            HapticsManager.shared.playImpact(.light)
-        }
     }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         isDragging = false
-        lastHapticDragStep = 0
-        hasTriggeredMaxPullHaptic = false
-        trajectoryDots.forEach { $0.isHidden = true }
+        trajectoryNode.path = nil
         slingshotNode.path = nil
         slingshotDot.isHidden = true
         crosshairNode.isHidden = true
         frog.resetPullOffset()
     }
-    
-    // --- Performance Improvement: Use sprite pool for trajectory ---
-    // This function now updates the positions of a pre-allocated array of sprites
-    // instead of regenerating a complex SKShapeNode path every frame.
     private func updateTrajectoryVisuals() {
         guard let offset = dragStartOffset, let current = dragCurrent else { return }
-        
         // Calculate dragStart relative to frog's current position (follows moving platforms)
         let start = CGPoint(x: frog.position.x + offset.x, y: frog.position.y + offset.y)
         let dx = start.x - current.x
         let dy = start.y - current.y
         let dist = sqrt(dx*dx + dy*dy)
-        
-        // Hide visuals if drag is too small
         if dist < 10 {
-            trajectoryDots.forEach { $0.isHidden = true }
+            trajectoryNode.path = nil
             slingshotNode.path = nil
             slingshotDot.isHidden = true
             crosshairNode.isHidden = true
@@ -2689,46 +2431,30 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
         
         let maxDist = Configuration.Physics.maxDragDistance
-        
-        // Haptic feedback for pulling back
-        let hapticStepThreshold: CGFloat = 30.0
-        let currentStep = Int(dist / hapticStepThreshold)
-
-        if dist < maxDist {
-            if currentStep > self.lastHapticDragStep {
-                HapticsManager.shared.playImpact(.light)
-                self.lastHapticDragStep = currentStep
-            }
-        } else {
-            if !hasTriggeredMaxPullHaptic {
-                HapticsManager.shared.playImpact(.medium)
-                hasTriggeredMaxPullHaptic = true
-            }
-        }
-        
         let ratio = min(dist, maxDist) / maxDist
         let power = Configuration.Physics.dragPower(level: PersistenceManager.shared.jumpLevel)
+        
+        // Check if SuperJump is active
         let isSuperJumping = frog.buffs.superJumpTimer > 0
+        let superJumpMultiplier: CGFloat = isSuperJumping ? 2.0 : 1.0
+        
+        // Slingshot is only for grounded jumps now (air jumps use directional taps)
         
         // Visual Drag Line (Slingshot)
         let dragVector = CGPoint(x: current.x - start.x, y: current.y - start.y)
         frog.setPullOffset(dragVector)
         
-        var clampedDrag = dragVector
         let visualDragDist = sqrt(dragVector.x*dragVector.x + dragVector.y*dragVector.y)
+        var clampedDrag = dragVector
         if visualDragDist > maxDist {
-            clampedDrag.x *= (maxDist / visualDragDist)
-            clampedDrag.y *= (maxDist / visualDragDist)
+            let s = maxDist / visualDragDist
+            clampedDrag.x *= s
+            clampedDrag.y *= s
         }
         
         let dotPos = CGPoint(x: frog.position.x + clampedDrag.x, y: frog.position.y + clampedDrag.y)
         slingshotDot.position = dotPos
         slingshotDot.isHidden = false
-        
-        let slingPath = CGMutablePath()
-        slingPath.move(to: frog.position)
-        slingPath.addLine(to: dotPos)
-        slingshotNode.path = slingPath
         
         // Visual styling based on jump type
         let trajectoryColor: UIColor
@@ -2746,26 +2472,38 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         slingshotDot.fillColor = slingshotColor
         slingshotNode.strokeColor = slingshotColor
+        trajectoryNode.strokeColor = trajectoryColor
         crosshairNode.strokeColor = slingshotColor
         (crosshairNode.children.first as? SKShapeNode)?.fillColor = slingshotColor
         (crosshairNode.children.last as? SKShapeNode)?.fillColor = slingshotColor
         
-        // Simulate jump physics to position trajectory dots
+        let slingPath = CGMutablePath()
+        slingPath.move(to: frog.position)
+        slingPath.addLine(to: dotPos)
+        slingshotNode.path = slingPath
+        
+        // Trajectory Line - must match EXACTLY what touchesEnded will produce
         var simPos = frog.position
+        
+        // Calculate launch vector exactly as touchesEnded does
         var simVel = CGVector(dx: dx * power, dy: dy * power)
+        
+        // Apply SuperJump multiplier (same as touchesEnded)
         if isSuperJumping {
-            simVel.dx *= 2.0
-            simVel.dy *= 2.0
+            simVel.dx *= superJumpMultiplier
+            simVel.dy *= superJumpMultiplier
         }
+        
+        // Start from ground level for grounded jumps
         var simZ: CGFloat = 0
         var simZVel: CGFloat = Configuration.Physics.baseJumpZ * (0.5 + (ratio * 0.5))
         
-        var landingPoint = simPos
-        var dotsUsed = 0
-
-        // Simulate physics and place dots along the arc
-        let simulationSteps = isSuperJumping ? 120 : 60
-        for i in 0..<simulationSteps {
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: simPos.x, y: simPos.y + simZ))
+        var landingPoint = CGPoint(x: simPos.x, y: simPos.y + simZ)
+        
+        // Simulate the jump physics - match frog.update() physics exactly
+        for _ in 0..<120 {  // More iterations for longer SuperJumps
             simPos.x += simVel.dx
             simPos.y += simVel.dy
             simZ += simZVel
@@ -2773,34 +2511,22 @@ class GameScene: SKScene, CollisionManagerDelegate {
             simVel.dx *= Configuration.Physics.frictionAir
             simVel.dy *= Configuration.Physics.frictionAir
             
-            // Show a dot every few simulation steps
-            if i % (simulationSteps / trajectoryDotCount) == 0 {
-                if dotsUsed < trajectoryDotCount {
-                    let dot = trajectoryDots[dotsUsed]
-                    dot.position = CGPoint(x: simPos.x, y: simPos.y + simZ)
-                    dot.color = trajectoryColor
-                    dot.isHidden = false
-                    dotsUsed += 1
-                }
-            }
+            let visualPoint = CGPoint(x: simPos.x, y: simPos.y + simZ)
+            path.addLine(to: visualPoint)
             
             if simZ <= 0 {
-                landingPoint = simPos
+                // Landing point is at ground level (simZ = 0)
+                landingPoint = CGPoint(x: simPos.x, y: simPos.y)
                 break
             }
-            landingPoint = simPos
+            landingPoint = CGPoint(x: simPos.x, y: simPos.y)
         }
+        trajectoryNode.path = path
         
-        // Hide any unused dots from the pool
-        for i in dotsUsed..<trajectoryDotCount {
-            trajectoryDots[i].isHidden = true
-        }
-        
-        // Position crosshairs at the landing position
+        // Position crosshairs at the exact landing position
         crosshairNode.isHidden = false
         crosshairNode.position = landingPoint
     }
-    
     @objc func handleUpgrade(_ notification: Notification) {
         guard let id = notification.userInfo?["id"] as? String else { return }
         applyUpgrade(id: id)

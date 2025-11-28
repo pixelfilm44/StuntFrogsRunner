@@ -178,9 +178,11 @@ struct Configuration {
         static let superJumpDuration: TimeInterval = 10.0
         
         // MARK: - Beat the Boat Challenge
-        static let boatRaceFinishY: CGFloat = 20000.0 // 2000m * 10 score units/meter
+        static let boatRaceFinishY: CGFloat = 10000.0 // 2000m * 10 score units/meter
         static let boatSpeed: CGFloat = 2.8 // Adjust for balanced difficulty
         static let boatRaceReward: Int = 100
+        static let cannonJumpsPerRun = 3
+
     }
     
     /// Progressive difficulty settings - scales every 500m traveled
@@ -196,11 +198,11 @@ struct Configuration {
         // MARK: - Enemy Spawning
         
         /// Base probability of spawning an enemy (at level 0)
-        static let baseEnemyProbability: Double = 0.25
+        static let baseEnemyProbability: Double = 0.15
         /// Additional enemy probability per difficulty level
-        static let enemyProbabilityPerLevel: Double = 0.45
+        static let enemyProbabilityPerLevel: Double = 0.25
         /// Maximum enemy spawn probability
-        static let maxEnemyProbability: Double = 0.85
+        static let maxEnemyProbability: Double = 0.65
         
         static func enemyProbability(forLevel level: Int) -> Double {
             return min(maxEnemyProbability, baseEnemyProbability + (Double(level) * enemyProbabilityPerLevel))
@@ -260,7 +262,7 @@ struct Configuration {
         /// Maximum number of crocodiles that can appear in a single run
         static let crocodileMaxPerRun: Int = 2
         /// Probability of spawning a crocodile near a water lily pad
-        static let crocodileSpawnProbability: Double = 0.05
+        static let crocodileSpawnProbability: Double = 0.15
         
         // MARK: - Snake Spawning
         
@@ -299,6 +301,7 @@ struct Configuration {
         static let rocketJumpCost = 500
         static let lifevest4PackCost = 500
         static let honey4PackCost = 500
+        static let cannonJumpCost = 1000
     }
     
     struct GameCenter {
@@ -307,5 +310,5 @@ struct Configuration {
 }
 
 enum WeatherType: String, CaseIterable {
-    case sunny, rain, night, winter
+    case sunny, night, rain, winter
 }

@@ -6,9 +6,11 @@ struct Layer {
     static let pad: CGFloat = 10
     static let shadow: CGFloat = 15
     static let item: CGFloat = 20 // Coins, Enemies
-    static let frog: CGFloat = 30
+    static let frogCharacter: CGFloat = 30
     static let trajectory: CGFloat = 50
+    static let overlay: CGFloat = 900 // Below UI, above everything else
     static let ui: CGFloat = 1000
+    static let frog: CGFloat = 30
 }
 
 enum RocketState {
@@ -22,6 +24,7 @@ enum FrogAnimationState {
     case leaping     // Beginning of jump / end of jump
     case jumping     // Midway through jump (peak)
     case recoiling   // Hit by enemy
+    case cannon     // Cannon jump
 }
 
 // MARK: - Base Entity
@@ -57,7 +60,13 @@ class Frog: GameEntity {
         var swatter: Int = 0
         var cross: Int = 0
         var superJumpTimer: Int = 0
+        var cannonJumps: Int = 0
+
     }
+    
+    // Cannon Jump State
+    var isCannonJumpArmed: Bool = false
+    var isCannonJumping: Bool = false
     
     var buffs = Buffs()
     
@@ -77,11 +86,6 @@ class Frog: GameEntity {
     
     // FIX: Re-added missing property
     var canJumpLogs: Bool = false
-    
-    // Air jump - allows directional boost while airborne after bouncing from water
-    var canAirJump: Bool = false
-    private let airJumpMinHeight: CGFloat = 20.0  // Minimum zHeight to allow air jump
-    private let airJumpPower: CGFloat = 6.0       // Horizontal/vertical boost strength
     
     var isSuperJumping: Bool { return buffs.superJumpTimer > 0 }
     
@@ -105,12 +109,21 @@ class Frog: GameEntity {
     private static let leapTexture = SKTexture(imageNamed: "frogLeap")
     private static let jumpTexture = SKTexture(imageNamed: "frogJump")
     private static let recoilTexture = SKTexture(imageNamed: "frogRecoil")
+    private static let cannonTexture = SKTexture(imageNamed: "cannon")
+    private static let drowningTextures: [SKTexture] = [
+        SKTexture(imageNamed: "frogDrown1"),
+        SKTexture(imageNamed: "frogDrown2"),
+        SKTexture(imageNamed: "frogDrown3")
+    ]
+
     
     // Target heights for frog sprite (aspect ratio preserved automatically)
     private static let frogSitHeight: CGFloat = 40
     private static let frogLeapHeight: CGFloat = 80
     private static let frogJumpHeight: CGFloat = 80
     private static let frogRecoilHeight: CGFloat = 60
+    private static let cannonHeight: CGFloat = 60
+
     
     /// Sets the frog sprite texture while preserving the image's aspect ratio
     private func setFrogTexture(_ texture: SKTexture, height: CGFloat) {
@@ -122,7 +135,7 @@ class Frog: GameEntity {
     
     init() {
         super.init(texture: nil, color: .clear, size: CGSize(width: 40, height: 40))
-        self.zPosition = Layer.frog
+        self.zPosition = Layer.frogCharacter
         setupNodes()
     }
     
@@ -248,7 +261,7 @@ class Frog: GameEntity {
         rocketTimer = 0
         landingTimer = 0
         velocity.dx = 0
-        velocity.dy = 1.5  // Keep drifting forward slowly during descent
+        velocity.dy = 2.5  // Keep drifting forward slowly during descent
         zVelocity = -32.0
     }
     
@@ -268,43 +281,67 @@ class Frog: GameEntity {
         // Disable physics updates during animation
         isInvincible = true
         
-        // Create the sinking and fading animation sequence
-        let duration: TimeInterval = 1.2
-        
-        // Sink down animation (move bodyNode down to simulate sinking)
-        let sinkDistance: CGFloat = 60
-        let sink = SKAction.moveBy(x: 0, y: -sinkDistance, duration: duration)
-        sink.timingMode = .easeIn
-        
-        // Fade out
-        let fadeOut = SKAction.fadeOut(withDuration: duration)
-        fadeOut.timingMode = .easeIn
-        
-        // Scale down slightly (like disappearing underwater)
-        let scaleDown = SKAction.scale(to: 0.3, duration: duration)
-        scaleDown.timingMode = .easeIn
-        
-        // Add a subtle rotation as if being pulled under
-        let wobble1 = SKAction.rotate(byAngle: 0.2, duration: duration * 0.25)
-        let wobble2 = SKAction.rotate(byAngle: -0.4, duration: duration * 0.25)
-        let wobble3 = SKAction.rotate(byAngle: 0.3, duration: duration * 0.25)
-        let wobble4 = SKAction.rotate(byAngle: -0.1, duration: duration * 0.25)
-        let wobbleSequence = SKAction.sequence([wobble1, wobble2, wobble3, wobble4])
-        
-        // Combine animations for the body
-        let bodyAnimation = SKAction.group([sink, fadeOut, scaleDown, wobbleSequence])
-        
-        // Also fade and scale the shadow
-        let shadowFade = SKAction.fadeOut(withDuration: duration * 0.5)
-        let shadowScale = SKAction.scale(to: 0.1, duration: duration * 0.5)
-        let shadowAnimation = SKAction.group([shadowFade, shadowScale])
-        
-        // Run animations
-        shadowNode.run(shadowAnimation)
-        bodyNode.run(bodyAnimation) {
-            completion()
+        // Total duration for the texture-based drowning animation
+        let animationDuration: TimeInterval = 1.2
+        let timePerFrame = animationDuration / Double(Frog.drowningTextures.count)
+
+        var actions: [SKAction] = []
+        for texture in Frog.drowningTextures {
+            let setTextureAction = SKAction.run {
+                // Use frogSitHeight as a reasonable height for the drowning frames, preserving aspect ratio.
+                self.setFrogTexture(texture, height: Frog.frogSitHeight)
+            }
+            let waitAction = SKAction.wait(forDuration: timePerFrame)
+            actions.append(setTextureAction)
+            actions.append(waitAction)
         }
+
+        let textureAnimation = SKAction.sequence(actions)
+
+        // After the animation plays, fade out the frog and its shadow
+        let fadeDuration: TimeInterval = 0.3
+        let fadeOut = SKAction.fadeOut(withDuration: fadeDuration)
+        let sequence = SKAction.sequence([textureAnimation, fadeOut])
+        
+        // Run fade out on the body container and call completion when done
+        bodyNode.run(sequence, completion: completion)
+        
+        // Also fade the shadow over the total duration
+        let totalDuration = animationDuration + fadeDuration
+        shadowNode.run(SKAction.fadeOut(withDuration: totalDuration))
     }
+    
+    func playWailingAnimation() {
+        // Stop all movement
+        velocity = .zero
+        zVelocity = 0
+        
+        // Disable physics updates during animation
+        isInvincible = true
+        
+        // Total duration for one loop of the texture-based wailing animation
+        let animationDuration: TimeInterval = 1.2
+        let timePerFrame = animationDuration / Double(Frog.drowningTextures.count)
+
+        var actions: [SKAction] = []
+        for texture in Frog.drowningTextures {
+            let setTextureAction = SKAction.run {
+                // Use frogSitHeight as a reasonable height for the wailing frames, preserving aspect ratio.
+                self.setFrogTexture(texture, height: Frog.frogSitHeight)
+            }
+            let waitAction = SKAction.wait(forDuration: timePerFrame)
+            actions.append(setTextureAction)
+            actions.append(waitAction)
+        }
+
+        let textureAnimation = SKAction.sequence(actions)
+        let loopingAnimation = SKAction.repeatForever(textureAnimation)
+        
+        // Run the looping wailing animation on the body container.
+        // This will not complete, so no completion handler is used.
+        bodyNode.run(loopingAnimation, withKey: "wailingAnimation")
+    }
+
     
     /// Plays a death animation where the frog spins around and falls off the screen (for enemy deaths).
     /// - Parameter completion: Called when the animation finishes
@@ -404,7 +441,7 @@ class Frog: GameEntity {
                 return
             }
             velocity.dy *= 0.25
-            if velocity.dy < 0.5 { velocity.dy = 0.5 }
+            if velocity.dy < 0.5 { velocity.dy = 1.5 } // was 0.5
             position.y += velocity.dy
             zHeight = 60 + sin(CGFloat(Date().timeIntervalSince1970) * 5) * 5
         }
@@ -413,7 +450,13 @@ class Frog: GameEntity {
     
     private func updateVisuals() {
         if !isBeingDragged {
-            bodyNode.position.y = zHeight
+            if isFloating {
+                // Add a gentle bobbing motion when floating in water
+                let bobOffset = sin(CGFloat(Date().timeIntervalSince1970) * 5.0) * 3.0
+                bodyNode.position.y = bobOffset
+            } else {
+                bodyNode.position.y = zHeight
+            }
             
             // Update facing direction based on movement
             let speed = sqrt(velocity.dx * velocity.dx + velocity.dy * velocity.dy)
@@ -473,16 +516,12 @@ class Frog: GameEntity {
         if recoilTimer > 0 {
             newState = .recoiling
         } else {
-            // Calculate horizontal speed
-            let horizontalSpeed = sqrt(velocity.dx * velocity.dx + velocity.dy * velocity.dy)
-            
             // Determine animation state based on jump phase and movement
             if zHeight <= 0.1 && abs(zVelocity) < 0.1 {
-                // On ground / lilypad - use sitting if idle, leaping if sliding
-                if horizontalSpeed < 0.5 {
-                    newState = .sitting
+                // On ground / lilypad. Show cannon if armed, otherwise sit.
+                if isCannonJumpArmed {
+                    newState = .cannon
                 } else {
-                    // Sliding on ice or moving - still show sitting pose when grounded
                     newState = .sitting
                 }
             } else if zVelocity > jumpStartZVelocity * 0.3 {
@@ -510,6 +549,8 @@ class Frog: GameEntity {
                 setFrogTexture(Frog.jumpTexture, height: Frog.frogJumpHeight)
             case .recoiling:
                 setFrogTexture(Frog.recoilTexture, height: Frog.frogRecoilHeight)
+            case .cannon:
+                setFrogTexture(Frog.cannonTexture, height: Frog.cannonHeight)
             }
         }
     }
@@ -532,22 +573,26 @@ class Frog: GameEntity {
         setFrogTexture(Frog.leapTexture, height: Frog.frogLeapHeight)
         
         SoundManager.shared.play("jump")
-        HapticsManager.shared.playImpact(.light)
     }
     
     func land(on pad: Pad, weather: WeatherType) {
+        bodyNode.removeAction(forKey: "wailingAnimation")
         zVelocity = 0
         zHeight = 0
         jumpStartZVelocity = 0  // Reset for next jump
         self.onPad = pad
         self.isFloating = false
-        self.canAirJump = false  // Reset air jump ability on landing
         resetPullOffset()
         
-        // Transition to sitting state
-        animationState = .sitting
-        setFrogTexture(Frog.sitTexture, height: Frog.frogSitHeight)
-        
+        if isCannonJumpArmed {
+            animationState = .cannon
+            setFrogTexture(Frog.cannonTexture, height: Frog.cannonHeight)
+        }
+        else {
+            // Transition to sitting state
+            animationState = .sitting
+            setFrogTexture(Frog.sitTexture, height: Frog.frogSitHeight)
+        }
         let isRain = (weather == .rain)
         let isIce = (pad.type == .ice)
         
@@ -573,49 +618,11 @@ class Frog: GameEntity {
         velocity.dx *= -0.5
         velocity.dy *= -0.5
         
-        // Enable air jump after bouncing from water
-        canAirJump = true
-        
         // Transition to leaping state since we're bouncing up
         animationState = .leaping
         setFrogTexture(Frog.leapTexture, height: Frog.frogLeapHeight)
         
         HapticsManager.shared.playImpact(.heavy)
-    }
-    
-    /// Check if the frog can perform an air jump (must be airborne and have the ability)
-    func canPerformAirJump() -> Bool {
-        return canAirJump && zHeight >= airJumpMinHeight && onPad == nil
-    }
-    
-    /// Perform a directional air jump - simple tap in a direction
-    /// - Parameter direction: Normalized direction vector (e.g., left = (-1, 0), up = (0, 1))
-    func airJump(direction: CGVector) {
-        guard canPerformAirJump() else { return }
-        
-        // Consume the air jump ability
-        canAirJump = false
-        
-        // Apply directional boost to current velocity
-        self.velocity.dx += direction.dx * airJumpPower
-        self.velocity.dy += direction.dy * airJumpPower
-        
-        // Give a small upward boost to extend air time
-        self.zVelocity = max(self.zVelocity, 8.0)
-        self.jumpStartZVelocity = self.zVelocity
-        self.isFloating = false
-        
-        // Transition to leaping state
-        animationState = .leaping
-        setFrogTexture(Frog.leapTexture, height: Frog.frogLeapHeight)
-        
-        // Update facing direction
-        let angle = atan2(direction.dy, direction.dx) - CGFloat.pi / 2
-        lastFacingAngle = angle
-        bodyNode.zRotation = angle
-        
-        SoundManager.shared.play("jump")
-        HapticsManager.shared.playImpact(.medium)
     }
 }
 
@@ -706,8 +713,11 @@ class Pad: GameEntity {
             self.padSprite = sprite
         }
     }
-    func updateColor(weather: WeatherType) {
+    func updateColor(weather: WeatherType, duration: TimeInterval = 0) {
         guard type == .normal || type == .moving || type == .waterLily else { return }
+        
+        // Don't change if already correct
+        if weather == currentWeather && padSprite?.texture != nil { return }
         currentWeather = weather
         
         let texture: SKTexture
@@ -715,10 +725,11 @@ class Pad: GameEntity {
             switch weather {
             case .sunny:
                 texture = Pad.waterLilyTexture
-            case .rain:
-                texture = Pad.waterLilyRainTexture
+          
             case .night:
                 texture = Pad.waterLilyNightTexture
+            case .rain:
+                texture = Pad.waterLilyRainTexture
             case .winter:
                 texture = Pad.waterLilySnowTexture
             }
@@ -726,15 +737,37 @@ class Pad: GameEntity {
             switch weather {
             case .sunny:
                 texture = Pad.dayTexture
-            case .rain:
-                texture = Pad.rainTexture
             case .night:
                 texture = Pad.nightTexture
+            case .rain:
+                texture = Pad.rainTexture
+            
             case .winter:
                 texture = Pad.snowTexture
             }
         }
-        padSprite?.texture = texture
+        
+        guard let sprite = padSprite, sprite.texture != texture else { return }
+
+        if duration > 0 {
+            let crossfadeDuration = duration * 0.5 // Crossfade over a portion of the total transition
+            let oldSprite = self.padSprite
+            
+            let newSprite = SKSpriteNode(texture: texture)
+            newSprite.size = sprite.size
+            newSprite.alpha = 0
+            newSprite.zRotation = sprite.zRotation
+            addChild(newSprite)
+            self.padSprite = newSprite
+
+            newSprite.run(SKAction.fadeIn(withDuration: crossfadeDuration))
+            oldSprite?.run(SKAction.sequence([
+                SKAction.fadeOut(withDuration: crossfadeDuration),
+                SKAction.removeFromParent()
+            ]))
+        } else {
+            sprite.texture = texture
+        }
     }
     /// Plays a subtle squish animation when the frog lands on the pad.
     /// Uses SKAction for GPU-accelerated animation with no performance impact.

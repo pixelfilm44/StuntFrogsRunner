@@ -296,7 +296,104 @@ class VFXManager {
     private weak var currentScene: SKScene?
     private var lightningOverlay: SKSpriteNode?
     
+    // Properties for weather transitions
+    private var weatherOverlay: SKSpriteNode?
+    private var activeEmitter: SKEmitterNode?
+    
     private init() {}
+    
+    // MARK: - Weather Transitions
+    
+    /// Smoothly transitions the visual weather effects over a duration.
+    func transitionWeather(from oldWeather: WeatherType, to newWeather: WeatherType, in scene: GameScene, duration: TimeInterval) {
+        self.currentScene = scene
+
+        // 1. Setup or update the screen overlay for darkness/color tinting
+        if self.weatherOverlay == nil, let cam = scene.camera {
+            let overlay = SKSpriteNode(color: .clear, size: scene.size)
+            overlay.zPosition = Layer.overlay
+            self.weatherOverlay = overlay
+            cam.addChild(overlay)
+        }
+
+        let targetColor = overlayColor(for: newWeather)
+        let colorAction = SKAction.colorize(with: targetColor, colorBlendFactor: 1.0, duration: duration)
+        weatherOverlay?.run(colorAction)
+        
+        // 2. Fade out the old particle emitter
+        if let oldEmitter = activeEmitter {
+            let fadeOutAction = SKAction.customAction(withDuration: duration) { node, elapsedTime in
+                guard let emitter = node as? SKEmitterNode, let initialRate = emitter.userData?["initialRate"] as? CGFloat else { return }
+                let progress = elapsedTime / CGFloat(duration)
+                emitter.particleBirthRate = initialRate * (1.0 - progress)
+            }
+            let removeAction = SKAction.removeFromParent()
+            oldEmitter.run(SKAction.sequence([fadeOutAction, removeAction]))
+            self.activeEmitter = nil
+        }
+
+        // 3. Fade in the new particle emitter
+        if let newEmitter = createEmitter(for: newWeather, in: scene) {
+            let targetBirthRate = newEmitter.particleBirthRate
+            newEmitter.userData = ["initialRate": targetBirthRate]
+            newEmitter.particleBirthRate = 0
+            
+            scene.weatherNode.addChild(newEmitter)
+            self.activeEmitter = newEmitter
+            
+            let fadeInAction = SKAction.customAction(withDuration: duration) { node, elapsedTime in
+                guard let emitter = node as? SKEmitterNode else { return }
+                let progress = elapsedTime / CGFloat(duration)
+                emitter.particleBirthRate = targetBirthRate * progress
+            }
+            newEmitter.run(fadeInAction)
+        }
+
+        // 4. Manage the thunder cycle
+        if newWeather == .rain {
+            let wait = SKAction.wait(forDuration: duration)
+            let startThunder = SKAction.run { [weak self] in
+                self?.startThunderCycle(in: scene)
+            }
+            scene.run(SKAction.sequence([wait, startThunder]))
+        } else {
+            stopThunderCycle()
+        }
+    }
+    
+    private func overlayColor(for weather: WeatherType) -> UIColor {
+        switch weather {
+        case .sunny:
+            return .clear
+        case .night:
+            return .black.withAlphaComponent(0.65)
+        case .rain:
+            return .black.withAlphaComponent(0.35)
+        case .winter:
+            return .white.withAlphaComponent(0.25)
+        }
+    }
+
+    private func createEmitter(for weather: WeatherType, in scene: SKScene) -> SKEmitterNode? {
+        let sceneSize = scene.size
+        let emitter: SKEmitterNode?
+        
+        switch weather {
+        case .rain:
+            emitter = createRainEmitter(width: sceneSize.width)
+            emitter?.position = CGPoint(x: 0, y: sceneSize.height / 2 + 50)
+        case .winter:
+            emitter = createSnowEmitter(width: sceneSize.width)
+            emitter?.position = CGPoint(x: 0, y: sceneSize.height / 2 + 50)
+        case .night:
+            emitter = createFirefliesEmitter(width: sceneSize.width, height: sceneSize.height)
+            emitter?.position = .zero
+            emitter?.zPosition = Layer.pad + 1 // Fireflies should be in the world, not stuck to screen
+        case .sunny:
+            emitter = nil
+        }
+        return emitter
+    }
     
     // MARK: - Thunder & Lightning
     
@@ -306,7 +403,7 @@ class VFXManager {
     ///   - scene: The scene to display lightning effects in
     ///   - minInterval: Minimum seconds between lightning strikes (default 4)
     ///   - maxInterval: Maximum seconds between lightning strikes (default 12)
-    func startThunderCycle(in scene: SKScene, minInterval: TimeInterval = 4, maxInterval: TimeInterval = 12) {
+    func startThunderCycle(in scene: SKScene, minInterval: TimeInterval = 8, maxInterval: TimeInterval = 12) {
         stopThunderCycle()
         currentScene = scene
         scheduleNextThunder(minInterval: minInterval, maxInterval: maxInterval)
@@ -320,6 +417,29 @@ class VFXManager {
         lightningOverlay = nil
         currentScene = nil
     }
+    
+    func spawnImpactWave(at position: CGPoint, in scene: SKScene) {
+        guard let worldNode = scene.childNode(withName: "//worldNode") else { return }
+
+        let wave = SKShapeNode(circleOfRadius: 30)
+        wave.position = position
+        wave.strokeColor = .purple
+        wave.fillColor = .purple.withAlphaComponent(0.3)
+        wave.lineWidth = 15
+        wave.zPosition = Layer.frog - 1 // Behind the frog but above pads
+        worldNode.addChild(wave)
+        
+        let scaleUp = SKAction.scale(to: 40, duration: 0.5)
+        scaleUp.timingMode = .easeOut
+        
+        let fadeOut = SKAction.fadeOut(withDuration: 0.5)
+        
+        let group = SKAction.group([scaleUp, fadeOut])
+        let remove = SKAction.removeFromParent()
+        
+        wave.run(SKAction.sequence([group, remove]))
+    }
+
     
     private func scheduleNextThunder(minInterval: TimeInterval, maxInterval: TimeInterval) {
         let interval = TimeInterval.random(in: minInterval...maxInterval)
@@ -443,6 +563,48 @@ class VFXManager {
         emitter.run(SKAction.sequence([wait, remove]))
     }
     
+    /// Spawns a puff of smoke/cloud for the air jump ability.
+    /// - Parameters:
+    ///   - position: World position to spawn the puff.
+    ///   - parentNode: The node to add the effect to (typically the world node).
+    func spawnAirJumpPuff(at position: CGPoint, parentNode: SKNode) {
+        let emitter = SKEmitterNode()
+        emitter.particleTexture = SKTexture(imageNamed: "spark") // A generic small white particle
+        emitter.position = position
+        emitter.zPosition = Layer.frog - 1 // Just behind the frog
+
+        // Burst properties
+        emitter.particleBirthRate = 400 // High birth rate for a quick burst
+        emitter.numParticlesToEmit = 25
+        emitter.particleLifetime = 0.4
+        emitter.particleLifetimeRange = 0.1
+
+        // Motion properties: expand outward in a circle
+        emitter.particleSpeed = 100
+        emitter.particleSpeedRange = 50
+        emitter.emissionAngleRange = .pi * 2 // 360 degrees
+
+        // Appearance properties
+        emitter.particleScale = 0.2
+        emitter.particleScaleRange = 0.1
+        emitter.particleScaleSpeed = 0.3 // Grow slightly
+        
+        emitter.particleAlpha = 0.7
+        emitter.particleAlphaSpeed = -1.5 // Fade out
+        
+        emitter.particleColor = .white
+        emitter.particleColorBlendFactor = 1.0
+
+        parentNode.addChild(emitter)
+
+        // Auto cleanup after the effect is finished
+        let cleanupAction = SKAction.sequence([
+            SKAction.wait(forDuration: 1.0), // Wait for all particles to die
+            SKAction.removeFromParent()
+        ])
+        emitter.run(cleanupAction)
+    }
+    
     // Programmatic Weather Emitters
     func createRainEmitter(width: CGFloat) -> SKEmitterNode {
         let node = SKEmitterNode()
@@ -463,7 +625,7 @@ class VFXManager {
     
     func createSnowEmitter(width: CGFloat) -> SKEmitterNode {
         let node = SKEmitterNode()
-        node.particleTexture = SKTexture(imageNamed: "spark")
+        node.particleTexture = SKTexture(imageNamed: "snowflake")
         node.particleBirthRate = 20
         node.particleLifetime = 4.0
         node.particlePositionRange = CGVector(dx: width, dy: 0)

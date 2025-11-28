@@ -78,9 +78,9 @@ class CollisionManager {
         
         // Create a smaller hitbox for the boat, half its visual size, centered on its position.
         let boatSize = boat.size
-        let hitBoxSize = CGSize(width: boatSize.width / 2, height: boatSize.height / 2)
-        let hitBoxOrigin = CGPoint(x: boat.position.x - hitBoxSize.width / 2,
-                                   y: boat.position.y - hitBoxSize.height / 2)
+        let hitBoxSize = CGSize(width: boatSize.width / 4, height: boatSize.height / 4)
+        let hitBoxOrigin = CGPoint(x: boat.position.x - hitBoxSize.width / 4,
+                                   y: boat.position.y - hitBoxSize.height / 4)
         let smallerBoatFrame = CGRect(origin: hitBoxOrigin, size: hitBoxSize)
 
         if frogFrame.intersects(smallerBoatFrame) {

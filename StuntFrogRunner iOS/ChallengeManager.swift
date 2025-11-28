@@ -167,7 +167,7 @@ class ChallengeManager {
                 title: "Bug Swatter",
                 description: "Defeat 10 enemies using items",
                 requirement: 10,
-                reward: .upgrade("SWATTER"),
+                reward: .coins(100),
                 type: .enemiesDefeated,
                 progress: 0,
                 isCompleted: false,

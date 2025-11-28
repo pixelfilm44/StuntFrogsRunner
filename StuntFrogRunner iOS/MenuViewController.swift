@@ -1,4 +1,5 @@
 import UIKit
+import MessageUI
 
 class MenuViewController: UIViewController {
     
@@ -30,12 +31,57 @@ class MenuViewController: UIViewController {
         return label
     }()
     
-    private lazy var statsLabel: UILabel = {
+    private lazy var statsLabel1: UILabel = {
         let label = UILabel()
         label.font = UIFont.systemFont(ofSize: 16, weight: .medium)
         label.textColor = .white
         label.textAlignment = .center
-        label.numberOfLines = 2
+        label.numberOfLines = 1
+        // Add shadow for readability over background image
+        label.layer.shadowColor = UIColor.black.cgColor
+        label.layer.shadowOffset = CGSize(width: 1, height: 1)
+        label.layer.shadowOpacity = 0.8
+        label.layer.shadowRadius = 2
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var statsValue1: UILabel = {
+        let label = UILabel()
+        label.font = UIFont(name: "Fredoka-Bold", size: 24)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.numberOfLines = 1
+        // Add shadow for readability over background image
+        label.layer.shadowColor = UIColor.black.cgColor
+        label.layer.shadowOffset = CGSize(width: 1, height: 1)
+        label.layer.shadowOpacity = 0.8
+        label.layer.shadowRadius = 2
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var statsLabel2: UILabel = {
+        let label = UILabel()
+        label.font = UIFont.systemFont(ofSize: 16, weight: .medium)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.numberOfLines = 1
+        // Add shadow for readability over background image
+        label.layer.shadowColor = UIColor.black.cgColor
+        label.layer.shadowOffset = CGSize(width: 1, height: 1)
+        label.layer.shadowOpacity = 0.8
+        label.layer.shadowRadius = 2
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var statsValue2: UILabel = {
+        let label = UILabel()
+        label.font = UIFont(name: "Fredoka-Bold", size: 24)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.numberOfLines = 1
         // Add shadow for readability over background image
         label.layer.shadowColor = UIColor.black.cgColor
         label.layer.shadowOffset = CGSize(width: 1, height: 1)
@@ -49,11 +95,21 @@ class MenuViewController: UIViewController {
         let button = UIButton(type: .system)
         button.setTitle("PLAY", for: .normal)
         button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 36)
-        button.setTitleColor(UIColor(red: 211/255, green: 84/255, blue: 0/255, alpha: 1), for: .normal)
-        button.backgroundColor = UIColor(red: 241/255, green: 196/255, blue: 15/255, alpha: 1)
+        // "Darker Yellow" for the font
+        button.setTitleColor(UIColor(red: 186/255, green: 96/255, blue: 2/255, alpha: 1), for: .normal)
+        // "Yellow" for the background
+        button.backgroundColor = UIColor(red: 232/255, green: 199/255, blue: 96/255, alpha: 1)
         button.layer.cornerRadius = 37
         button.layer.borderWidth = 6
-        button.layer.borderColor = UIColor.white.cgColor
+        // "Dark Yellow" for the border
+        button.layer.borderColor = UIColor(red: 249/255, green: 192/255, blue: 6/255, alpha: 1).cgColor
+        
+        // Add shadow
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOffset = CGSize(width: 0, height: 4)
+        button.layer.shadowOpacity = 0.3
+        button.layer.shadowRadius = 5
+        
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(handlePlay), for: .touchUpInside)
         return button
@@ -63,53 +119,66 @@ class MenuViewController: UIViewController {
         let button = UIButton(type: .system)
         button.setTitle("RACE", for: .normal)
         button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 24)
-        button.setTitleColor(.white, for: .normal)
-        button.backgroundColor = UIColor(red: 26/255, green: 188/255, blue: 156/255, alpha: 1) // Teal color
+        // Light blue text
+        button.setTitleColor(UIColor(red: 93/255, green: 173/255, blue: 226/255, alpha: 1), for: .normal)
+        // Dark blue button
+        button.backgroundColor = UIColor(red: 27/255, green: 79/255, blue: 114/255, alpha: 1)
         button.layer.cornerRadius = 25
         button.layer.borderWidth = 4
-        button.layer.borderColor = UIColor.white.cgColor
+        // Light blue border
+        button.layer.borderColor = UIColor(red: 93/255, green: 173/255, blue: 226/255, alpha: 1).cgColor
+        
+        // Add shadow
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOffset = CGSize(width: 0, height: 4)
+        button.layer.shadowOpacity = 0.3
+        button.layer.shadowRadius = 5
+        
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(handleRace), for: .touchUpInside)
         return button
     }()
     
     private lazy var shopButton: UIButton = {
-        let button = UIButton(type: .system)
-        button.setTitle("SHOP", for: .normal)
-        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 24)
-        button.setTitleColor(.white, for: .normal)
-        button.backgroundColor = UIColor(red: 52/255, green: 152/255, blue: 219/255, alpha: 1)
-        button.layer.cornerRadius = 25
-        button.layer.borderWidth = 4
-        button.layer.borderColor = UIColor.white.cgColor
+        let button = UIButton(type: .custom)
+        button.setImage(UIImage(named: "shoppingButton"), for: .normal)
+        
+        // Add shadow
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowOpacity = 0.4
+        button.layer.shadowRadius = 3
+        
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(handleShop), for: .touchUpInside)
         return button
     }()
     
     private lazy var leaderboardButton: UIButton = {
-        let button = UIButton(type: .system)
-        button.setTitle("LEADERS", for: .normal)
-        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 24)
-        button.setTitleColor(.white, for: .normal)
-        button.backgroundColor = UIColor(red: 155/255, green: 89/255, blue: 182/255, alpha: 1) // Purple
-        button.layer.cornerRadius = 25
-        button.layer.borderWidth = 4
-        button.layer.borderColor = UIColor.white.cgColor
+        let button = UIButton(type: .custom)
+        button.setImage(UIImage(named: "leadersButton"), for: .normal)
+        
+        // Add shadow
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowOpacity = 0.4
+        button.layer.shadowRadius = 3
+        
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(handleLeaderboard), for: .touchUpInside)
         return button
     }()
     
     private lazy var challengesButton: UIButton = {
-        let button = UIButton(type: .system)
-        button.setTitle("CHALLENGES", for: .normal)
-        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 24) 
-        button.setTitleColor(.white, for: .normal)
-        button.backgroundColor = UIColor(red: 230/255, green: 126/255, blue: 34/255, alpha: 1) // Orange
-        button.layer.cornerRadius = 25
-        button.layer.borderWidth = 4
-        button.layer.borderColor = UIColor.white.cgColor
+        let button = UIButton(type: .custom)
+        button.setImage(UIImage(named: "challengesButton"), for: .normal)
+        
+        // Add shadow
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowOpacity = 0.4
+        button.layer.shadowRadius = 3
+        
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(handleChallenges), for: .touchUpInside)
         return button
@@ -137,8 +206,36 @@ class MenuViewController: UIViewController {
         button.layer.cornerRadius = 22
         button.layer.borderWidth = 2
         button.layer.borderColor = UIColor.white.cgColor
+        
+        // Add shadow
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowOpacity = 0.4
+        button.layer.shadowRadius = 3
+        
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(handleHelp), for: .touchUpInside)
+        return button
+    }()
+    
+    private lazy var feedbackButton: UIButton = {
+        let button = UIButton(type: .system)
+        let emailIcon = UIImage(systemName: "envelope.fill")
+        button.setImage(emailIcon, for: .normal)
+        button.tintColor = .white
+        button.backgroundColor = UIColor(red: 52/255, green: 73/255, blue: 94/255, alpha: 1)
+        button.layer.cornerRadius = 22
+        button.layer.borderWidth = 2
+        button.layer.borderColor = UIColor.white.cgColor
+        
+        // Add shadow
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowOpacity = 0.4
+        button.layer.shadowRadius = 3
+        
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(handleFeedback), for: .touchUpInside)
         return button
     }()
     
@@ -169,17 +266,42 @@ class MenuViewController: UIViewController {
     private func setupUI() {
         // Add Background Image first
         view.addSubview(backgroundImageView)
-        view.sendSubviewToBack(backgroundImageView)
         
         view.addSubview(titleLabel)
-        view.addSubview(statsLabel)
         view.addSubview(playButton)
         view.addSubview(raceButton)
-        view.addSubview(shopButton)
-        view.addSubview(leaderboardButton)
-        view.addSubview(challengesButton)
-        view.addSubview(challengeBadge)
         view.addSubview(helpButton)
+        view.addSubview(feedbackButton)
+        
+        // Create a horizontal stack view for shop, challenges, and leaderboard buttons
+        let secondaryActionsStackView = UIStackView(arrangedSubviews: [shopButton, challengesButton, leaderboardButton])
+        secondaryActionsStackView.axis = .horizontal
+        secondaryActionsStackView.distribution = .equalSpacing
+        secondaryActionsStackView.alignment = .center
+        secondaryActionsStackView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(secondaryActionsStackView)
+
+        // The challenge badge needs to be on top of other views
+        view.addSubview(challengeBadge)
+        
+        // Create vertical stack views for each stat
+        let highScoreStackView = UIStackView(arrangedSubviews: [statsLabel1, statsValue1])
+        highScoreStackView.axis = .vertical
+        highScoreStackView.alignment = .center
+        highScoreStackView.spacing = 4
+        
+        let coinsStackView = UIStackView(arrangedSubviews: [statsLabel2, statsValue2])
+        coinsStackView.axis = .vertical
+        coinsStackView.alignment = .center
+        coinsStackView.spacing = 4
+        
+        // Create a horizontal stack view to hold both stat stacks
+        let statsContainerStackView = UIStackView(arrangedSubviews: [highScoreStackView, coinsStackView])
+        statsContainerStackView.axis = .horizontal
+        statsContainerStackView.distribution = .fillEqually
+        statsContainerStackView.alignment = .center
+        statsContainerStackView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(statsContainerStackView)
         
         NSLayoutConstraint.activate([
             // Background Constraints (Fill Screen)
@@ -188,54 +310,64 @@ class MenuViewController: UIViewController {
             backgroundImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             backgroundImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             
+            // Title at the top
             titleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -100),
-            
-            statsLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 20),
-            statsLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            
-            playButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            playButton.topAnchor.constraint(equalTo: statsLabel.bottomAnchor, constant: 30),
-            playButton.widthAnchor.constraint(equalToConstant: 300),
-            playButton.heightAnchor.constraint(equalToConstant: 90),
-            
-            raceButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            raceButton.topAnchor.constraint(equalTo: playButton.bottomAnchor, constant: 15),
-            raceButton.widthAnchor.constraint(equalToConstant: 200),
-            raceButton.heightAnchor.constraint(equalToConstant: 60),
-            
-            shopButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            shopButton.topAnchor.constraint(equalTo: raceButton.bottomAnchor, constant: 15),
-            shopButton.widthAnchor.constraint(equalToConstant: 200),
-            shopButton.heightAnchor.constraint(equalToConstant: 60),
-            
-            challengesButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            challengesButton.topAnchor.constraint(equalTo: shopButton.bottomAnchor, constant: 15),
-            challengesButton.widthAnchor.constraint(equalToConstant: 200),
-            challengesButton.heightAnchor.constraint(equalToConstant: 60),
-            
-            challengeBadge.topAnchor.constraint(equalTo: challengesButton.topAnchor, constant: -8),
-            challengeBadge.trailingAnchor.constraint(equalTo: challengesButton.trailingAnchor, constant: 8),
-            challengeBadge.widthAnchor.constraint(equalToConstant: 24),
-            challengeBadge.heightAnchor.constraint(equalToConstant: 24),
-            
-            leaderboardButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            leaderboardButton.topAnchor.constraint(equalTo: challengesButton.bottomAnchor, constant: 15),
-            leaderboardButton.widthAnchor.constraint(equalToConstant: 200),
-            leaderboardButton.heightAnchor.constraint(equalToConstant: 60),
+            titleLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
             
             // Help button - top right corner
             helpButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
             helpButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
             helpButton.widthAnchor.constraint(equalToConstant: 44),
-            helpButton.heightAnchor.constraint(equalToConstant: 44)
+            helpButton.heightAnchor.constraint(equalToConstant: 44),
+            
+            // Feedback button - top left corner
+            feedbackButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            feedbackButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            feedbackButton.widthAnchor.constraint(equalToConstant: 44),
+            feedbackButton.heightAnchor.constraint(equalToConstant: 44),
+            
+            // Icon buttons at the very bottom
+            secondaryActionsStackView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            secondaryActionsStackView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 50),
+            secondaryActionsStackView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -50),
+            
+            // Race button above the icon buttons
+            raceButton.bottomAnchor.constraint(equalTo: secondaryActionsStackView.topAnchor, constant: -25),
+            raceButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            raceButton.widthAnchor.constraint(equalToConstant: 200),
+            raceButton.heightAnchor.constraint(equalToConstant: 60),
+
+            // Play button above the race button
+            playButton.bottomAnchor.constraint(equalTo: raceButton.topAnchor, constant: -15),
+            playButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            playButton.widthAnchor.constraint(equalToConstant: 300),
+            playButton.heightAnchor.constraint(equalToConstant: 90),
+            
+            // Stats container above the play button
+            statsContainerStackView.bottomAnchor.constraint(equalTo: playButton.topAnchor, constant: -25),
+            statsContainerStackView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            statsContainerStackView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+
+            // Explicit size for the image buttons
+            shopButton.widthAnchor.constraint(equalToConstant: 70),
+            shopButton.heightAnchor.constraint(equalToConstant: 70),
+            challengesButton.widthAnchor.constraint(equalToConstant: 70),
+            challengesButton.heightAnchor.constraint(equalToConstant: 70),
+            leaderboardButton.widthAnchor.constraint(equalToConstant: 70),
+            leaderboardButton.heightAnchor.constraint(equalToConstant: 70),
+
+            // Badge constraints relative to the challenges button
+            challengeBadge.topAnchor.constraint(equalTo: challengesButton.topAnchor, constant: -8),
+            challengeBadge.trailingAnchor.constraint(equalTo: challengesButton.trailingAnchor, constant: 8),
+            challengeBadge.widthAnchor.constraint(equalToConstant: 24),
+            challengeBadge.heightAnchor.constraint(equalToConstant: 24),
         ])
     }
     
     // MARK: - Button Animations
     
     private func setupButtonAnimations() {
-        let buttons = [playButton, raceButton, shopButton, leaderboardButton, challengesButton, helpButton]
+        let buttons = [playButton, raceButton, shopButton, leaderboardButton, challengesButton, helpButton, feedbackButton]
         for button in buttons {
             button.addTarget(self, action: #selector(buttonPressed), for: .touchDown)
             button.addTarget(self, action: #selector(buttonReleased), for: [.touchUpInside, .touchUpOutside, .touchCancel])
@@ -257,7 +389,10 @@ class MenuViewController: UIViewController {
     private func updateStats() {
         let high = PersistenceManager.shared.highScore
         let coins = PersistenceManager.shared.totalCoins
-        statsLabel.text = "High Score: \(high)m\nCoins: \(coins)"
+        statsLabel1.text = "High Score:"
+        statsValue1.text = "\(high)"
+        statsLabel2.text = "Coins:"
+        statsValue2.text = "\(coins)"
     }
     
     @objc private func handlePlay() {
@@ -296,6 +431,24 @@ class MenuViewController: UIViewController {
         showHelpModal(startGameOnDismiss: false)
     }
     
+    @objc private func handleFeedback() {
+        HapticsManager.shared.playImpact(.light)
+        
+        guard MFMailComposeViewController.canSendMail() else {
+            let alert = UIAlertController(title: "Cannot Send Mail", message: "Your device is not configured to send email.", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return
+        }
+        
+        let mailComposer = MFMailComposeViewController()
+        mailComposer.mailComposeDelegate = self
+        mailComposer.setToRecipients(["jmielke@gmail.com"])
+        mailComposer.setSubject("StuntFrog Feedback")
+        
+        present(mailComposer, animated: true)
+    }
+    
     private func showHelpModal(startGameOnDismiss: Bool) {
         let helpVC = HelpViewController()
         helpVC.modalPresentationStyle = .overFullScreen
@@ -307,5 +460,11 @@ class MenuViewController: UIViewController {
             }
         }
         present(helpVC, animated: true)
+    }
+}
+
+extension MenuViewController: MFMailComposeViewControllerDelegate {
+    func mailComposeController(_ controller: MFMailComposeViewController, didFinishWith result: MFMailComposeResult, error: Error?) {
+        controller.dismiss(animated: true)
     }
 }

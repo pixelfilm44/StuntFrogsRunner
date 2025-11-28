@@ -16,6 +16,8 @@ class PersistenceManager {
         static let hasSeenHelp = "sf_has_seen_help"
         static let honeyItems = "sf_consumable_honey_items"
         static let vestItems = "sf_consumable_vest_items"
+        static let cannonJump = "sf_upgrade_cannonJump" // NEW Key
+
     }
     
     private init() {}
@@ -78,6 +80,7 @@ class PersistenceManager {
     
     // MARK: - Upgrades
     
+    
     var jumpLevel: Int {
         let level = defaults.integer(forKey: Keys.jumpLevel)
         return max(1, level) // Default to level 1
@@ -103,8 +106,18 @@ class PersistenceManager {
         return defaults.bool(forKey: Keys.logJumper)
     }
     
+    var hasCannonJump: Bool {
+        return defaults.bool(forKey: Keys.cannonJump)
+    }
+    
+    
+    
     func unlockLogJumper() {
         defaults.set(true, forKey: Keys.logJumper)
+    }
+    
+    func unlockCannonJump() {
+        defaults.set(true, forKey: Keys.cannonJump)
     }
     
     // NEW: Super Jump Persistence
