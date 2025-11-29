@@ -8,7 +8,7 @@ class MenuViewController: UIViewController {
     // MARK: - Background
     private lazy var backgroundImageView: UIImageView = {
         // Loads "menuScreen.png" from Assets or Bundle
-        let imageView = UIImageView(image: UIImage(named: "StuntFrogTitle"))
+        let imageView = UIImageView(image: UIImage(named: "menuScreen"))
         imageView.contentMode = .scaleAspectFit
         imageView.backgroundColor = .black  // Fill letterbox areas with black
         imageView.clipsToBounds = true
@@ -94,21 +94,21 @@ class MenuViewController: UIViewController {
     private lazy var playButton: UIButton = {
         let button = UIButton(type: .system)
         button.setTitle("PLAY", for: .normal)
-        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 36)
+        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 28)
         // "Darker Yellow" for the font
         button.setTitleColor(UIColor(red: 186/255, green: 96/255, blue: 2/255, alpha: 1), for: .normal)
         // "Yellow" for the background
         button.backgroundColor = UIColor(red: 232/255, green: 199/255, blue: 96/255, alpha: 1)
-        button.layer.cornerRadius = 37
-        button.layer.borderWidth = 6
+        button.layer.cornerRadius = 28
+        button.layer.borderWidth = 5
         // "Dark Yellow" for the border
         button.layer.borderColor = UIColor(red: 249/255, green: 192/255, blue: 6/255, alpha: 1).cgColor
         
         // Add shadow
         button.layer.shadowColor = UIColor.black.cgColor
-        button.layer.shadowOffset = CGSize(width: 0, height: 4)
+        button.layer.shadowOffset = CGSize(width: 0, height: 3)
         button.layer.shadowOpacity = 0.3
-        button.layer.shadowRadius = 5
+        button.layer.shadowRadius = 4
         
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(handlePlay), for: .touchUpInside)
@@ -338,13 +338,13 @@ class MenuViewController: UIViewController {
             raceButton.heightAnchor.constraint(equalToConstant: 60),
 
             // Play button above the race button
-            playButton.bottomAnchor.constraint(equalTo: raceButton.topAnchor, constant: -15),
+            playButton.bottomAnchor.constraint(equalTo: raceButton.topAnchor, constant: -12),
             playButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            playButton.widthAnchor.constraint(equalToConstant: 300),
-            playButton.heightAnchor.constraint(equalToConstant: 90),
+            playButton.widthAnchor.constraint(equalToConstant: 225),
+            playButton.heightAnchor.constraint(equalToConstant: 70),
             
             // Stats container above the play button
-            statsContainerStackView.bottomAnchor.constraint(equalTo: playButton.topAnchor, constant: -25),
+            statsContainerStackView.bottomAnchor.constraint(equalTo: playButton.topAnchor, constant: -20),
             statsContainerStackView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
             statsContainerStackView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
 

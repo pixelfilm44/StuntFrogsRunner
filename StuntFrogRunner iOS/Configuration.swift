@@ -266,8 +266,8 @@ struct Configuration {
         
         // MARK: - Snake Spawning
         
-        /// Difficulty level when snakes start appearing (level 2 = 1000m)
-        static let snakeStartLevel: Int = 2
+        /// Minimum score before snakes can appear
+        static let snakeStartScore: Int = 3000
         /// Base probability of spawning a snake (once unlocked)
         static let baseSnakeProbability: Double = 0.08
         /// Additional snake probability per level after unlock
@@ -277,9 +277,11 @@ struct Configuration {
         /// Maximum snakes on screen at once
         static let snakeMaxOnScreen: Int = 3
         
-        static func snakeProbability(forLevel level: Int) -> Double {
-            guard level >= snakeStartLevel else { return 0.0 }
-            let effectiveLevel = level - snakeStartLevel
+        static func snakeProbability(forScore score: Int) -> Double {
+            guard score >= snakeStartScore else { return 0.0 }
+            let snakeStartLevel = snakeStartScore / scalingInterval
+            let currentLevel = level(forScore: score)
+            let effectiveLevel = currentLevel - snakeStartLevel
             return min(maxSnakeProbability, baseSnakeProbability + (Double(effectiveLevel) * snakeProbabilityPerLevel))
         }
     }

@@ -886,7 +886,7 @@ class VFXManager {
     ///   - color: The color of the ripples (adjust based on weather/environment)
     ///   - rippleCount: Number of concentric ripples to spawn (default 3)
     ///   - offset: Optional position offset from the parent's center (default .zero means center of parent)
-    func spawnRippleEffect(parentedTo parentNode: SKNode, color: UIColor = .white, rippleCount: Int = 3, offset: CGPoint = .zero) {
+    func spawnRippleEffect(parentedTo parentNode: SKNode, color: UIColor = .white, rippleCount: Int = 2, offset: CGPoint = .zero) {
         // Create ripples directly on the parent node without an intermediate container
         // This reduces node count and improves performance for multiple simultaneous ripples
         for i in 0..<rippleCount {

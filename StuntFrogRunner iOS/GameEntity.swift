@@ -106,8 +106,11 @@ class Frog: GameEntity {
     
     // Preloaded textures for performance
     private static let sitTexture = SKTexture(imageNamed: "frogSit")
+    private static let sitLvTexture = SKTexture(imageNamed: "frogSitLv")
     private static let leapTexture = SKTexture(imageNamed: "frogLeap")
+    private static let leapLvTexture = SKTexture(imageNamed: "frogLeapLv")
     private static let jumpTexture = SKTexture(imageNamed: "frogJump")
+    private static let jumpLvTexture = SKTexture(imageNamed: "frogJumpLv")
     private static let recoilTexture = SKTexture(imageNamed: "frogRecoil")
     private static let cannonTexture = SKTexture(imageNamed: "cannon")
     private static let drowningTextures: [SKTexture] = [
@@ -189,11 +192,7 @@ class Frog: GameEntity {
         setFrogTexture(Frog.sitTexture, height: Frog.frogSitHeight)
         bodyNode.addChild(frogSprite)
         
-        vestNode.strokeColor = .orange
-        vestNode.lineWidth = 4
-        vestNode.fillColor = .clear
-        vestNode.isHidden = true
-        bodyNode.addChild(vestNode)
+      
     }
     
     func update(dt: TimeInterval, weather: WeatherType) {
@@ -327,7 +326,7 @@ class Frog: GameEntity {
         for texture in Frog.drowningTextures {
             let setTextureAction = SKAction.run {
                 // Use frogSitHeight as a reasonable height for the wailing frames, preserving aspect ratio.
-                self.setFrogTexture(texture, height: Frog.frogSitHeight)
+                self.setFrogTexture(texture, height: Frog.frogSitHeight * 1.5)
             }
             let waitAction = SKAction.wait(forDuration: timePerFrame)
             actions.append(setTextureAction)
@@ -542,11 +541,14 @@ class Frog: GameEntity {
             
             switch animationState {
             case .sitting:
-                setFrogTexture(Frog.sitTexture, height: Frog.frogSitHeight)
+                let texture = buffs.vest > 0 ? Frog.sitLvTexture : Frog.sitTexture
+                setFrogTexture(texture, height: Frog.frogSitHeight)
             case .leaping:
-                setFrogTexture(Frog.leapTexture, height: Frog.frogLeapHeight)
+                let texture = buffs.vest > 0 ? Frog.leapLvTexture : Frog.leapTexture
+                setFrogTexture(texture, height: Frog.frogLeapHeight)
             case .jumping:
-                setFrogTexture(Frog.jumpTexture, height: Frog.frogJumpHeight)
+                let texture = buffs.vest > 0 ? Frog.jumpLvTexture : Frog.jumpTexture
+                setFrogTexture(texture, height: Frog.frogJumpHeight)
             case .recoiling:
                 setFrogTexture(Frog.recoilTexture, height: Frog.frogRecoilHeight)
             case .cannon:
@@ -570,7 +572,8 @@ class Frog: GameEntity {
         
         // Immediately transition to leaping state
         animationState = .leaping
-        setFrogTexture(Frog.leapTexture, height: Frog.frogLeapHeight)
+        let texture = buffs.vest > 0 ? Frog.leapLvTexture : Frog.leapTexture
+        setFrogTexture(texture, height: Frog.frogLeapHeight)
         
         SoundManager.shared.play("jump")
     }
@@ -591,7 +594,8 @@ class Frog: GameEntity {
         else {
             // Transition to sitting state
             animationState = .sitting
-            setFrogTexture(Frog.sitTexture, height: Frog.frogSitHeight)
+            let texture = buffs.vest > 0 ? Frog.sitLvTexture : Frog.sitTexture
+            setFrogTexture(texture, height: Frog.frogSitHeight)
         }
         let isRain = (weather == .rain)
         let isIce = (pad.type == .ice)
@@ -620,7 +624,8 @@ class Frog: GameEntity {
         
         // Transition to leaping state since we're bouncing up
         animationState = .leaping
-        setFrogTexture(Frog.leapTexture, height: Frog.frogLeapHeight)
+        let texture = buffs.vest > 0 ? Frog.leapLvTexture : Frog.leapTexture
+        setFrogTexture(texture, height: Frog.frogLeapHeight)
         
         HapticsManager.shared.playImpact(.heavy)
     }

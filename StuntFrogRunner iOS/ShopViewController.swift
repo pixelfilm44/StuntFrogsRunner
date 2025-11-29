@@ -202,14 +202,14 @@ class ShopViewController: UIViewController {
             cost = Configuration.Shop.lifevest4PackCost
             maxLevel = -1 // Indicates no max level
             title.text = "Life Vest (4-Pack)"
-            desc.text = "Get 4 Life Vests. You have: \(currentItems)"
+            desc.text = "Get a life vest every time you start a round for 4 rounds. You have: \(currentItems)"
         case .honeyPack:
             let currentItems = PersistenceManager.shared.honeyItems
             currentLevel = currentItems
             cost = Configuration.Shop.honey4PackCost
             maxLevel = -1 // Indicates no max level
             title.text = "Honey Jars (4-Pack)"
-            desc.text = "Get 4 Honey Jars. You have: \(currentItems)"
+            desc.text = "Get a honey jar every time you start a round for 4 rounds. You have: \(currentItems)"
         }
         
         let userCoins = PersistenceManager.shared.totalCoins

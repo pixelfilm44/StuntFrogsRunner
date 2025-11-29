@@ -47,6 +47,12 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private var waterTilesHigh = 0
     private let flotsamNode = SKNode()
     
+    // --- Performance Improvement: Ripple Pool ---
+    // A pool of reusable sprite nodes for water ripples.
+    private lazy var rippleTexture: SKTexture = self.createRippleTexture()
+    private var ripplePool: [SKSpriteNode] = []
+    private let ripplePoolSize = 20
+    
     // MARK: - HUD Elements
     private let scoreLabel = SKLabelNode(fontNamed: Configuration.Fonts.primaryBold)
     private let coinLabel = SKLabelNode(fontNamed: Configuration.Fonts.primaryBold)
@@ -126,6 +132,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         setupCountdownLabel()
         setupAchievementCard()
         setupInput()
+        setupRipplePool()
         startSpawningLeaves()
         //startSpawningFlotsam()
         collisionManager.delegate = self
@@ -149,6 +156,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         waterTilesNode.zPosition = -100
         worldNode.addChild(waterTilesNode)
         createWaterTiles()
+        animateWaterTiles()
         
         // Weather effects (rain, snow, etc.) are parented to the camera for screen-space effects
         weatherNode.zPosition = Layer.overlay - 1 // Just behind the full-screen overlay
@@ -369,6 +377,12 @@ class GameScene: SKScene, CollisionManagerDelegate {
                 let tile = SKSpriteNode(texture: waterTexture)
                 tile.size = tileSize
                 
+                // Flip every other tile horizontally in a checkerboard pattern
+                // to create a more seamless, less repetitive texture.
+                if (row + col) % 2 == 1 {
+                    tile.xScale = -1.0
+                }
+                
                 let xPos = (CGFloat(col) * tileSize.width) - (gridWidth / 2) + (tileSize.width / 2)
                 let yPos = (CGFloat(row) * tileSize.height) - (gridHeight / 2) + (tileSize.height / 2)
                 tile.position = CGPoint(x: xPos, y: yPos)
@@ -380,6 +394,28 @@ class GameScene: SKScene, CollisionManagerDelegate {
                 waterTilesNode.addChild(tile)
             }
         }
+    }
+    
+    /// Animates the water tile container for a gentle ebb and flow effect.
+    /// This is performant as it only animates one node.
+    private func animateWaterTiles() {
+        // To ensure we don't add multiple animations if this were ever called again
+        waterTilesNode.removeAction(forKey: "waterAnimation")
+        
+        let horizontalDrift: CGFloat = 8.0
+        let verticalDrift: CGFloat = 4.0
+        let driftDuration: TimeInterval = 6.0
+
+        let moveRightUp = SKAction.moveBy(x: horizontalDrift, y: verticalDrift, duration: driftDuration / 2)
+        moveRightUp.timingMode = .easeInEaseOut
+
+        let moveLeftDown = SKAction.moveBy(x: -horizontalDrift, y: -verticalDrift, duration: driftDuration / 2)
+        moveLeftDown.timingMode = .easeInEaseOut
+
+        let moveSequence = SKAction.sequence([moveRightUp, moveLeftDown])
+        let moveBackAndForth = SKAction.repeatForever(moveSequence)
+        
+        waterTilesNode.run(moveBackAndForth, withKey: "waterAnimation")
     }
     
     /// Returns the appropriate water texture name based on current weather
@@ -419,28 +455,94 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
     }
     
-    /// Spawns animated water ripples at the specified position
-    /// Spawns water ripples parented to a pad so they follow moving pads
-    /// Uses GPU-accelerated SKAction animations for optimal performance
-    private func spawnWaterRipple(for pad: Pad) {
-        // Adjust color based on weather
-        let rippleColor: UIColor = switch currentWeather {
-        case .sunny: .white.withAlphaComponent(0.7)
-        case .rain: .cyan.withAlphaComponent(0.8)
-        case .night: .cyan.withAlphaComponent(0.5)
-        case .winter: .white.withAlphaComponent(0.6)
+    // MARK: - Water Ripples (Optimized)
+    
+    private func createRippleTexture() -> SKTexture {
+        let size = CGSize(width: 128, height: 128)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { ctx in
+            let rect = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
+            let path = UIBezierPath(ovalIn: rect)
+            UIColor.white.setFill()
+            path.fill()
         }
-        
-        // Use the new parented ripple effect from VFXManager
-        // Ripples are now children of the pad, so they follow moving pads automatically
-        VFXManager.shared.spawnRippleEffect(
-            parentedTo: pad,
-            color: rippleColor,
-            rippleCount: 3
-        )
+        return SKTexture(image: image)
     }
     
-    /// Spawns water ripples parented to any node (for crocodiles, etc.)
+    private func setupRipplePool() {
+        for _ in 0..<ripplePoolSize {
+            let ripple = SKSpriteNode(texture: rippleTexture)
+            ripple.isHidden = true
+            ripple.blendMode = .add // Additive blending for a nice water effect
+            ripplePool.append(ripple)
+        }
+    }
+    
+    private func spawnRipples(parentedTo node: SKNode, color: UIColor, rippleCount: Int, isDramatic: Bool) {
+        let delayBetweenRipples = isDramatic ? 0.25 : 0.3
+        
+        for i in 0..<rippleCount {
+            let delay = (Double(i) * delayBetweenRipples)
+            
+            run(SKAction.wait(forDuration: delay)) { [weak self] in
+                if isDramatic {
+                    self?.spawnSingleDramaticRipple(parentedTo: node, color: color)
+                } else {
+                    self?.spawnSingleRipple(parentedTo: node, color: color)
+                }
+            }
+        }
+    }
+
+    private func spawnSingleRipple(parentedTo node: SKNode, color: UIColor) {
+        guard let ripple = ripplePool.first(where: { $0.parent == nil }) else { return }
+    
+        ripple.isHidden = false
+        ripple.color = color
+        ripple.colorBlendFactor = 1.0
+        ripple.alpha = 0.7
+        ripple.setScale(0.1)
+        // Position the ripple at the lilypad's location in the world
+        ripple.position = node.position
+        // Set zPosition to be below pads but above water
+        ripple.zPosition = Layer.water + 1
+        
+        // Add to the worldNode, not the lilypad node
+        worldNode.addChild(ripple)
+        
+        let scaleUp = SKAction.scale(to: 1.0, duration: 1.5)
+        scaleUp.timingMode = .easeOut
+        let fadeOut = SKAction.fadeOut(withDuration: 1.5)
+        
+        let group = SKAction.group([scaleUp, fadeOut])
+        ripple.run(SKAction.sequence([group, .removeFromParent()]))
+    }
+
+    private func spawnSingleDramaticRipple(parentedTo node: SKNode, color: UIColor) {
+        guard let ripple = ripplePool.first(where: { $0.parent == nil }) else { return }
+    
+        ripple.isHidden = false
+        ripple.color = color
+        ripple.colorBlendFactor = 1.0
+        ripple.alpha = 1.0
+        ripple.setScale(0.1)
+        // Position the ripple at the parent's location in the world
+        ripple.position = node.position
+        // Set zPosition to be below pads but above water
+        ripple.zPosition = Layer.water + 1
+    
+        // Add to the worldNode, not the lilypad node
+        worldNode.addChild(ripple)
+        
+        let scaleUp = SKAction.scale(to: 2.5, duration: 1.8)
+        scaleUp.timingMode = .easeOut
+        let fadeOut = SKAction.fadeOut(withDuration: 1.8)
+        
+        let group = SKAction.group([scaleUp, fadeOut])
+        ripple.run(SKAction.sequence([group, .removeFromParent()]))
+    }
+
+    /// Spawns animated water ripples parented to the specified node.
     private func spawnWaterRipple(for node: SKNode) {
         // Adjust color based on weather
         let rippleColor: UIColor = switch currentWeather {
@@ -450,12 +552,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         case .winter: .white.withAlphaComponent(0.6)
         }
         
-        // Use the new parented ripple effect from VFXManager
-        VFXManager.shared.spawnRippleEffect(
-            parentedTo: node,
-            color: rippleColor,
-            rippleCount: 2
-        )
+        spawnRipples(parentedTo: node, color: rippleColor, rippleCount: 2, isDramatic: false)
     }
     
     private func setupHUD() {
@@ -1499,9 +1596,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
             enemies.append(enemy)
         }
         
-        // Snake spawning - snakes appear after difficulty level 2 (1000m)
+        // Snake spawning - snakes appear after 3000m
         // They move from left to right across the screen
-        let snakeProb = Configuration.Difficulty.snakeProbability(forLevel: difficultyLevel)
+        let snakeProb = Configuration.Difficulty.snakeProbability(forScore: scoreVal)
         if Double.random(in: 0...1) < snakeProb && snakes.count < Configuration.Difficulty.snakeMaxOnScreen {
             spawnSnake(nearY: newY)
         }
@@ -1656,7 +1753,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // Visual and haptic feedback
         pad.playLandingSquish()
-        spawnWaterRipple(for: pad)  // Ripples now parent to pad and follow it!
+        //spawnWaterRipple(for: pad)  // Ripples now parent to pad and follow it!
         HapticsManager.shared.playImpact(.light)
         
         // Track for challenges
@@ -1673,12 +1770,20 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Spawn ghost when frog disturbs a grave
         if pad.type == .grave && !pad.hasSpawnedGhost {
             pad.hasSpawnedGhost = true
-            SoundManager.shared.play("ghost")
-            HapticsManager.shared.playNotification(.warning)
             
-            let ghost = Enemy(position: CGPoint(x: pad.position.x, y: pad.position.y + 40), type: "GHOST")
-            worldNode.addChild(ghost)
-            enemies.append(ghost)
+            let waitAction = SKAction.wait(forDuration: 2.0)
+            let spawnAction = SKAction.run { [weak self, weak pad] in
+                guard let self = self, let pad = pad, pad.parent != nil else { return }
+                
+                SoundManager.shared.play("ghost")
+                HapticsManager.shared.playNotification(.warning)
+                
+                let ghost = Enemy(position: CGPoint(x: pad.position.x, y: pad.position.y + 40), type: "GHOST")
+                self.worldNode.addChild(ghost)
+                self.enemies.append(ghost)
+            }
+            
+            self.run(SKAction.sequence([waitAction, spawnAction]))
         }
     }
     
@@ -1835,15 +1940,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
     }
     
     /// Creates expanding concentric ripples at the drowning location
-    /// Ripples are parented to the frog node so they stay at the drowning location
     private func spawnDrowningRipples() {
-        // Use the new parented dramatic ripples from VFXManager
-        // Parent to frog so ripples stay at drowning location even if frog node moves during animation
-        VFXManager.shared.spawnDramaticRipples(
-            parentedTo: frog,
-            color: .white,
-            rippleCount: 4
-        )
+        spawnRipples(parentedTo: frog, color: .white, rippleCount: 4, isDramatic: true)
     }
     
     /// Creates upward splash particles when frog hits the water
