@@ -19,7 +19,7 @@ struct Configuration {
     struct Dimensions {
         static let riverWidth: CGFloat = 600.0
         static let minPadRadius: CGFloat = 45.0
-        static let maxPadRadius: CGFloat = 85.0
+        static let maxPadRadius: CGFloat = 105.0
         static let padSpacing: CGFloat = 10.0  // Minimum gap between lily pads
         static let frogRadius: CGFloat = 20.0
         
@@ -34,6 +34,8 @@ struct Configuration {
         static let rain = SKColor(red: 44/255, green: 62/255, blue: 80/255, alpha: 1)
         static let night = SKColor(red: 12/255, green: 21/255, blue: 32/255, alpha: 1)
         static let winter = SKColor(red: 160/255, green: 190/255, blue: 220/255, alpha: 1)
+        static let desert = SKColor(red: 240/255, green: 210/255, blue: 120/255, alpha: 1) // Sandy sky for desert
+        static let blackVoid = SKColor.black // Instant death water for desert
     }
     
     /// Centralized font configuration for all UI elements
@@ -183,6 +185,12 @@ struct Configuration {
         static let boatRaceReward: Int = 100
         static let cannonJumpsPerRun = 3
 
+        // MARK: - Weather-Specific Rules
+        
+        /// Determines if falling in water is instant death for a given weather type.
+        static func isInstantDeathWater(for weather: WeatherType) -> Bool {
+            return weather == .desert
+        }
     }
     
     /// Progressive difficulty settings - scales every 500m traveled
@@ -261,8 +269,11 @@ struct Configuration {
         static let crocodileMinScore: Int = 2500
         /// Maximum number of crocodiles that can appear in a single run
         static let crocodileMaxPerRun: Int = 2
-        /// Probability of spawning a crocodile near a water lily pad
-        static let crocodileSpawnProbability: Double = 0.15
+        /// Probability of spawning a crocodile near a water lily pad. Zero in desert.
+        static func crocodileSpawnProbability(for weather: WeatherType) -> Double {
+            guard weather != .desert else { return 0.0 }
+            return 0.15
+        }
         
         // MARK: - Snake Spawning
         
@@ -283,6 +294,26 @@ struct Configuration {
             let currentLevel = level(forScore: score)
             let effectiveLevel = currentLevel - snakeStartLevel
             return min(maxSnakeProbability, baseSnakeProbability + (Double(effectiveLevel) * snakeProbabilityPerLevel))
+        }
+        
+        // MARK: - Cactus Spawning (Desert Only)
+        
+        /// Minimum score before cacti can appear in the desert
+        static let cactusStartScore: Int = 2000
+        /// Base probability of a cactus spawning on a lily pad (once unlocked)
+        static let baseCactusProbability: Double = 0.10
+        /// Additional cactus probability per difficulty level
+        static let cactusProbabilityPerLevel: Double = 0.03
+        /// Maximum cactus spawn probability
+        static let maxCactusProbability: Double = 0.30
+        
+        /// Calculates the probability of a cactus spawning. Returns 0 if not in desert.
+        static func cactusProbability(forScore score: Int, weather: WeatherType) -> Double {
+            guard weather == .desert, score >= cactusStartScore else { return 0.0 }
+            let cactusStartLevel = cactusStartScore / scalingInterval
+            let currentLevel = level(forScore: score)
+            let effectiveLevel = currentLevel - cactusStartLevel
+            return min(maxCactusProbability, baseCactusProbability + (Double(effectiveLevel) * cactusProbabilityPerLevel))
         }
     }
     
@@ -312,5 +343,5 @@ struct Configuration {
 }
 
 enum WeatherType: String, CaseIterable {
-    case sunny, night, rain, winter
+    case sunny, desert, night, rain, winter
 }

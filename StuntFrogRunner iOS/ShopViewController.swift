@@ -171,7 +171,7 @@ class ShopViewController: UIViewController {
             maxLevel = 1
             currentLevel = isPurchased ? 1 : 0
             title.text = "Log Jumper"
-            desc.text = "Land on Logs safely!"
+            desc.text = "Land on logs safely!"
         case .cannonJump:
             isPurchased = PersistenceManager.shared.hasCannonJump
             cost = Configuration.Shop.cannonJumpCost
@@ -187,7 +187,7 @@ class ShopViewController: UIViewController {
             currentLevel = isPurchased ? 1 : 0
             isUnlockItem = true
             title.text = "Super Jump ⚡️"
-            desc.text = "Double Jump Range + Invincible"
+            desc.text = "Double jump range + invincible"
         case .rocketJump:
             isPurchased = PersistenceManager.shared.hasRocketJump
             cost = Configuration.Shop.rocketJumpCost

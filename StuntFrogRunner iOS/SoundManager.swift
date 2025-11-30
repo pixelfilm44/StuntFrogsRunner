@@ -30,6 +30,7 @@ class SoundManager: NSObject, AVAudioPlayerDelegate {
         case rain = "rain"
         case night = "night"
         case winter = "wind"
+        case desert = "windrattle"
     }
     
     private override init() {
@@ -371,6 +372,8 @@ class VFXManager {
             return .black.withAlphaComponent(0.35)
         case .winter:
             return .white.withAlphaComponent(0.25)
+        case .desert:
+            return .orange.withAlphaComponent(0.25)
         }
     }
 
@@ -390,6 +393,8 @@ class VFXManager {
             emitter?.position = .zero
             emitter?.zPosition = Layer.pad + 1 // Fireflies should be in the world, not stuck to screen
         case .sunny:
+            emitter = nil
+        case .desert:
             emitter = nil
         }
         return emitter

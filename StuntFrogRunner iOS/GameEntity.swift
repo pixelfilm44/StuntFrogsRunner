@@ -649,6 +649,8 @@ class Pad: GameEntity {
     private static let rainTexture = SKTexture(imageNamed: "lilypadRain")
     private static let iceTexture = SKTexture(imageNamed: "lilypadIce")
     private static let snowTexture = SKTexture(imageNamed: "lilypadSnow")
+    private static let desertTexture = SKTexture(imageNamed: "lilypadDesert")
+
     private static let graveTexture = SKTexture(imageNamed: "lilypadGrave")
     private static let shrinkTexture = SKTexture(imageNamed: "lilypadShrink")
     private static let waterLilyTexture = SKTexture(imageNamed: "lilypadWater")
@@ -737,6 +739,8 @@ class Pad: GameEntity {
                 texture = Pad.waterLilyRainTexture
             case .winter:
                 texture = Pad.waterLilySnowTexture
+            case .desert:
+                texture = Pad.waterLilyTexture
             }
         } else {
             switch weather {
@@ -749,6 +753,8 @@ class Pad: GameEntity {
             
             case .winter:
                 texture = Pad.snowTexture
+            case .desert:
+                texture = Pad.desertTexture
             }
         }
         
@@ -774,12 +780,55 @@ class Pad: GameEntity {
             sprite.texture = texture
         }
     }
+    
+    /// Smoothly transforms the pad to its desert variant over a duration.
+    func transformToDesert(duration: TimeInterval) {
+        // Only transform pads that can change appearance.
+        guard type == .normal || type == .moving || type == .shrinking || type == .waterLily else { return }
+        
+        let newTexture = SKTexture(imageNamed: "lilypadDesert")
+        
+        // Don't re-transform if it's already the correct texture
+        guard let sprite = padSprite, sprite.texture?.hash != newTexture.hash else { return }
+
+        // Create a cross-fade effect
+        let crossfadeDuration = duration * 0.9 // Crossfade over most of the duration
+        let oldSprite = self.padSprite
+        
+        let newSprite = SKSpriteNode(texture: newTexture)
+        newSprite.size = sprite.size
+        newSprite.alpha = 0
+        newSprite.zRotation = sprite.zRotation
+        addChild(newSprite)
+        self.padSprite = newSprite
+
+        // Add a "drying out" effect: colorize to a sandy brown then fade the colorization out.
+        let dryColor = SKAction.colorize(with: UIColor(red: 0.7, green: 0.5, blue: 0.3, alpha: 1.0), colorBlendFactor: 0.6, duration: crossfadeDuration * 0.6)
+        let normalizeColor = SKAction.colorize(withColorBlendFactor: 0.0, duration: crossfadeDuration * 0.4)
+        let colorSequence = SKAction.sequence([dryColor, normalizeColor])
+        newSprite.run(colorSequence)
+        
+        // Fade in the new sprite and fade out the old one.
+        newSprite.run(SKAction.fadeIn(withDuration: crossfadeDuration))
+        oldSprite?.run(SKAction.sequence([
+            SKAction.fadeOut(withDuration: crossfadeDuration),
+            SKAction.removeFromParent()
+        ]))
+        
+        // After transformation, water lilies become static desert pads.
+        if type == .waterLily {
+            self.type = .normal
+            self.moveSpeed = 0 // Stop moving
+        }
+    }
+    
     /// Plays a subtle squish animation when the frog lands on the pad.
     /// Uses SKAction for GPU-accelerated animation with no performance impact.
     func playLandingSquish() {
         // Don't animate logs or shrinking pads (shrinking has its own animation)
         guard type != .log && type != .shrinking else { return }
         
+        if currentWeather == .desert { return }
         // Remove any existing squish action to avoid stacking
         removeAction(forKey: "landingSquish")
         

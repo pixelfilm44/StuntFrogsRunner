@@ -113,11 +113,15 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private var currentWeather: WeatherType = .sunny
     private let weatherChangeInterval: Int = 600 // in meters
     private var nextWeatherChangeScore: Int = 600
+    private var isDesertTransitionPending: Bool = false
     private var previousRocketState: RocketState = .none
     private var ridingCrocodile: Crocodile? = nil  // Currently riding crocodile
     private var crocRideVignetteNode: SKSpriteNode?  // Vignette overlay for croc ride
     private var baseMusic: SoundManager.Music = .gameplay
     private var drowningGracePeriodTimer: TimeInterval?
+    
+    // MARK: - Cutscene State
+    private var isInCutscene = false
     
     // MARK: - Challenge Tracking
     private var padsLandedThisRun: Int = 0
@@ -423,6 +427,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         switch currentWeather {
         case .night:
             return "waterNight"
+        case.desert:
+            return "waterSand"
         default:
             return "water"
         }
@@ -550,6 +556,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         case .rain: .cyan.withAlphaComponent(0.8)
         case .night: .cyan.withAlphaComponent(0.5)
         case .winter: .white.withAlphaComponent(0.6)
+        case .desert: .white.withAlphaComponent(0.6)
         }
         
         spawnRipples(parentedTo: node, color: rippleColor, rippleCount: 2, isDramatic: false)
@@ -1032,6 +1039,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         descendBg.isHidden = true
         setWeather(.sunny, duration: 0.0)
         stopDrowningGracePeriod()
+        
+        // Reset cutscene state for a new game
+        isInCutscene = false
+        isDesertTransitionPending = false
 
         if gameMode == .beatTheBoat {
             raceState = .countdown
@@ -1138,7 +1149,12 @@ class GameScene: SKScene, CollisionManagerDelegate {
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         let dt = currentTime - lastUpdateTime
         lastUpdateTime = currentTime
-        guard coordinator?.currentState == .playing && !isGameEnding else { return }
+        
+        // Pause all gameplay logic during cutscenes.
+        guard coordinator?.currentState == .playing && !isGameEnding && !isInCutscene else { return }
+        
+        // Check if a pending desert transition can be started.
+        checkPendingDesertTransition()
         
         frog.update(dt: dt, weather: currentWeather)
         for pad in pads { pad.update(dt: dt) }
@@ -1317,8 +1333,18 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let all = WeatherType.allCases
         guard let idx = all.firstIndex(of: currentWeather) else { return }
         let nextIdx = (idx + 1) % all.count
-        setWeather(all[nextIdx], duration: 60.0)
+        let nextWeather = all[nextIdx]
+
+        if nextWeather == .desert {
+            // The cutscene should not start mid-jump.
+            // Set a flag to trigger it once the frog has landed safely.
+            isDesertTransitionPending = true
+        } else {
+            // For all other weather types, use the gradual transition
+            setWeather(nextWeather, duration: 60.0)
+        }
     }
+
     private func setWeather(_ type: WeatherType, duration: TimeInterval) {
         let oldWeather = self.currentWeather
         // No change if weather is the same, unless it's an instant setup (duration 0)
@@ -1352,6 +1378,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         case .winter: .winter
         case .night: .night
         case .sunny: nil
+        case .desert: .desert
         }
         SoundManager.shared.playWeatherSFX(sfx)
 
@@ -1360,7 +1387,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
             pad.updateColor(weather: type, duration: duration)
         }
 
-        let needsWaterTextureSwap = (oldWeather == .night && type != .night) || (oldWeather != .night && type == .night)
+        let needsWaterTextureSwap = (oldWeather == .night && type != .night) || (oldWeather != .night && type == .night) || (oldWeather == .desert && type != .desert) || (oldWeather != .desert && type == .desert)
         transitionWaterColor(needsTextureSwap: needsWaterTextureSwap, duration: duration)
     }
     
@@ -1424,6 +1451,76 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
     }
     
+    // MARK: - Desert Cutscene
+    
+    private func checkPendingDesertTransition() {
+        // Start the desert cutscene only if the transition is pending
+        // and the frog is safely on a pad (not mid-air).
+        if isDesertTransitionPending && frog.onPad != nil {
+            isDesertTransitionPending = false // Consume the flag
+            startDesertCutscene()
+        }
+    }
+    
+    private func startDesertCutscene() {
+        isInCutscene = true
+        isUserInteractionEnabled = false
+        
+        frog.velocity = .zero // Stop frog movement
+        SoundManager.shared.stopMusic(fadeDuration: 1.0)
+        
+        let cutsceneDuration: TimeInterval = 4.0
+        
+        playDesertTransition(duration: cutsceneDuration)
+        
+        // After the animation duration, end the cutscene
+        let wait = SKAction.wait(forDuration: cutsceneDuration)
+        let end = SKAction.run { [weak self] in
+            self?.endDesertCutscene()
+        }
+        run(SKAction.sequence([wait, end]))
+    }
+
+    private func playDesertTransition(duration: TimeInterval) {
+        let oldWeather = self.currentWeather
+        let newWeather: WeatherType = .desert
+
+        // --- Visual & Audio Transitions ---
+        VFXManager.shared.transitionWeather(from: oldWeather, to: newWeather, in: self, duration: duration)
+        SoundManager.shared.playWeatherSFX(.desert, fadeDuration: duration)
+
+        // --- In-World Object Transitions ---
+        for pad in pads {
+            pad.transformToDesert(duration: duration)
+        }
+
+        // --- Custom Water Evaporation Animation ---
+        let evaporationDuration = duration * 0.8
+        let evaporateAction = SKAction.group([
+            SKAction.scaleY(to: 0.05, duration: evaporationDuration),
+            SKAction.fadeOut(withDuration: evaporationDuration)
+        ])
+        evaporateAction.timingMode = .easeIn
+        
+        self.waterTilesNode.enumerateChildNodes(withName: "waterTile") { node, _ in
+            node.run(evaporateAction)
+        }
+    }
+
+    private func endDesertCutscene() {
+        // Officially set the game state to desert. This updates logic like instant-death water.
+        self.currentWeather = .desert
+        
+        // Replace the evaporated water tiles with permanent sand tiles
+        recreateWaterTiles()
+        
+        isInCutscene = false
+        isUserInteractionEnabled = true
+        
+        // Resume music.
+        SoundManager.shared.playMusic(baseMusic)
+    }
+    
     /// Recreates water tiles with the appropriate texture for current weather
     private func recreateWaterTiles() {
         waterTilesNode.removeAllChildren()
@@ -1436,6 +1533,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         case .rain: return Configuration.Colors.rain
         case .night: return Configuration.Colors.night
         case .winter: return Configuration.Colors.winter
+        case .desert: return Configuration.Colors.desert
+
         }
     }
     
@@ -1522,7 +1621,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Only spawn if: score >= 2500 and we haven't reached max crocodiles this run
         let canSpawnCrocodile = scoreVal >= Configuration.Difficulty.crocodileMinScore &&
                                 crocodilesSpawnedThisRun < Configuration.Difficulty.crocodileMaxPerRun
-        if type == .waterLily && canSpawnCrocodile && Double.random(in: 0...1) < Configuration.Difficulty.crocodileSpawnProbability {
+        if type == .waterLily && canSpawnCrocodile && Double.random(in: 0...1) < Configuration.Difficulty.crocodileSpawnProbability(for: currentWeather) {
             // Find a valid spawn position in the water (not overlapping any pads/logs)
             if let crocPosition = findCrocodileSpawnPosition(nearY: newY) {
                 // Random delay before rising (1-4 seconds)
@@ -1789,6 +1888,14 @@ class GameScene: SKScene, CollisionManagerDelegate {
     
     func didFallIntoWater() {
         guard !isGameEnding, !frog.isFloating else { return }
+
+        // Instant game over in desert, regardless of vests
+        if currentWeather == .desert {
+            isGameEnding = true
+            frog.playWailingAnimation()
+            playDrowningSequence()
+            return
+        }
 
         // If the frog was riding a crocodile, this shouldn't happen, but handle it.
         if let croc = ridingCrocodile {

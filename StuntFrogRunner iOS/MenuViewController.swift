@@ -92,17 +92,12 @@ class MenuViewController: UIViewController {
     }()
     
     private lazy var playButton: UIButton = {
-        let button = UIButton(type: .system)
+        let button = UIButton(type: .custom)
+        button.setBackgroundImage(UIImage(named: "primaryButton"), for: .normal)
         button.setTitle("PLAY", for: .normal)
         button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 28)
         // "Darker Yellow" for the font
         button.setTitleColor(UIColor(red: 186/255, green: 96/255, blue: 2/255, alpha: 1), for: .normal)
-        // "Yellow" for the background
-        button.backgroundColor = UIColor(red: 232/255, green: 199/255, blue: 96/255, alpha: 1)
-        button.layer.cornerRadius = 28
-        button.layer.borderWidth = 5
-        // "Dark Yellow" for the border
-        button.layer.borderColor = UIColor(red: 249/255, green: 192/255, blue: 6/255, alpha: 1).cgColor
         
         // Add shadow
         button.layer.shadowColor = UIColor.black.cgColor
@@ -118,16 +113,12 @@ class MenuViewController: UIViewController {
     private lazy var raceButton: UIButton = {
         let button = UIButton(type: .system)
         button.setTitle("RACE", for: .normal)
+        button.setBackgroundImage(UIImage(named: "secondaryButton"), for: .normal)
+
         button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 24)
         // Light blue text
         button.setTitleColor(UIColor(red: 93/255, green: 173/255, blue: 226/255, alpha: 1), for: .normal)
-        // Dark blue button
-        button.backgroundColor = UIColor(red: 27/255, green: 79/255, blue: 114/255, alpha: 1)
-        button.layer.cornerRadius = 25
-        button.layer.borderWidth = 4
-        // Light blue border
-        button.layer.borderColor = UIColor(red: 93/255, green: 173/255, blue: 226/255, alpha: 1).cgColor
-        
+       
         // Add shadow
         button.layer.shadowColor = UIColor.black.cgColor
         button.layer.shadowOffset = CGSize(width: 0, height: 4)
