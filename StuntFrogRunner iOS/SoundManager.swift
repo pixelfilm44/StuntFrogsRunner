@@ -373,7 +373,7 @@ class VFXManager {
         case .winter:
             return .white.withAlphaComponent(0.25)
         case .desert:
-            return .orange.withAlphaComponent(0.25)
+            return .orange.withAlphaComponent(0.20)
         }
     }
 

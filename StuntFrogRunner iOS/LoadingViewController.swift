@@ -16,6 +16,9 @@ class LoadingViewController: UIViewController {
         "water",
         "waterNight",
         "menuScreen",
+        "primaryButton",
+        "secondaryButton",
+        "waterSand",
         
         // Frog Assets
         "frogSit",
@@ -35,6 +38,7 @@ class LoadingViewController: UIViewController {
         "lilypadWaterNight",
         "lilypadWaterRain",
         "lilypadWaterSnow",
+        "lilypadWaterSand",
         
         // Object Assets
         "log",
@@ -70,26 +74,18 @@ class LoadingViewController: UIViewController {
     // MARK: - UI Elements
     
     private lazy var backgroundImageView: UIImageView = {
-        // Loads "loadingScreen.png"
         let imageView = UIImageView(image: UIImage(named: "loadingScreen"))
-        imageView.contentMode = .scaleAspectFit
-        imageView.backgroundColor = .black  // Fill letterbox areas with black
+        imageView.contentMode = .scaleAspectFill // Fills the entire screen
         imageView.clipsToBounds = true
         imageView.translatesAutoresizingMaskIntoConstraints = false
         return imageView
     }()
     
-    private lazy var containerView: UIView = {
-        let view = UIView()
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
-    }()
-    
     private lazy var titleLabel: UILabel = {
         let label = UILabel()
-        label.text = "Loading..."
+        label.text = ""
         label.numberOfLines = 2
-        label.font = UIFont(name: "Fredoka-Bold", size: 44) 
+        label.font = UIFont(name: "Fredoka-Bold", size: 44)
         label.textColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
         label.textAlignment = .center
         label.layer.shadowColor = UIColor.black.cgColor
@@ -139,28 +135,28 @@ class LoadingViewController: UIViewController {
     
     private func preloadAllAssets() {
         Task {
-            // Update status
-            await updateStatus("Loading textures...")
+            // Update status once at the beginning
+            await updateStatus("Loading Assets...")
             
-            // Preload visual assets using SpriteKit's texture preloading
-            await preloadVisualAssets()
+            // Preload all asset types concurrently for a significant speed boost.
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    await self.preloadVisualAssets()
+                }
+                
+                group.addTask {
+                    await self.preloadAudioAssets()
+                }
+                
+                group.addTask {
+                    await self.preloadMusicAssets()
+                }
+            }
             
-            // Update status
-            await updateStatus("Loading sounds...")
-            
-            // Preload audio assets
-            preloadAudioAssets()
-            
-            // Update status
-            await updateStatus("Loading music...")
-            
-            // Preload music assets
-            preloadMusicAssets()
-            
-            // Complete loading
+            // All assets are now loaded.
             await updateStatus("Ready!")
             
-            // Small delay to show "Ready!" status
+            // Small delay to show "Ready!" status before transitioning.
             try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
             
             await MainActor.run {
@@ -176,10 +172,9 @@ class LoadingViewController: UIViewController {
     }
     
     private func preloadVisualAssets() async {
-        // Create SKTextures for all visual assets
         let textures = visualAssets.map { SKTexture(imageNamed: $0) }
         
-        // Use SpriteKit's built-in texture preloading
+        // Use Swift's modern concurrency to await SpriteKit's preloading.
         await withCheckedContinuation { continuation in
             SKTexture.preload(textures) {
                 continuation.resume()
@@ -187,18 +182,18 @@ class LoadingViewController: UIViewController {
         }
     }
     
-    private func preloadAudioAssets() {
-        // Preload sound effects through SoundManager
+    private func preloadAudioAssets() async {
+        // This is a synchronous operation, but running it inside a `Task`
+        // in the `TaskGroup` prevents it from blocking the main thread.
         SoundManager.shared.preloadSounds()
     }
     
-    private func preloadMusicAssets() {
-        // Preload music tracks by initializing AVAudioPlayers
-        // This ensures the files are loaded into memory for faster playback
+    private func preloadMusicAssets() async {
+        // Preloading music by touching the file data is I/O-bound.
+        // Running this inside a `Task` is ideal.
         for musicName in musicAssets {
             if let url = Bundle.main.url(forResource: musicName, withExtension: "mp3") {
-                // Just verify the file exists and is accessible
-                // The actual AVAudioPlayer will be created when music plays
+                // Just verify the file exists and is accessible.
                 _ = try? Data(contentsOf: url, options: .mappedIfSafe)
             }
         }
@@ -207,34 +202,38 @@ class LoadingViewController: UIViewController {
     private func setupUI() {
         // Add Background
         view.addSubview(backgroundImageView)
-        view.sendSubviewToBack(backgroundImageView)
         
-        view.addSubview(containerView)
-        containerView.addSubview(titleLabel)
-        containerView.addSubview(loadingIndicator)
-        containerView.addSubview(statusLabel)
+        // Use a UIStackView for simpler, more adaptive layout.
+        let stackView = UIStackView(arrangedSubviews: [titleLabel, loadingIndicator, statusLabel])
+        stackView.axis = .vertical
+        stackView.alignment = .center
+        stackView.spacing = 20
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Set specific spacing between the title and the loading indicator.
+        stackView.setCustomSpacing(50, after: titleLabel)
+        
+        view.addSubview(stackView)
+        
+        // Adapt font sizes for different device types (iPhone vs. iPad).
+        let titleFontSize: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 64 : 44
+        let statusFontSize: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 20 : 14
+        
+        titleLabel.font = UIFont(name: "Fredoka-Bold", size: titleFontSize)
+        statusLabel.font = UIFont.systemFont(ofSize: statusFontSize, weight: .medium)
         
         NSLayoutConstraint.activate([
-            // Background
+            // Background should fill the view
             backgroundImageView.topAnchor.constraint(equalTo: view.topAnchor),
             backgroundImageView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             backgroundImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             backgroundImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             
-            containerView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            containerView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            containerView.widthAnchor.constraint(equalTo: view.widthAnchor),
-            containerView.heightAnchor.constraint(equalToConstant: 300),
-            
-            titleLabel.topAnchor.constraint(equalTo: containerView.topAnchor),
-            titleLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-            
-            loadingIndicator.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 50),
-            loadingIndicator.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-            
-            statusLabel.topAnchor.constraint(equalTo: loadingIndicator.bottomAnchor, constant: 15),
-            statusLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor)
+            // Center the stack view vertically and horizontally.
+            stackView.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            stackView.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
+            // Ensure stack view doesn't exceed the width of the screen.
+            stackView.widthAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.widthAnchor, multiplier: 0.9)
         ])
     }
 }
-

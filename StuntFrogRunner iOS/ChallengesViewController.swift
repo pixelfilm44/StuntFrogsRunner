@@ -18,7 +18,7 @@ class ChallengesViewController: UIViewController {
     private lazy var titleLabel: UILabel = {
         let label = UILabel()
         label.text = "CHALLENGES"
-        label.font = UIFont.systemFont(ofSize: 32, weight: .heavy)
+        label.font = UIFont(name: Configuration.Fonts.primaryHeavy, size: 30)
         label.textColor = .white
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -50,13 +50,11 @@ class ChallengesViewController: UIViewController {
     
     private lazy var backButton: UIButton = {
         let button = UIButton(type: .system)
-        button.setTitle("← BACK", for: .normal)
-        button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .bold)
         button.setTitleColor(.white, for: .normal)
-        button.backgroundColor = UIColor(red: 231/255, green: 76/255, blue: 60/255, alpha: 1)
-        button.layer.cornerRadius = 25
-        button.layer.borderWidth = 3
-        button.layer.borderColor = UIColor.white.cgColor
+        button.setTitle("BACK", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .bold)
+      button.setBackgroundImage(UIImage(named: "secondaryButton"), for: .normal)
+
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(handleBack), for: .touchUpInside)
         return button
@@ -207,7 +205,8 @@ class ChallengeCell: UITableViewCell {
     
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = UIFont.systemFont(ofSize: 18, weight: .bold)
+        
+        label.font = UIFont(name: Configuration.Fonts.cardHeader, size: 18)
         label.textColor = .white
         label.translatesAutoresizingMaskIntoConstraints = false
         return label

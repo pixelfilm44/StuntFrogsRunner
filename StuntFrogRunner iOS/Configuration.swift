@@ -54,6 +54,8 @@ struct Configuration {
         // MARK: - Font Names
         static let primaryBold = "Nunito-Bold"
         static let primaryHeavy = "Fredoka-Bold"
+        static let cardHeader = "Nunito-ExtraBold"
+
         
         
         // MARK: - SpriteKit Fonts (SKLabelNode)
@@ -343,5 +345,5 @@ struct Configuration {
 }
 
 enum WeatherType: String, CaseIterable {
-    case sunny, desert, night, rain, winter
+    case sunny, night, rain, winter, desert
 }

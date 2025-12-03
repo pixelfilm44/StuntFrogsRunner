@@ -46,12 +46,14 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private var waterTilesWide = 0
     private var waterTilesHigh = 0
     private let flotsamNode = SKNode()
+    private var moonlightNode: SKSpriteNode?
     
     // --- Performance Improvement: Ripple Pool ---
     // A pool of reusable sprite nodes for water ripples.
     private lazy var rippleTexture: SKTexture = self.createRippleTexture()
     private var ripplePool: [SKSpriteNode] = []
     private let ripplePoolSize = 20
+    private var frameCount: Int = 0
     
     // MARK: - HUD Elements
     private let scoreLabel = SKLabelNode(fontNamed: Configuration.Fonts.primaryBold)
@@ -223,6 +225,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
         crosshairNode.addChild(hLine)
         crosshairNode.isHidden = true
         worldNode.addChild(crosshairNode)
+
+        // Add moonlight node for night scenes
+        let moon = createMoonlightNode()
+        self.moonlightNode = moon
+        worldNode.addChild(moon)
     }
     
     private func startSpawningLeaves() {
@@ -422,6 +429,46 @@ class GameScene: SKScene, CollisionManagerDelegate {
         waterTilesNode.run(moveBackAndForth, withKey: "waterAnimation")
     }
     
+    private func createMoonlightNode() -> SKSpriteNode {
+        // The node needs to be large enough to cover the screen even with parallax.
+        // 2x screen size is a safe bet.
+        let nodeSize = CGSize(width: size.width * 2, height: size.height * 2)
+        
+        // Create the gradient texture programmatically.
+        let renderer = UIGraphicsImageRenderer(size: nodeSize)
+        let image = renderer.image { context in
+            let center = CGPoint(x: nodeSize.width / 2, y: nodeSize.height / 2)
+            let radius = nodeSize.width / 2
+            
+            // A soft, bluish-white light. Increased alpha for more visibility.
+            let colors = [UIColor.blue.withAlphaComponent(0.28).cgColor, UIColor.clear.cgColor]
+            let locations: [CGFloat] = [0.0, 1.0]
+            
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                          colors: colors as CFArray,
+                                          locations: locations) {
+                context.cgContext.drawRadialGradient(gradient,
+                                                      startCenter: center, startRadius: 0,
+                                                      endCenter: center, endRadius: radius,
+                                                      options: [])
+            }
+        }
+        
+        let texture = SKTexture(image: image)
+        let node = SKSpriteNode(texture: texture, size: nodeSize)
+        
+        // Position it above the water tiles (-100) but below everything else on the water.
+        node.zPosition = -99
+        
+        // Additive blending creates a realistic lighting effect.
+        node.blendMode = .add
+        
+        // Start hidden.
+        node.isHidden = true
+        
+        return node
+    }
+    
     /// Returns the appropriate water texture name based on current weather
     private func getWaterTextureName() -> String {
         switch currentWeather {
@@ -466,11 +513,22 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private func createRippleTexture() -> SKTexture {
         let size = CGSize(width: 128, height: 128)
         let renderer = UIGraphicsImageRenderer(size: size)
-        let image = renderer.image { ctx in
-            let rect = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
-            let path = UIBezierPath(ovalIn: rect)
-            UIColor.white.setFill()
-            path.fill()
+        let image = renderer.image { context in
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let radius = size.width / 2
+            
+            // A soft, white circle that can be tinted to create a shadow.
+            let colors = [UIColor.white.cgColor, UIColor.white.withAlphaComponent(0.0).cgColor]
+            let locations: [CGFloat] = [0.0, 1.0]
+            
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                          colors: colors as CFArray,
+                                          locations: locations) {
+                context.cgContext.drawRadialGradient(gradient,
+                                                      startCenter: center, startRadius: 0,
+                                                      endCenter: center, endRadius: radius,
+                                                      options: [])
+            }
         }
         return SKTexture(image: image)
     }
@@ -479,13 +537,14 @@ class GameScene: SKScene, CollisionManagerDelegate {
         for _ in 0..<ripplePoolSize {
             let ripple = SKSpriteNode(texture: rippleTexture)
             ripple.isHidden = true
-            ripple.blendMode = .add // Additive blending for a nice water effect
+            // Use alpha blending for shadows instead of additive for light.
+            ripple.blendMode = .alpha
             ripplePool.append(ripple)
         }
     }
     
     private func spawnRipples(parentedTo node: SKNode, color: UIColor, rippleCount: Int, isDramatic: Bool) {
-        let delayBetweenRipples = isDramatic ? 0.25 : 0.3
+        let delayBetweenRipples = isDramatic ? 0.01 : 0.02
         
         for i in 0..<rippleCount {
             let delay = (Double(i) * delayBetweenRipples)
@@ -506,7 +565,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         ripple.isHidden = false
         ripple.color = color
         ripple.colorBlendFactor = 1.0
-        ripple.alpha = 0.7
+        // Use a lower alpha for a more subtle shadow effect.
+        ripple.alpha = 0.2
         ripple.setScale(0.1)
         // Position the ripple at the lilypad's location in the world
         ripple.position = node.position
@@ -540,9 +600,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Add to the worldNode, not the lilypad node
         worldNode.addChild(ripple)
         
-        let scaleUp = SKAction.scale(to: 2.5, duration: 1.8)
+        let scaleUp = SKAction.scale(to: 1.2, duration:0.8)
         scaleUp.timingMode = .easeOut
-        let fadeOut = SKAction.fadeOut(withDuration: 1.8)
+        let fadeOut = SKAction.fadeOut(withDuration: 0.8)
         
         let group = SKAction.group([scaleUp, fadeOut])
         ripple.run(SKAction.sequence([group, .removeFromParent()]))
@@ -550,16 +610,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
 
     /// Spawns animated water ripples parented to the specified node.
     private func spawnWaterRipple(for node: SKNode) {
-        // Adjust color based on weather
-        let rippleColor: UIColor = switch currentWeather {
-        case .sunny: .white.withAlphaComponent(0.7)
-        case .rain: .cyan.withAlphaComponent(0.8)
-        case .night: .cyan.withAlphaComponent(0.5)
-        case .winter: .white.withAlphaComponent(0.6)
-        case .desert: .white.withAlphaComponent(0.6)
-        }
-        
-        spawnRipples(parentedTo: node, color: rippleColor, rippleCount: 2, isDramatic: false)
+        // Spawns a single, subtle black shadow instead of a bright ripple.
+        let shadowColor: UIColor = .white
+        spawnRipples(parentedTo: node, color: shadowColor, rippleCount: 1, isDramatic: true)
     }
     
     private func setupHUD() {
@@ -591,35 +644,52 @@ class GameScene: SKScene, CollisionManagerDelegate {
         uiNode.addChild(buffsNode)
         
         // --- Performance Improvement: Create buff indicators once ---
-        func createBuffIndicator(text: String, color: UIColor) -> SKNode {
+        func createBuffIndicator(text: String, color: UIColor, iconName: String? = nil) -> SKNode {
             let node = SKNode()
             let bg = SKShapeNode(rectOf: CGSize(width: 120, height: 24), cornerRadius: 12)
             bg.fillColor = .black.withAlphaComponent(0.5)
             bg.strokeColor = color
             bg.lineWidth = 2
             bg.position = CGPoint(x: 60, y: 0)
-            
+            bg.name = "background"
+
             let lbl = SKLabelNode(fontNamed: Configuration.Fonts.buffIndicator.name)
             lbl.text = text
             lbl.fontSize = Configuration.Fonts.buffIndicator.size
             lbl.fontColor = .white
             lbl.verticalAlignmentMode = .center
-            lbl.position = CGPoint(x: 0, y: 0)
+            lbl.name = "label"
             bg.addChild(lbl)
-            
+
+            if let iconName = iconName {
+                let icon = SKSpriteNode(imageNamed: iconName)
+                icon.size = CGSize(width: 16, height: 16)
+                icon.name = "icon"
+                bg.addChild(icon)
+
+                // Position icon on the left, label on the right
+                icon.position = CGPoint(x: -45, y: 0)
+                lbl.horizontalAlignmentMode = .left
+                lbl.position = CGPoint(x: -30, y: 0)
+            } else {
+                // Center label if no icon
+                lbl.horizontalAlignmentMode = .center
+                lbl.position = CGPoint(x: 0, y: 0)
+            }
+
             node.addChild(bg)
             node.isHidden = true
             return node
         }
 
-        vestBuffNode = createBuffIndicator(text: "VEST", color: .orange)
-        honeyBuffNode = createBuffIndicator(text: "HONEY", color: .yellow)
-        axeBuffNode = createBuffIndicator(text: "AXE", color: .brown)
-        swatterBuffNode = createBuffIndicator(text: "SWATTER", color: .green)
-        crossBuffNode = createBuffIndicator(text: "CROSS", color: .white)
-        rocketBuffNode = createBuffIndicator(text: "ROCKET", color: .red)
-        superJumpBuffNode = createBuffIndicator(text: "SUPER JUMP", color: .cyan)
-        bootsBuffNode = createBuffIndicator(text: "BOOTS", color: .blue)
+        vestBuffNode = createBuffIndicator(text: "VEST", color: .orange, iconName: "lifevest")
+        honeyBuffNode = createBuffIndicator(text: "HONEY", color: .yellow, iconName: "honeyPot")
+        axeBuffNode = createBuffIndicator(text: "AXE", color: .brown, iconName: "ax")
+        swatterBuffNode = createBuffIndicator(text: "SWATTER", color: .green, iconName: "swatter")
+        crossBuffNode = createBuffIndicator(text: "CROSS", color: .white, iconName: "cross")
+        rocketBuffNode = createBuffIndicator(text: "ROCKET", color: .red, iconName: "rocket")
+        superJumpBuffNode = createBuffIndicator(text: "SUPER JUMP", color: .cyan, iconName:  "lightning")
+        bootsBuffNode = createBuffIndicator(text: "BOOTS", color: .blue, iconName: "rainboots")
         crocRideBuffNode = createBuffIndicator(text: "CROC RIDE", color: .green)
         
         buffsNode.addChild(vestBuffNode)
@@ -866,9 +936,23 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Hide all nodes initially, we will un-hide the active ones.
         buffNodes.forEach { $0?.isHidden = true }
         
-        func updateAndPositionBuffNode(_ node: SKNode, text: String) {
-            if let label = node.children.first?.children.first as? SKLabelNode {
+        func updateAndPositionBuffNode(_ node: SKNode, text: String, showIcon: Bool = true) {
+            // Find the label by name using a recursive search.
+            if let label = node.childNode(withName: "//label") as? SKLabelNode {
                 label.text = text
+                
+                // Adjust label position based on whether the icon is shown,
+                // to keep text centered or left-aligned as needed.
+                if let icon = node.childNode(withName: "//icon") {
+                    icon.isHidden = !showIcon
+                    if showIcon {
+                        label.horizontalAlignmentMode = .left
+                        label.position = CGPoint(x: -30, y: 0)
+                    } else {
+                        label.horizontalAlignmentMode = .center
+                        label.position = CGPoint(x: 0, y: 0)
+                    }
+                }
             }
             node.position.y = yOffset
             node.isHidden = false
@@ -879,23 +963,23 @@ class GameScene: SKScene, CollisionManagerDelegate {
             updateAndPositionBuffNode(vestBuffNode, text: "VEST x\(frog.buffs.vest)")
         }
         if frog.buffs.honey > 0 {
-            updateAndPositionBuffNode(honeyBuffNode, text: "HONEY x\(frog.buffs.honey)")
+            updateAndPositionBuffNode(honeyBuffNode, text: "x\(frog.buffs.honey)")
         }
         if frog.buffs.axe > 0 {
             updateAndPositionBuffNode(axeBuffNode, text: "🪓 AXE x\(frog.buffs.axe)")
         }
         if frog.buffs.swatter > 0 {
-            updateAndPositionBuffNode(swatterBuffNode, text: "🏸 SWAT x\(frog.buffs.swatter)")
+            updateAndPositionBuffNode(swatterBuffNode, text: "x\(frog.buffs.swatter)")
         }
         if frog.buffs.cross > 0 {
-            updateAndPositionBuffNode(crossBuffNode, text: "✝️ CROSS x\(frog.buffs.cross)")
+            updateAndPositionBuffNode(crossBuffNode, text: "x\(frog.buffs.cross)")
         }
         
         if frog.rocketTimer > 0 {
             let sec = Int(ceil(Double(frog.rocketTimer) / 60.0))
-            updateAndPositionBuffNode(rocketBuffNode, text: "🚀 \(sec)s")
+            updateAndPositionBuffNode(rocketBuffNode, text: "\(sec)s")
         } else if frog.rocketState == .landing {
-            updateAndPositionBuffNode(rocketBuffNode, text: "⚠ DESCEND")
+            updateAndPositionBuffNode(rocketBuffNode, text: "⚠ DESCEND", showIcon: false)
         }
         
         if frog.buffs.superJumpTimer > 0 {
@@ -904,7 +988,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
         
         if frog.buffs.bootsCount > 0 {
-            let label = frog.isWearingBoots ? "👢 ACTIVE" : "👢 x\(frog.buffs.bootsCount)"
+            let label = frog.isWearingBoots ? "ACTIVE" : "x\(frog.buffs.bootsCount)"
             updateAndPositionBuffNode(bootsBuffNode, text: label)
             if let bg = bootsBuffNode.children.first as? SKShapeNode {
                 bg.strokeColor = frog.isWearingBoots ? .green : .blue
@@ -1150,45 +1234,99 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let dt = currentTime - lastUpdateTime
         lastUpdateTime = currentTime
         
-        // Pause all gameplay logic during cutscenes.
+        // Increment frame counter for throttling
+        frameCount += 1
+        
+        // 1. EARLY EXIT: Pause logic
         guard coordinator?.currentState == .playing && !isGameEnding && !isInCutscene else { return }
         
-        // Check if a pending desert transition can be started.
+        // 2. CHECK PENDING EVENTS (Low Cost)
         checkPendingDesertTransition()
         
+        // 3. DEFINE ACTIVE WINDOW (Optimization Core)
+        // We only care about entities roughly one screen height above and below the camera
+        let camY = cam.position.y
+        let viewHeight = size.height
+        let activeLowerBound = camY - viewHeight
+        let activeUpperBound = camY + viewHeight
+        
+        // 4. FILTER ACTIVE ENTITIES
+        // Swift's `filter` is fast, but for very large arrays, maintaining a separate "active" set is better.
+        // However, given the array sizes here, filter is sufficient and safer for now.
+        
+        // Optimization: Only filter pads that actually DO something (moving, shrinking, logs)
+        // Static pads don't need an .update() call, they only need collision checks.
+        let activePads = pads.filter { $0.position.y > activeLowerBound && $0.position.y < activeUpperBound }
+        
+        // 5. UPDATE ENTITIES
         frog.update(dt: dt, weather: currentWeather)
-        for pad in pads { pad.update(dt: dt) }
-        for enemy in enemies { enemy.update(dt: dt, target: frog.position) }
-        for crocodile in crocodiles { 
+        
+        // Only update pads that have logic (skip static ones to save CPU)
+        for pad in activePads where (pad.type == .moving || pad.type == .log || pad.type == .shrinking || pad.type == .waterLily) {
+            pad.update(dt: dt)
+        }
+        
+        // Filter and update enemies
+        let activeEnemies = enemies.filter { $0.position.y > activeLowerBound && $0.position.y < activeUpperBound }
+        for enemy in activeEnemies {
+            enemy.update(dt: dt, target: frog.position)
+        }
+        
+        // Filter and update crocodiles
+        let activeCrocs = crocodiles.filter { $0.position.y > activeLowerBound && $0.position.y < activeUpperBound }
+        for crocodile in activeCrocs {
             crocodile.update(dt: dt, frogPosition: frog.position, frogZHeight: frog.zHeight)
         }
-        for fly in flies { fly.update(dt: dt) }
         
-        // Update snakes - check if any reached the right edge and need respawning
+        // Filter flies
+        let activeFlies = flies.filter { $0.position.y > activeLowerBound && $0.position.y < activeUpperBound }
+        for fly in activeFlies { fly.update(dt: dt) }
+
+        // Update Snakes (Respond to logic)
+        // Note: We don't filter snakes strictly by Y for update because they move horizontally and might be just offscreen
         var snakesToRespawn: [Snake] = []
         for snake in snakes {
-            let reachedEnd = snake.update(dt: dt, pads: pads)
-            if reachedEnd && !snake.isDestroyed {
-                snakesToRespawn.append(snake)
+            // Optimization: Only update physics if relatively close
+            if abs(snake.position.y - camY) < viewHeight * 1.5 {
+                let reachedEnd = snake.update(dt: dt, pads: activePads)
+                if reachedEnd && !snake.isDestroyed {
+                    snakesToRespawn.append(snake)
+                }
             }
         }
-        // Respawn snakes that reached the right edge
-        for snake in snakesToRespawn {
-            respawnSnake(snake)
-        }
+        snakesToRespawn.forEach { respawnSnake($0) }
         
-        // Update frog position if riding a crocodile
+        // Ride Logic
         if let croc = ridingCrocodile, croc.isCarryingFrog {
             frog.position = croc.position
             frog.velocity = .zero
         }
         
-        collisionManager.update(frog: frog, pads: pads, enemies: enemies, coins: coins, crocodiles: crocodiles, treasureChests: treasureChests, snakes: snakes, flies: flies, boat: boat)
+        // 6. OPTIMIZED COLLISION DETECTION
+        // Pass ONLY the active entities to the collision manager.
+        // This reduces O(N*M) checks significantly.
+        let activeCoins = coins.filter { $0.position.y > activeLowerBound && $0.position.y < activeUpperBound }
+        let activeChests = treasureChests.filter { $0.position.y > activeLowerBound && $0.position.y < activeUpperBound }
+        
+        collisionManager.update(
+            frog: frog,
+            pads: activePads,
+            enemies: activeEnemies,
+            coins: activeCoins,
+            crocodiles: activeCrocs,
+            treasureChests: activeChests,
+            snakes: snakes, // Snakes count is low, pass all
+            flies: activeFlies,
+            boat: boat
+        )
+        
+        // 7. VISUALS & LOGIC
         checkWeatherChange()
-        updateWaterVisuals()
+        updateWaterVisuals() // Already optimized in previous code
         updateRaceState(dt: dt)
         updateDrowningGracePeriod(dt: dt)
         
+        // UI Updates
         if frog.rocketState == .landing {
             descendBg.isHidden = false
             let s = 1.0 + sin(currentTime * 5) * 0.05
@@ -1197,21 +1335,29 @@ class GameScene: SKScene, CollisionManagerDelegate {
             descendBg.isHidden = true
         }
         
-        // Handle rocket music transitions
         if previousRocketState != .none && frog.rocketState == .none {
             SoundManager.shared.playMusic(baseMusic)
         }
         previousRocketState = frog.rocketState
         
+        updateMoonlightPosition()
         updateCamera()
+        
+        // Optimization: Don't update HUD text every single frame if values haven't changed.
+        // (Assuming updateHUDVisuals handles internal checks, otherwise consider throttling this too)
         updateHUDVisuals()
         
+        // 8. GENERATION & CLEANUP
+        // Check generation only if we are near the top
         if let lastPad = pads.last, lastPad.position.y < cam.position.y + size.height {
             generateNextLevelSlice(lastPad: lastPad)
         }
-        cleanupOffscreenEntities()
+        
+        // THROTTLED CLEANUP: Only run cleanup every 30 frames (0.5s at 60fps)
+        if frameCount % 30 == 0 {
+            cleanupOffscreenEntities()
+        }
     }
-    
     private func updateRaceState(dt: TimeInterval) {
         guard gameMode == .beatTheBoat, raceState == .racing, let boat = boat, !isGameEnding else { return }
         
@@ -1389,6 +1535,28 @@ class GameScene: SKScene, CollisionManagerDelegate {
 
         let needsWaterTextureSwap = (oldWeather == .night && type != .night) || (oldWeather != .night && type == .night) || (oldWeather == .desert && type != .desert) || (oldWeather != .desert && type == .desert)
         transitionWaterColor(needsTextureSwap: needsWaterTextureSwap, duration: duration)
+
+        // Handle moonlight visibility with a fade for smooth transitions.
+        if let moon = moonlightNode {
+            if type == .night {
+                moon.isHidden = false
+                if duration > 0 {
+                    moon.run(SKAction.fadeAlpha(to: 1.0, duration: duration))
+                } else {
+                    moon.alpha = 1.0
+                }
+            } else if oldWeather == .night {
+                if duration > 0 {
+                    // Hide after fade out to stop processing it.
+                    let fadeOut = SKAction.fadeAlpha(to: 0.0, duration: duration)
+                    let hide = SKAction.run { moon.isHidden = true }
+                    moon.run(SKAction.sequence([fadeOut, hide]))
+                } else {
+                    moon.alpha = 0.0
+                    moon.isHidden = true
+                }
+            }
+        }
     }
     
     private func transitionWaterColor(needsTextureSwap: Bool, duration: TimeInterval) {
@@ -1465,7 +1633,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private func startDesertCutscene() {
         isInCutscene = true
         isUserInteractionEnabled = false
-        
+        ToolTips.showToolTip(forKey: "desert", in: self)
+            
         frog.velocity = .zero // Stop frog movement
         SoundManager.shared.stopMusic(fadeDuration: 1.0)
         
@@ -1544,6 +1713,20 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let lerpSpeed: CGFloat = (frog.rocketState != .none) ? 0.2 : 0.1
         cam.position.x += (targetX - cam.position.x) * lerpSpeed
         cam.position.y += (targetY - cam.position.y) * 0.1
+    }
+    
+    private func updateMoonlightPosition() {
+        guard let moonlightNode = moonlightNode, !moonlightNode.isHidden else { return }
+        
+        // Create a parallax effect by moving the light source slower than the camera.
+        // This gives the illusion of a distant moon.
+        // A slight horizontal offset suggests the moon is off to one side.
+        let parallaxFactor: CGFloat = 0.9
+        let horizontalOffset: CGFloat = 200
+        moonlightNode.position = CGPoint(
+            x: cam.position.x * parallaxFactor + horizontalOffset,
+            y: cam.position.y * parallaxFactor
+        )
     }
     private func cleanupOffscreenEntities() {
         let thresholdY = cam.position.y - (size.height / 2) - 200
@@ -1852,7 +2035,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // Visual and haptic feedback
         pad.playLandingSquish()
-        //spawnWaterRipple(for: pad)  // Ripples now parent to pad and follow it!
+        spawnWaterRipple(for: pad)  // Ripples now parent to pad and follow it!
         HapticsManager.shared.playImpact(.light)
         
         // Track for challenges
@@ -2048,6 +2231,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
     
     /// Creates expanding concentric ripples at the drowning location
     private func spawnDrowningRipples() {
+        if (currentWeather == .desert){ return }
         spawnRipples(parentedTo: frog, color: .white, rippleCount: 4, isDramatic: true)
     }
     

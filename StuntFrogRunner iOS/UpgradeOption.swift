@@ -1,18 +1,27 @@
 import UIKit
 
+enum UpgradeZone {
+    case any
+    case early  // < 1000m
+    case mid    // 1000m - 2000m
+    case late   // > 2000m
+}
+
 struct UpgradeOption {
     let id: String
     let name: String
     let desc: String
     let icon: String
     let iconImage: String?  // Optional image name for custom icons
+    let zone: UpgradeZone
     
-    init(id: String, name: String, desc: String, icon: String, iconImage: String? = nil) {
+    init(id: String, name: String, desc: String, icon: String, iconImage: String? = nil, zone: UpgradeZone) {
         self.id = id
         self.name = name
         self.desc = desc
         self.icon = icon
         self.iconImage = iconImage
+        self.zone = zone
     }
 }
 
@@ -26,25 +35,39 @@ class UpgradeViewController: UIViewController {
     /// Set to true if the upgrade selection is for a race, to filter out certain items.
     var isForRace: Bool = false
     
+    /// The distance traveled by the player, used to determine contextual upgrades.
+    var distanceTraveled: Int = 0
+    
     // Available Upgrades Pool
     private let baseOptions: [UpgradeOption] = [
-        UpgradeOption(id: "HONEY", name: "Honey Jar", desc: "Block 1 Bee Attack", icon: "", iconImage: "honeyPot"),
-        UpgradeOption(id: "BOOTS", name: "Rain Boots", desc: "No Sliding for a rain season", icon: "", iconImage: "rainboots"),
-        UpgradeOption(id: "HEART", name: "Heart Container", desc: "+1 Max HP & Heal", icon: "❤️"),
-        UpgradeOption(id: "HEARTBOOST", name: "Heart Boost", desc: "Refill All Hearts", icon: "", iconImage: "heartBoost"),
-        UpgradeOption(id: "VEST", name: "Life Vest", desc: "Float on Water (1 Use)", icon: "", iconImage: "lifevest"),
-        UpgradeOption(id: "AXE", name: "Woodcutter's Axe", desc: "Chops down 1 Log", icon: "🪓"),
-        UpgradeOption(id: "SWATTER", name: "Fly Swatter", desc: "Swats 1 Dragonfly", icon: "🏸"),
-        UpgradeOption(id: "CROSS", name: "Holy Cross", desc: "Repels 1 Ghost", icon: "✝️")
+        UpgradeOption(id: "HONEY", name: "Honey Jar", desc: "Block 1 Bee Attack", icon: "", iconImage: "honeyPot", zone: .any),
+        UpgradeOption(id: "BOOTS", name: "Rain Boots", desc: "No Sliding for a rain season", icon: "", iconImage: "rainboots", zone: .mid),
+        UpgradeOption(id: "HEART", name: "Heart Container", desc: "+1 Max HP & Heal", icon: "", iconImage: "heart", zone: .any),
+        UpgradeOption(id: "HEARTBOOST", name: "Heart Boost", desc: "Refill All Hearts", icon: "", iconImage: "heartBoost", zone: .any),
+        UpgradeOption(id: "VEST", name: "Life Vest", desc: "Float on Water (1 Use)", icon: "", iconImage: "lifevest", zone: .any),
+        UpgradeOption(id: "AXE", name: "Woodcutter's Axe", desc: "Chops down 1 Log", icon: "",iconImage: "ax", zone: .late),
+        UpgradeOption(id: "SWATTER", name: "Fly Swatter", desc: "Swats 1 Dragonfly", icon: "",iconImage: "swatter", zone: .late),
+        UpgradeOption(id: "CROSS", name: "Holy Cross", desc: "Repels 1 Ghost", icon: "", iconImage: "cross", zone: .mid)
     ]
     
     // Purchasable Upgrades (only appear if unlocked in shop)
-    private let superJumpOption = UpgradeOption(id: "SUPERJUMP", name: "Super Jump", desc: "Double Jump Range + Invincible", icon: "⚡️")
-    private let rocketJumpOption = UpgradeOption(id: "ROCKET", name: "Rocket", desc: "Fly for 7s", icon: "🚀")
-    private let cannonBallOption = UpgradeOption(id: "CANNONBALL", name: "Cannon Ball", desc: "+1 Cannon Jump", icon: "💣")
+    private let superJumpOption = UpgradeOption(id: "SUPERJUMP", name: "Super Jump", desc: "Double Jump Range + Invincible", icon: "",iconImage: "lightning", zone: .any)
+    private let rocketJumpOption = UpgradeOption(id: "ROCKET", name: "Rocket", desc: "Fly for 7s", icon: "", iconImage: "rocket", zone: .any)
+    private let cannonBallOption = UpgradeOption(id: "CANNONBALL", name: "Cannon Ball", desc: "+1 Cannon Jump", icon: "", iconImage: "bomb", zone: .any)
     
     private var allOptions: [UpgradeOption] {
-        var options = baseOptions
+        let currentZone: UpgradeZone
+        if distanceTraveled < 1000 {
+            currentZone = .early
+        } else if distanceTraveled < 2000 {
+            currentZone = .mid
+        } else {
+            currentZone = .late
+        }
+        
+        var options = baseOptions.filter {
+            $0.zone == .any || $0.zone == currentZone
+        }
         
         // Don't offer heart boost if player already has full health
         if hasFullHealth {
@@ -75,7 +98,7 @@ class UpgradeViewController: UIViewController {
     private lazy var titleLabel: UILabel = {
         let label = UILabel()
         label.text = "LEVEL UP!"
-        label.font = UIFont.systemFont(ofSize: 36, weight: .heavy)
+        label.font = UIFont(name: Configuration.Fonts.primaryBold, size: 40)
         label.textColor = .yellow
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false

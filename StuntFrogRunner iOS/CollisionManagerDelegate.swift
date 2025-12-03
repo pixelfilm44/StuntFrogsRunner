@@ -290,22 +290,21 @@ class CollisionManager {
                 }
             } else {
                 // Circle Pad Logic
-                // Use dynamic scaled radius for checking
                 let currentPadRadius = pad.scaledRadius
+                let safetyBuffer = frogRadius * 0.10
+                let hitDistance = currentPadRadius + safetyBuffer
                 
-                // Minimal safety buffer - only 15% of frog radius for tighter landing requirement
-                let safetyBuffer = frogRadius * 0.15
+                // 1. Broad Phase: Simple Box Check (Fastest)
+                if abs(frog.position.x - pad.position.x) > hitDistance { continue }
+                if abs(frog.position.y - pad.position.y) > hitDistance { continue }
                 
-                // Optimization: Simple bounds check with dynamic size
-                if abs(frog.position.x - pad.position.x) > (currentPadRadius + safetyBuffer) { continue }
-                if abs(frog.position.y - pad.position.y) > (currentPadRadius + safetyBuffer) { continue }
-                
+                // 2. Narrow Phase: Squared Distance (Fast)
                 let dx = frog.position.x - pad.position.x
                 let dy = frog.position.y - pad.position.y
                 let distSq = (dx * dx) + (dy * dy)
+                let hitDistanceSq = hitDistance * hitDistance // Pre-calculate squared radius
                 
-                let distThresholdSq = pow(currentPadRadius + safetyBuffer, 2)
-                if distSq < distThresholdSq {
+                if distSq < hitDistanceSq {
                     isHit = true
                 }
             }

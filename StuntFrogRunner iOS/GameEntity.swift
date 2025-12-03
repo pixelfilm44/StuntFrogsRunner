@@ -657,6 +657,7 @@ class Pad: GameEntity {
     private static let waterLilyNightTexture = SKTexture(imageNamed: "lilypadWaterNight")
     private static let waterLilyRainTexture = SKTexture(imageNamed: "lilypadWaterRain")
     private static let waterLilySnowTexture = SKTexture(imageNamed: "lilypadWaterSnow")
+    private static let waterLilySandTexture = SKTexture(imageNamed: "lilypadWaterSand")
     
     /// The base radius for this pad (before any scaling from shrinking)
     private(set) var baseRadius: CGFloat = Configuration.Dimensions.minPadRadius
@@ -708,7 +709,7 @@ class Pad: GameEntity {
                 texture = Pad.graveTexture
             case .shrinking:
                 texture = Pad.shrinkTexture
-            case .waterLily:
+            case .waterLily, .moving:
                 texture = Pad.waterLilyTexture
             default:
                 texture = Pad.dayTexture
@@ -728,7 +729,7 @@ class Pad: GameEntity {
         currentWeather = weather
         
         let texture: SKTexture
-        if type == .waterLily {
+        if type == .waterLily || type == .moving {
             switch weather {
             case .sunny:
                 texture = Pad.waterLilyTexture
@@ -736,11 +737,14 @@ class Pad: GameEntity {
             case .night:
                 texture = Pad.waterLilyNightTexture
             case .rain:
+                if let scene = self.scene {
+                    ToolTips.showToolTip(forKey: "rain", in: scene)
+                }
                 texture = Pad.waterLilyRainTexture
             case .winter:
                 texture = Pad.waterLilySnowTexture
             case .desert:
-                texture = Pad.waterLilyTexture
+                texture = Pad.waterLilySandTexture
             }
         } else {
             switch weather {
@@ -786,7 +790,12 @@ class Pad: GameEntity {
         // Only transform pads that can change appearance.
         guard type == .normal || type == .moving || type == .shrinking || type == .waterLily else { return }
         
-        let newTexture = SKTexture(imageNamed: "lilypadDesert")
+        let newTexture: SKTexture
+        if type == .waterLily || type == .moving {
+            newTexture = Pad.waterLilySandTexture
+        } else {
+            newTexture = Pad.desertTexture
+        }
         
         // Don't re-transform if it's already the correct texture
         guard let sprite = padSprite, sprite.texture?.hash != newTexture.hash else { return }
@@ -827,7 +836,7 @@ class Pad: GameEntity {
     func playLandingSquish() {
         // Don't animate logs or shrinking pads (shrinking has its own animation)
         guard type != .log && type != .shrinking else { return }
-        
+       
         if currentWeather == .desert { return }
         // Remove any existing squish action to avoid stacking
         removeAction(forKey: "landingSquish")

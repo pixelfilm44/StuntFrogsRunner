@@ -7,28 +7,19 @@ class MenuViewController: UIViewController {
     
     // MARK: - Background
     private lazy var backgroundImageView: UIImageView = {
-        // Loads "menuScreen.png" from Assets or Bundle
-        let imageView = UIImageView(image: UIImage(named: "menuScreen"))
-        imageView.contentMode = .scaleAspectFit
-        imageView.backgroundColor = .black  // Fill letterbox areas with black
+        // Loads "background.png" from Assets or Bundle
+        let imageView = UIImageView(image: UIImage(named: "backdrop"))
+        imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.translatesAutoresizingMaskIntoConstraints = false
         return imageView
     }()
     
-    private lazy var titleLabel: UILabel = {
-        let label = UILabel()
-        label.text = ""
-        label.numberOfLines = 2
-        label.font = UIFont(name: "Fredoka-Bold", size: 60)
-        label.textColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
-        label.textAlignment = .center
-        label.layer.shadowColor = UIColor.black.cgColor
-        label.layer.shadowOffset = CGSize(width: 3, height: 3)
-        label.layer.shadowOpacity = 1.0
-        label.layer.shadowRadius = 0.0
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
+    private lazy var titleImageView: UIImageView = {
+        let imageView = UIImageView(image: UIImage(named: "StuntFrogTitle"))
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
     }()
     
     private lazy var statsLabel1: UILabel = {
@@ -189,14 +180,9 @@ class MenuViewController: UIViewController {
     }()
     
     private lazy var helpButton: UIButton = {
-        let button = UIButton(type: .system)
-        button.setTitle("?", for: .normal)
-        button.titleLabel?.font = UIFont.systemFont(ofSize: 24, weight: .bold)
-        button.setTitleColor(.white, for: .normal)
-        button.backgroundColor = UIColor(red: 52/255, green: 73/255, blue: 94/255, alpha: 1)
-        button.layer.cornerRadius = 22
-        button.layer.borderWidth = 2
-        button.layer.borderColor = UIColor.white.cgColor
+        let button = UIButton(type: .custom)
+        button.setBackgroundImage(UIImage(named: "helpButton"), for: .normal)
+
         
         // Add shadow
         button.layer.shadowColor = UIColor.black.cgColor
@@ -210,14 +196,9 @@ class MenuViewController: UIViewController {
     }()
     
     private lazy var feedbackButton: UIButton = {
-        let button = UIButton(type: .system)
-        let emailIcon = UIImage(systemName: "envelope.fill")
-        button.setImage(emailIcon, for: .normal)
-        button.tintColor = .white
-        button.backgroundColor = UIColor(red: 52/255, green: 73/255, blue: 94/255, alpha: 1)
-        button.layer.cornerRadius = 22
-        button.layer.borderWidth = 2
-        button.layer.borderColor = UIColor.white.cgColor
+        let button = UIButton(type: .custom)
+        button.setBackgroundImage(UIImage(named: "supportButton"), for: .normal)
+
         
         // Add shadow
         button.layer.shadowColor = UIColor.black.cgColor
@@ -258,7 +239,7 @@ class MenuViewController: UIViewController {
         // Add Background Image first
         view.addSubview(backgroundImageView)
         
-        view.addSubview(titleLabel)
+        view.addSubview(titleImageView)
         view.addSubview(playButton)
         view.addSubview(raceButton)
         view.addSubview(helpButton)
@@ -294,6 +275,10 @@ class MenuViewController: UIViewController {
         statsContainerStackView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(statsContainerStackView)
         
+        // A layout guide to define the flexible space for the title image
+        let titleAreaGuide = UILayoutGuide()
+        view.addLayoutGuide(titleAreaGuide)
+
         NSLayoutConstraint.activate([
             // Background Constraints (Fill Screen)
             backgroundImageView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -301,19 +286,29 @@ class MenuViewController: UIViewController {
             backgroundImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             backgroundImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             
-            // Title at the top
-            titleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            titleLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+            // Center title horizontally
+            titleImageView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            // Set max width to 85% of safe area width to prevent touching edges on wide screens
+            titleImageView.widthAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.widthAnchor, multiplier: 0.95),
             
+            // The guide will fill the space between the top buttons and the stats section
+            titleAreaGuide.topAnchor.constraint(equalTo: feedbackButton.bottomAnchor, constant: 10),
+            titleAreaGuide.bottomAnchor.constraint(equalTo: statsContainerStackView.topAnchor, constant: -10),
+            
+            // Center the title image view vertically within this guide
+            titleImageView.centerYAnchor.constraint(equalTo: titleAreaGuide.centerYAnchor),
+            // Also constrain its height to not exceed the guide's height (with some padding)
+            titleImageView.heightAnchor.constraint(lessThanOrEqualTo: titleAreaGuide.heightAnchor, multiplier: 0.8),
+
             // Help button - top right corner
-            helpButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
-            helpButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            helpButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 32),
+            helpButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -32),
             helpButton.widthAnchor.constraint(equalToConstant: 44),
             helpButton.heightAnchor.constraint(equalToConstant: 44),
             
             // Feedback button - top left corner
-            feedbackButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
-            feedbackButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            feedbackButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 32),
+            feedbackButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 32),
             feedbackButton.widthAnchor.constraint(equalToConstant: 44),
             feedbackButton.heightAnchor.constraint(equalToConstant: 44),
             
@@ -340,12 +335,12 @@ class MenuViewController: UIViewController {
             statsContainerStackView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
 
             // Explicit size for the image buttons
-            shopButton.widthAnchor.constraint(equalToConstant: 70),
-            shopButton.heightAnchor.constraint(equalToConstant: 70),
-            challengesButton.widthAnchor.constraint(equalToConstant: 70),
-            challengesButton.heightAnchor.constraint(equalToConstant: 70),
-            leaderboardButton.widthAnchor.constraint(equalToConstant: 70),
-            leaderboardButton.heightAnchor.constraint(equalToConstant: 70),
+            shopButton.widthAnchor.constraint(equalToConstant: 45),
+            shopButton.heightAnchor.constraint(equalToConstant: 45),
+            challengesButton.widthAnchor.constraint(equalToConstant: 45),
+            challengesButton.heightAnchor.constraint(equalToConstant: 45),
+            leaderboardButton.widthAnchor.constraint(equalToConstant: 45),
+            leaderboardButton.heightAnchor.constraint(equalToConstant: 45),
 
             // Badge constraints relative to the challenges button
             challengeBadge.topAnchor.constraint(equalTo: challengesButton.topAnchor, constant: -8),

@@ -42,7 +42,7 @@ class HelpViewController: UIViewController {
             emoji: ""
         ),
         HelpSlide(
-            title: "Upgrades & Challenges",
+            title: "Upgrades",
             description: "Visit the shop to upgrade your jump and health. Complete challenges for bonus rewards!",
             imageName: nil,
             emoji: "⬆️"

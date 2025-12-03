@@ -14,20 +14,37 @@ class ShopViewController: UIViewController {
     private lazy var headerLabel: UILabel = {
         let label = UILabel()
         label.text = "FROG SHOP"
-        label.font = UIFont.systemFont(ofSize: 36, weight: .heavy)
+    
+        label.font = UIFont(name: Configuration.Fonts.primaryHeavy, size: 30)
         label.textColor = .white
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
     
+    private lazy var coinIconImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.image = UIImage(named: "star")
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
+    }()
+    
     private lazy var coinsLabel: UILabel = {
         let label = UILabel()
         label.font = UIFont.systemFont(ofSize: 20, weight: .bold)
         label.textColor = .yellow
-        label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
+    }()
+    
+    private lazy var coinsStackView: UIStackView = {
+        let stackView = UIStackView(arrangedSubviews: [coinIconImageView, coinsLabel])
+        stackView.axis = .horizontal
+        stackView.spacing = 8
+        stackView.alignment = .center
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        return stackView
     }()
     
     private lazy var scrollView: UIScrollView = {
@@ -52,8 +69,8 @@ class ShopViewController: UIViewController {
         button.setTitle("BACK", for: .normal)
         button.titleLabel?.font = UIFont.systemFont(ofSize: 18, weight: .bold)
         button.setTitleColor(.white, for: .normal)
-        button.backgroundColor = UIColor(red: 52/255, green: 152/255, blue: 219/255, alpha: 1)
-        button.layer.cornerRadius = 25
+        button.setBackgroundImage(UIImage(named: "secondaryButton"), for: .normal)
+
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(handleBack), for: .touchUpInside)
         return button
@@ -77,7 +94,7 @@ class ShopViewController: UIViewController {
         containerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         
         containerView.addSubview(headerLabel)
-        containerView.addSubview(coinsLabel)
+        containerView.addSubview(coinsStackView)
         containerView.addSubview(scrollView)
         containerView.addSubview(backButton)
         
@@ -87,11 +104,14 @@ class ShopViewController: UIViewController {
             headerLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
             headerLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             
-            coinsLabel.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 10),
-            coinsLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            coinsStackView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 10),
+            coinsStackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            
+            coinIconImageView.widthAnchor.constraint(equalToConstant: 24),
+            coinIconImageView.heightAnchor.constraint(equalToConstant: 24),
             
             // Scroll View - between coins label and back button
-            scrollView.topAnchor.constraint(equalTo: coinsLabel.bottomAnchor, constant: 20),
+            scrollView.topAnchor.constraint(equalTo: coinsStackView.bottomAnchor, constant: 20),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: backButton.topAnchor, constant: -20),
@@ -122,7 +142,8 @@ class ShopViewController: UIViewController {
         cardView.heightAnchor.constraint(equalToConstant: 120).isActive = true
         
         let title = UILabel()
-        title.font = UIFont.systemFont(ofSize: 20, weight: .bold)
+       
+        title.font = UIFont(name: Configuration.Fonts.cardHeader, size: 18)
         title.textColor = .white
         title.translatesAutoresizingMaskIntoConstraints = false
         
@@ -137,8 +158,8 @@ class ShopViewController: UIViewController {
         costLabel.textColor = .yellow
         costLabel.translatesAutoresizingMaskIntoConstraints = false
         
-        let buyButton = UIButton(type: .system)
-        buyButton.backgroundColor = .green
+        let buyButton = UIButton(type: .custom)
+        buyButton.setBackgroundImage(UIImage(named: "primaryButton"), for: .normal)
         buyButton.setTitle("UPGRADE", for: .normal)
         buyButton.setTitleColor(.black, for: .normal)
         buyButton.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .bold)
@@ -202,14 +223,14 @@ class ShopViewController: UIViewController {
             cost = Configuration.Shop.lifevest4PackCost
             maxLevel = -1 // Indicates no max level
             title.text = "Life Vest (4-Pack)"
-            desc.text = "Get a life vest every time you start a round for 4 rounds. You have: \(currentItems)"
+            desc.text = "Get a life vest every time you start. You have: \(currentItems)"
         case .honeyPack:
             let currentItems = PersistenceManager.shared.honeyItems
             currentLevel = currentItems
             cost = Configuration.Shop.honey4PackCost
             maxLevel = -1 // Indicates no max level
             title.text = "Honey Jars (4-Pack)"
-            desc.text = "Get a honey jar every time you start a round for 4 rounds. You have: \(currentItems)"
+            desc.text = "Get a honey jar every time you start. You have: \(currentItems)"
         }
         
         let userCoins = PersistenceManager.shared.totalCoins
@@ -255,7 +276,7 @@ class ShopViewController: UIViewController {
             if userCoins < cost {
                 buyButton.isEnabled = false
                 buyButton.backgroundColor = UIColor.systemGray
-                buyButton.setTitleColor(.lightGray, for: .disabled)
+                buyButton.setTitleColor(.darkGray, for: .disabled)
             }
         }
         
@@ -375,7 +396,7 @@ class ShopViewController: UIViewController {
     
     private func refreshData() {
         let coins = PersistenceManager.shared.totalCoins
-        coinsLabel.text = "💰 Coins: \(coins)"
+        coinsLabel.text = "\(coins)"
         
         stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
         
