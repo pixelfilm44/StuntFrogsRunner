@@ -57,6 +57,7 @@ enum ChallengeType: String, Codable {
     case landOnPads           // Land on X pads in a single run
     case consecutiveJumps     // X jumps without falling in water
     case crocodileRides       // Complete crocodile rides
+    case winningStreak        // Win X races in a row
 }
 
 /// Manages all game challenges and persists progress
@@ -70,6 +71,7 @@ class ChallengeManager {
     private(set) var challenges: [Challenge] = []
     private(set) var stats: ChallengeStats
     
+
     private init() {
         stats = ChallengeStats()
         loadChallenges()
@@ -281,6 +283,19 @@ class ChallengeManager {
                 progress: 0,
                 isCompleted: false,
                 isRewardClaimed: false
+            ),
+
+            // Winning Streak Challenges
+            Challenge(
+                id: "winning_streak_3",
+                title: "On a Roll",
+                description: "Win 3 races in a row",
+                requirement: 3,
+                reward: .coins(500),
+                type: .winningStreak,
+                progress: 0,
+                isCompleted: false,
+                isRewardClaimed: false
             )
         ]
     }
@@ -327,9 +342,11 @@ class ChallengeManager {
     }
     
     // MARK: - Progress Tracking
+
+ 
     
     /// Call when a game ends to update challenge progress
-    func recordGameEnd(score: Int, coinsCollected: Int, padsLanded: Int, consecutiveJumps: Int) {
+    func recordGameEnd(score: Int, coinsCollected: Int, padsLanded: Int, consecutiveJumps: Int, consecutiveRaces: Int) {
         stats.totalScore += score
         stats.totalCoins += coinsCollected
         stats.gamesPlayed += 1
@@ -346,6 +363,9 @@ class ChallengeManager {
         }
         if consecutiveJumps > stats.bestConsecutiveJumps {
             stats.bestConsecutiveJumps = consecutiveJumps
+        }
+        if consecutiveRaces > stats.bestConsecutiveRaces {
+            stats.bestConsecutiveRaces = consecutiveRaces
         }
         
         saveStats()
@@ -411,6 +431,21 @@ class ChallengeManager {
         }
     }
     
+    /// Sets the current winning streak and updates relevant challenges.
+    /// Call this when a race ends (win or lose) or when the streak should be reset.
+    func setWinningStreak(_ streak: Int) {
+        stats.currentWinningStreak = streak
+        
+        // Update the all-time best streak if this one is better.
+        if streak > stats.bestConsecutiveRaces {
+            stats.bestConsecutiveRaces = streak
+        }
+        
+        // Saving and updating challenges ensures the UI and progress are consistent.
+        saveStats()
+        updateChallenges(ofType: .winningStreak)
+    }
+    
     private func updateAllChallenges() {
         for i in challenges.indices {
             updateChallengeProgress(at: i)
@@ -452,6 +487,8 @@ class ChallengeManager {
             newProgress = stats.bestConsecutiveJumps
         case .crocodileRides:
             newProgress = stats.crocodileRidesCompleted
+        case .winningStreak:
+            newProgress = stats.currentWinningStreak
         }
         
         challenges[index].progress = newProgress
@@ -542,5 +579,7 @@ struct ChallengeStats: Codable {
     var weathersSurvived: Int = 0
     var bestPadsInRun: Int = 0
     var bestConsecutiveJumps: Int = 0
+    var bestConsecutiveRaces: Int = 0
     var crocodileRidesCompleted: Int = 0
+    var currentWinningStreak: Int = 0
 }

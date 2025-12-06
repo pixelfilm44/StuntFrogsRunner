@@ -43,6 +43,9 @@ class GameCoordinator: GameCoordinatorDelegate {
     
     let storage = UserDefaults.standard
     
+    // Track the race win streak
+    private var raceWinStreak: Int = 0
+    
     init(window: UIWindow?) {
         self.window = window
     }
@@ -65,6 +68,9 @@ class GameCoordinator: GameCoordinatorDelegate {
     }
     
     func showMenu(animated: Bool = false) {
+        // Reset the win streak when returning to the main menu
+        raceWinStreak = 0
+        
         currentState = .menu
         let menuVC = MenuViewController()
         menuVC.coordinator = self
@@ -143,6 +149,12 @@ class GameCoordinator: GameCoordinatorDelegate {
         scene.coordinator = self
         scene.gameMode = gameMode
         
+        // If it's a race, configure it with the current streak data
+        if gameMode == .beatTheBoat {
+            scene.boatSpeedMultiplier = 1.0 + (CGFloat(raceWinStreak) * 0.10)
+            scene.raceRewardBonus = raceWinStreak * 100
+        }
+        
         if let upgradeId = initialUpgradeId {
             scene.initialUpgrade = upgradeId
         }
@@ -202,11 +214,22 @@ class GameCoordinator: GameCoordinatorDelegate {
         
         var isNewHigh = false
         if raceResult == nil {
+            // Endless mode
             isNewHigh = PersistenceManager.shared.saveScore(score)
-            // NEW: Submit to Game Center if new high score
             if isNewHigh {
                 GameCenterManager.shared.submitScore(score, leaderboardID: Configuration.GameCenter.leaderboardID)
             }
+            // Reset race streak if returning from endless mode
+            raceWinStreak = 0
+            ChallengeManager.shared.setWinningStreak(0)
+        } else {
+            // Race mode
+            if case .win = raceResult {
+                raceWinStreak += 1
+            } else {
+                raceWinStreak = 0
+            }
+            ChallengeManager.shared.setWinningStreak(raceWinStreak)
         }
         
         PersistenceManager.shared.addCoins(coins)
@@ -216,6 +239,12 @@ class GameCoordinator: GameCoordinatorDelegate {
         gameOverVC.runCoins = coins
         gameOverVC.isNewHighScore = isNewHigh
         gameOverVC.raceResult = raceResult
+        
+        // Pass the new win streak to the game over screen if it was a race
+        if raceResult != nil {
+            gameOverVC.winStreak = self.raceWinStreak
+        }
+        
         gameOverVC.coordinator = self
         gameOverVC.modalPresentationStyle = .overFullScreen
         gameOverVC.modalTransitionStyle = .crossDissolve

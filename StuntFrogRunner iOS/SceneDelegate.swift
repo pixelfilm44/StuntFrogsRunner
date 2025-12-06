@@ -52,8 +52,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneWillResignActive(_ scene: UIScene) {
-        // Pause the game (e.g., incoming phone call)
-        // In the future: gameCoordinator?.pauseGame()
+        // Pause the game when the app is interrupted or enters the background.
+        print("🔵 SceneDelegate: sceneWillResignActive - Pausing game")
+        gameCoordinator?.pauseGame()
     }
 
     func sceneWillEnterForeground(_ scene: UIScene) {

@@ -159,19 +159,24 @@ struct Configuration {
         static let challengeClaimBadge = UIFont.systemFont(ofSize: 12, weight: .heavy)
         
         /// Game over screen title (WIPEOUT!)
-        static let gameOverTitle : (name: String, size: CGFloat) = (primaryHeavy, 42)
+        static let gameOverTitle : (name: String, size: CGFloat) = (primaryHeavy, 40)
         
         /// Game over score display
-        static let gameOverScore = UIFont.systemFont(ofSize: 32, weight: .bold)
+        static let gameOverScore: (name: String, size: CGFloat) = (primaryBold, 32)
         
         /// Game over high score banner
-        static let gameOverHighScore = UIFont.systemFont(ofSize: 18, weight: .bold)
+        static let gameOverHighScore: (name: String, size: CGFloat) = (primaryBold, 18)
         
+        static let gameOverSubtext: (name: String, size: CGFloat) = (primaryBold, 18)
+
         /// Game over coins display
-        static let gameOverCoins = UIFont.systemFont(ofSize: 18, weight: .medium)
+        static let gameOverCoins: (name: String, size: CGFloat) = (primaryBold, 18)
         
         /// Game over retry/menu buttons
-        static let gameOverButton = UIFont.systemFont(ofSize: 20, weight: .bold)
+        static let gameOverButton: (name: String, size: CGFloat) = (primaryBold, 20)
+        
+        static let button = UIFont.systemFont(ofSize: 14, weight: .semibold)
+
     }
     
     struct GameRules {

@@ -21,6 +21,10 @@ public class ToolTips {
         "rain": (
             title: "Don't slip in the rain.",
             message: "The lilypads are slippery now."
+        ),
+        "race": (
+            title: "It's frog vs. boat.",
+            message: "Try to keep up and survive."
         )
         
         // Add more tooltips here with a unique key.
@@ -81,9 +85,35 @@ public class ToolTips {
             overlay.removeFromParent()
         }
         
-        // Add the tooltip to the scene's UI container, and then pause the scene.
+        // Store the final position, then set the initial state for our animation.
+        let finalPosition = toolTip.position
+        // Start off-screen to the right
+        toolTip.position = CGPoint(x: finalPosition.x + view.bounds.width, y: finalPosition.y)
+        toolTip.alpha = 0.0
+
+        // Add the tooltip to the scene's UI container.
         uiContainer.addChild(toolTip)
-        scene.isPaused = true
+        
+        // Define the animation actions for a slide-in with a bounce effect.
+        let overshootAmount: CGFloat = 30.0
+        let overshootPosition = CGPoint(x: finalPosition.x - overshootAmount, y: finalPosition.y)
+
+        let slideInAction = SKAction.move(to: overshootPosition, duration: 0.6)
+        slideInAction.timingMode = .easeOut
+
+        let bounceBackAction = SKAction.move(to: finalPosition, duration: 0.25)
+        bounceBackAction.timingMode = .easeInEaseOut
+        
+        let slideAndBounce = SKAction.sequence([slideInAction, bounceBackAction])
+        
+        let fadeInAction = SKAction.fadeIn(withDuration: 0.2)
+        
+        let animationGroup = SKAction.group([slideAndBounce, fadeInAction])
+
+        // Run the animation, and only pause the game after the tooltip is in place.
+        toolTip.run(animationGroup) {
+            scene.isPaused = true
+        }
 
         // Mark this tooltip as shown so it won't appear again.
         UserDefaults.standard.set(true, forKey: defaultsKey)
@@ -108,7 +138,7 @@ private class ToolTipNode: SKSpriteNode {
     var onDismiss: (() -> Void)?
 
     init(title: String, message: String, size: CGSize) {
-        let texture = SKTexture(imageNamed: "modalBackdrop")
+        let texture = SKTexture(imageNamed: "toolTipBackdrop")
         super.init(texture: texture, color: .clear, size: size)
 
         self.isUserInteractionEnabled = true
@@ -123,7 +153,7 @@ private class ToolTipNode: SKSpriteNode {
         titleLabel.numberOfLines = 0
         titleLabel.preferredMaxLayoutWidth = self.size.width - 60
         titleLabel.verticalAlignmentMode = .top
-        titleLabel.position = CGPoint(x: 0, y: self.size.height / 2 - 40) // 40pt top margin
+        titleLabel.position = CGPoint(x: 0, y: self.size.height / 2 - 80) // 40pt top margin
         addChild(titleLabel)
 
         // Create and configure the message label.
@@ -144,7 +174,7 @@ private class ToolTipNode: SKSpriteNode {
         let buttonSize = CGSize(width: 120, height: 50)
         let okButton = SKSpriteNode(imageNamed: "secondaryButton")
         okButton.size = buttonSize
-        okButton.position = CGPoint(x: 0, y: -self.size.height / 2 + 60)
+        okButton.position = CGPoint(x: 0, y: -self.size.height / 2 + 120)
         okButton.name = "okButton" // Name the button for reliable touch handling.
         addChild(okButton)
 

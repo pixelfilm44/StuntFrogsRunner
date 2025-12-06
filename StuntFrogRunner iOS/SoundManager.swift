@@ -431,7 +431,7 @@ class VFXManager {
         wave.strokeColor = .purple
         wave.fillColor = .purple.withAlphaComponent(0.3)
         wave.lineWidth = 15
-        wave.zPosition = Layer.frog - 1 // Behind the frog but above pads
+        wave.zPosition = Layer.frog + 10 // Behind the frog but above pads
         worldNode.addChild(wave)
         
         let scaleUp = SKAction.scale(to: 40, duration: 0.5)

@@ -223,6 +223,7 @@ class MenuViewController: UIViewController {
         updateChallengeBadge()
         coordinator?.authenticateGameCenter()
         SoundManager.shared.playMusic(.menu)
+        animateTitleOnLoad()
     }
     
     private func updateChallengeBadge() {
@@ -348,6 +349,25 @@ class MenuViewController: UIViewController {
             challengeBadge.widthAnchor.constraint(equalToConstant: 24),
             challengeBadge.heightAnchor.constraint(equalToConstant: 24),
         ])
+    }
+    
+    // MARK: - View Animations
+    
+    private func animateTitleOnLoad() {
+        // Start with the title scaled up and faded out
+        titleImageView.transform = CGAffineTransform(scaleX: 3.2, y: 3.2)
+        titleImageView.alpha = 0
+
+        // Animate to the final state with a spring effect
+        UIView.animate(withDuration: 0.8,
+                       delay: 0.2,
+                       usingSpringWithDamping: 0.6,
+                       initialSpringVelocity: 1,
+                       options: .allowUserInteraction,
+                       animations: {
+            self.titleImageView.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
+            self.titleImageView.alpha = 1
+        })
     }
     
     // MARK: - Button Animations

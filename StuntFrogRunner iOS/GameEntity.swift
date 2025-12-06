@@ -21,8 +21,7 @@ enum RocketState {
 
 enum FrogAnimationState {
     case sitting
-    case leaping     // Beginning of jump / end of jump
-    case jumping     // Midway through jump (peak)
+    case jumping
     case recoiling   // Hit by enemy
     case cannon     // Cannon jump
 }
@@ -51,7 +50,7 @@ class GameEntity: SKSpriteNode {
 // MARK: - The Frog
 class Frog: GameEntity {
     
-    struct Buffs {
+    struct Buffs: Equatable {
         var honey: Int = 0
         var rocketTimer: Int = 0
         var bootsCount: Int = 0
@@ -93,7 +92,6 @@ class Frog: GameEntity {
     
     // Animation state
     private(set) var animationState: FrogAnimationState = .sitting
-    private var jumpStartZVelocity: CGFloat = 0  // Track initial jump velocity for phase transitions
     private var lastFacingAngle: CGFloat = 0     // Preserve facing direction
     
     // Visual nodes
@@ -107,10 +105,6 @@ class Frog: GameEntity {
     // Preloaded textures for performance
     private static let sitTexture = SKTexture(imageNamed: "frogSit")
     private static let sitLvTexture = SKTexture(imageNamed: "frogSitLv")
-    private static let leapTexture = SKTexture(imageNamed: "frogLeap")
-    private static let leapLvTexture = SKTexture(imageNamed: "frogLeapLv")
-    private static let jumpTexture = SKTexture(imageNamed: "frogJump")
-    private static let jumpLvTexture = SKTexture(imageNamed: "frogJumpLv")
     private static let recoilTexture = SKTexture(imageNamed: "frogRecoil")
     private static let cannonTexture = SKTexture(imageNamed: "cannon")
     private static let drowningTextures: [SKTexture] = [
@@ -118,12 +112,17 @@ class Frog: GameEntity {
         SKTexture(imageNamed: "frogDrown2"),
         SKTexture(imageNamed: "frogDrown3")
     ]
+    private static let jumpAnimationTextures: [SKTexture] = {
+        (1...6).map { SKTexture(imageNamed: "frogJump\($0)") }
+    }()
+    private static let jumpLvAnimationTextures: [SKTexture] = {
+        (1...6).map { SKTexture(imageNamed: "frogJumpLv\($0)") }
+    }()
 
     
     // Target heights for frog sprite (aspect ratio preserved automatically)
     private static let frogSitHeight: CGFloat = 40
-    private static let frogLeapHeight: CGFloat = 80
-    private static let frogJumpHeight: CGFloat = 80
+    private static let frogJumpingHeight: CGFloat = 80
     private static let frogRecoilHeight: CGFloat = 60
     private static let cannonHeight: CGFloat = 60
 
@@ -273,6 +272,11 @@ class Frog: GameEntity {
     /// Plays a drowning animation where the frog sinks underwater and disappears.
     /// - Parameter completion: Called when the animation finishes
     func playDrowningAnimation(completion: @escaping () -> Void) {
+        // Stop any running jump animation and reset scale
+        frogSprite.removeAction(forKey: "jumpFrameAnimation")
+        bodyNode.removeAction(forKey: "jumpScaleAnimation")
+        bodyNode.setScale(1.5)
+        
         // Stop all movement
         velocity = .zero
         zVelocity = 0
@@ -311,6 +315,11 @@ class Frog: GameEntity {
     }
     
     func playWailingAnimation() {
+        // Stop any running jump animation and reset scale
+        frogSprite.removeAction(forKey: "jumpFrameAnimation")
+        bodyNode.removeAction(forKey: "jumpScaleAnimation")
+        bodyNode.setScale(1.5)
+        
         // Stop all movement
         velocity = .zero
         zVelocity = 0
@@ -345,6 +354,11 @@ class Frog: GameEntity {
     /// Plays a death animation where the frog spins around and falls off the screen (for enemy deaths).
     /// - Parameter completion: Called when the animation finishes
     func playDeathAnimation(completion: @escaping () -> Void) {
+        // Stop any running jump animation and reset scale
+        frogSprite.removeAction(forKey: "jumpFrameAnimation")
+        bodyNode.removeAction(forKey: "jumpScaleAnimation")
+        bodyNode.setScale(1.0)
+        
         // Stop all movement
         velocity = .zero
         zVelocity = 0
@@ -467,9 +481,6 @@ class Frog: GameEntity {
                 // Keep facing the last direction when stationary
                 bodyNode.zRotation = lastFacingAngle
             }
-            
-            let scale = 1.0 + (zHeight / 100.0)
-            bodyNode.setScale(scale)
         }
         
         let shadowScale = max(0, 1.0 - (zHeight / 200.0))
@@ -515,7 +526,7 @@ class Frog: GameEntity {
         if recoilTimer > 0 {
             newState = .recoiling
         } else {
-            // Determine animation state based on jump phase and movement
+            // Determine animation based on whether the frog is in the air or not.
             if zHeight <= 0.1 && abs(zVelocity) < 0.1 {
                 // On ground / lilypad. Show cannon if armed, otherwise sit.
                 if isCannonJumpArmed {
@@ -523,32 +534,31 @@ class Frog: GameEntity {
                 } else {
                     newState = .sitting
                 }
-            } else if zVelocity > jumpStartZVelocity * 0.3 {
-                // Rising phase - just started jumping (first ~30% of upward velocity)
-                newState = .leaping
-            } else if zVelocity > -jumpStartZVelocity * 0.3 {
-                // Peak phase - midway through jump
-                newState = .jumping
             } else {
-                // Falling phase - about to land
-                newState = .leaping
+                // In the air, so we are jumping.
+                newState = .jumping
             }
         }
         
-        // Only update texture if state changed (performance optimization)
+        // Only update texture or animation if the state has changed.
         if newState != animationState {
+            // If the new state forces a stop (e.g., recoiling), clean up any existing jump animation.
+            // Landing animations are stopped by the land() function itself.
+            if newState == .recoiling {
+                frogSprite.removeAction(forKey: "jumpFrameAnimation")
+                bodyNode.removeAction(forKey: "jumpScaleAnimation")
+                bodyNode.setScale(1.0)
+            }
+            
             animationState = newState
             
             switch animationState {
             case .sitting:
                 let texture = buffs.vest > 0 ? Frog.sitLvTexture : Frog.sitTexture
                 setFrogTexture(texture, height: Frog.frogSitHeight)
-            case .leaping:
-                let texture = buffs.vest > 0 ? Frog.leapLvTexture : Frog.leapTexture
-                setFrogTexture(texture, height: Frog.frogLeapHeight)
             case .jumping:
-                let texture = buffs.vest > 0 ? Frog.jumpLvTexture : Frog.jumpTexture
-                setFrogTexture(texture, height: Frog.frogJumpHeight)
+                // Animation is triggered by jump() or bounce(), so do nothing here.
+                break
             case .recoiling:
                 setFrogTexture(Frog.recoilTexture, height: Frog.frogRecoilHeight)
             case .cannon:
@@ -565,24 +575,47 @@ class Frog: GameEntity {
         // Do NOT multiply here again to avoid double-application.
         
         self.velocity = vector
-        self.zVelocity = Configuration.Physics.baseJumpZ * (0.5 + (intensity * 0.5))
-        self.jumpStartZVelocity = self.zVelocity  // Track for animation phase calculation
+        let zVel = Configuration.Physics.baseJumpZ * (0.5 + (intensity * 0.5))
+        self.zVelocity = zVel
         self.onPad = nil
         self.isFloating = false
         
-        // Immediately transition to leaping state
-        animationState = .leaping
-        let texture = buffs.vest > 0 ? Frog.leapLvTexture : Frog.leapTexture
-        setFrogTexture(texture, height: Frog.frogLeapHeight)
+        // --- Dynamic Jump Animation ---
+        // Calculate air time based on physics to sync animations.
+        // Assumes physics runs at a consistent 60fps as gravity is not scaled by dt.
+        let timeToPeak = (zVel / Configuration.Physics.gravityZ) / 60.0 // in seconds
+        
+        if timeToPeak > 0 {
+            let totalAirTime = timeToPeak * 2.0
+            
+            // 1. Frame-by-frame animation action
+            let textures = buffs.vest > 0 ? Frog.jumpLvAnimationTextures : Frog.jumpAnimationTextures
+            let frameAnimation = SKAction.animate(with: textures, timePerFrame: totalAirTime / Double(textures.count), resize: false, restore: true)
+            
+            // 2. Scaling animation action
+            let scaleUp = SKAction.scale(to: 1.5, duration: timeToPeak)
+            scaleUp.timingMode = .easeOut
+            let scaleDown = SKAction.scale(to: 1.0, duration: timeToPeak)
+            scaleDown.timingMode = .easeIn
+            let scaleSequence = SKAction.sequence([scaleUp, scaleDown])
+            
+            // 3. Run animations on their respective nodes
+            frogSprite.run(frameAnimation, withKey: "jumpFrameAnimation")
+            bodyNode.run(scaleSequence, withKey: "jumpScaleAnimation")
+        }
         
         SoundManager.shared.play("jump")
     }
     
     func land(on pad: Pad, weather: WeatherType) {
+        // Stop jump animation and reset scale immediately on landing
+        frogSprite.removeAction(forKey: "jumpFrameAnimation")
+        bodyNode.removeAction(forKey: "jumpScaleAnimation")
+        bodyNode.setScale(1.0)
+        
         bodyNode.removeAction(forKey: "wailingAnimation")
         zVelocity = 0
         zHeight = 0
-        jumpStartZVelocity = 0  // Reset for next jump
         self.onPad = pad
         self.isFloating = false
         resetPullOffset()
@@ -616,16 +649,30 @@ class Frog: GameEntity {
     }
     
     func bounce() {
-        // High bounce to give time for air jump - extra air time for steering to a lilypad
-        zVelocity = 22.0
-        jumpStartZVelocity = zVelocity  // Track for animation phases
+        // High bounce to give time for air jump
+        let zVel: CGFloat = 22.0
+        zVelocity = zVel
         velocity.dx *= -0.5
         velocity.dy *= -0.5
         
-        // Transition to leaping state since we're bouncing up
-        animationState = .leaping
-        let texture = buffs.vest > 0 ? Frog.leapLvTexture : Frog.leapTexture
-        setFrogTexture(texture, height: Frog.frogLeapHeight)
+        // --- Dynamic Bounce Animation (same as jump) ---
+        let timeToPeak = (zVel / Configuration.Physics.gravityZ) / 60.0 // in seconds
+        
+        if timeToPeak > 0 {
+            let totalAirTime = timeToPeak * 2.0
+            
+            let textures = buffs.vest > 0 ? Frog.jumpLvAnimationTextures : Frog.jumpAnimationTextures
+            let frameAnimation = SKAction.animate(with: textures, timePerFrame: totalAirTime / Double(textures.count), resize: false, restore: true)
+
+            let scaleUp = SKAction.scale(to: 1.5, duration: timeToPeak)
+            scaleUp.timingMode = .easeOut
+            let scaleDown = SKAction.scale(to: 1.0, duration: timeToPeak)
+            scaleDown.timingMode = .easeIn
+            let scaleSequence = SKAction.sequence([scaleUp, scaleDown])
+
+            frogSprite.run(frameAnimation, withKey: "jumpFrameAnimation")
+            bodyNode.run(scaleSequence, withKey: "jumpScaleAnimation")
+        }
         
         HapticsManager.shared.playImpact(.heavy)
     }
@@ -737,9 +784,6 @@ class Pad: GameEntity {
             case .night:
                 texture = Pad.waterLilyNightTexture
             case .rain:
-                if let scene = self.scene {
-                    ToolTips.showToolTip(forKey: "rain", in: scene)
-                }
                 texture = Pad.waterLilyRainTexture
             case .winter:
                 texture = Pad.waterLilySnowTexture
@@ -836,7 +880,7 @@ class Pad: GameEntity {
     func playLandingSquish() {
         // Don't animate logs or shrinking pads (shrinking has its own animation)
         guard type != .log && type != .shrinking else { return }
-       
+        
         if currentWeather == .desert { return }
         // Remove any existing squish action to avoid stacking
         removeAction(forKey: "landingSquish")
@@ -1569,6 +1613,9 @@ class Boat: GameEntity {
     // Wake particle emitter
     private var wakeEmitter: SKEmitterNode?
     
+    // Speed multiplier for rematches
+    var speedMultiplier: CGFloat = 1.1
+    
     init(position: CGPoint, wakeTargetNode: SKNode? = nil) {
         self.originalX = position.x
         super.init(texture: nil, color: .clear, size: CGSize(width: 80, height: 150))
@@ -1616,8 +1663,8 @@ class Boat: GameEntity {
     }
     
     func update(dt: TimeInterval) {
-        // The boat moves at a constant speed upstream
-        position.y += Configuration.GameRules.boatSpeed
+        // The boat moves at a constant speed upstream, adjusted by the multiplier
+        position.y += Configuration.GameRules.boatSpeed * speedMultiplier
         
         // Handle veering logic
         if veerTimer > 0 {

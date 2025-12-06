@@ -10,6 +10,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
     
     // MARK: - Game Mode
     var gameMode: GameMode = .endless
+    var boatSpeedMultiplier: CGFloat = 1.0
+    var raceRewardBonus: Int = 0
     private var raceResult: RaceResult?
     private enum RaceState {
         case none
@@ -61,16 +63,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private let coinIcon = SKSpriteNode(imageNamed: "star")
     private var heartNodes: [SKSpriteNode] = []
     private let buffsNode = SKNode()
-    // --- Performance Improvement: Pre-created Buff Nodes ---
-    // Create buff UI elements once and update them, instead of recreating every frame.
-    private var vestBuffNode: SKNode!
-    private var honeyBuffNode: SKNode!
-    private var axeBuffNode: SKNode!
-    private var swatterBuffNode: SKNode!
-    private var crossBuffNode: SKNode!
+    private let buffsGridNode = SKNode() // Node for the new grid layout
+    // --- Timed/Special Buff Nodes ---
+    // These are kept for unique displays (timers, etc.)
     private var rocketBuffNode: SKNode!
     private var superJumpBuffNode: SKNode!
-    private var bootsBuffNode: SKNode!
     private var crocRideBuffNode: SKNode!
     private let descendButton = SKLabelNode(fontNamed: Configuration.Fonts.primaryHeavy)
     private let descendBg = SKShapeNode(rectOf: CGSize(width: 200, height: 60), cornerRadius: 30)
@@ -101,6 +98,17 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private var flies: [Fly] = []
     private var flotsam: [Flotsam] = []
     
+    // MARK: - Performance Optimization: Active Entity Arrays
+    // Pre-allocated arrays to hold entities that are currently on-screen.
+    // Cleared and re-populated each frame to avoid new array allocations.
+    private var activePads: [Pad] = []
+    private var activeEnemies: [Enemy] = []
+    private var activeCoins: [Coin] = []
+    private var activeCrocodiles: [Crocodile] = []
+    private var activeTreasureChests: [TreasureChest] = []
+    private var activeSnakes: [Snake] = []
+    private var activeFlies: [Fly] = []
+    
     // MARK: - State
     private var dragStartOffset: CGPoint?  // Offset from frog position when drag began
     private var dragCurrent: CGPoint?
@@ -121,6 +129,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private var crocRideVignetteNode: SKSpriteNode?  // Vignette overlay for croc ride
     private var baseMusic: SoundManager.Music = .gameplay
     private var drowningGracePeriodTimer: TimeInterval?
+    private var lastKnownBuffs: Frog.Buffs?
     
     // MARK: - Cutscene State
     private var isInCutscene = false
@@ -643,8 +652,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         buffsNode.position = CGPoint(x: -(size.width / 2) + hudMargin, y: (size.height / 2) - 140)
         uiNode.addChild(buffsNode)
         
-        // --- Performance Improvement: Create buff indicators once ---
-        func createBuffIndicator(text: String, color: UIColor, iconName: String? = nil) -> SKNode {
+        // --- Create timed/special buff indicators ---
+        // This helper creates the vertical list of timed buffs (Rocket, Super Jump, etc.)
+        func createTimedBuffIndicator(color: UIColor, iconName: String? = nil) -> SKNode {
             let node = SKNode()
             let bg = SKShapeNode(rectOf: CGSize(width: 120, height: 24), cornerRadius: 12)
             bg.fillColor = .black.withAlphaComponent(0.5)
@@ -654,7 +664,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
             bg.name = "background"
 
             let lbl = SKLabelNode(fontNamed: Configuration.Fonts.buffIndicator.name)
-            lbl.text = text
+            lbl.text = ""
             lbl.fontSize = Configuration.Fonts.buffIndicator.size
             lbl.fontColor = .white
             lbl.verticalAlignmentMode = .center
@@ -666,13 +676,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
                 icon.size = CGSize(width: 16, height: 16)
                 icon.name = "icon"
                 bg.addChild(icon)
-
-                // Position icon on the left, label on the right
                 icon.position = CGPoint(x: -45, y: 0)
                 lbl.horizontalAlignmentMode = .left
                 lbl.position = CGPoint(x: -30, y: 0)
             } else {
-                // Center label if no icon
                 lbl.horizontalAlignmentMode = .center
                 lbl.position = CGPoint(x: 0, y: 0)
             }
@@ -682,31 +689,23 @@ class GameScene: SKScene, CollisionManagerDelegate {
             return node
         }
 
-        vestBuffNode = createBuffIndicator(text: "VEST", color: .orange, iconName: "lifevest")
-        honeyBuffNode = createBuffIndicator(text: "HONEY", color: .yellow, iconName: "honeyPot")
-        axeBuffNode = createBuffIndicator(text: "AXE", color: .brown, iconName: "ax")
-        swatterBuffNode = createBuffIndicator(text: "SWATTER", color: .green, iconName: "swatter")
-        crossBuffNode = createBuffIndicator(text: "CROSS", color: .white, iconName: "cross")
-        rocketBuffNode = createBuffIndicator(text: "ROCKET", color: .red, iconName: "rocket")
-        superJumpBuffNode = createBuffIndicator(text: "SUPER JUMP", color: .cyan, iconName:  "lightning")
-        bootsBuffNode = createBuffIndicator(text: "BOOTS", color: .blue, iconName: "rainboots")
-        crocRideBuffNode = createBuffIndicator(text: "CROC RIDE", color: .green)
+        rocketBuffNode = createTimedBuffIndicator(color: .red, iconName: "rocket")
+        superJumpBuffNode = createTimedBuffIndicator(color: .cyan, iconName:  "lightning")
+        crocRideBuffNode = createTimedBuffIndicator(color: .green)
         
-        buffsNode.addChild(vestBuffNode)
-        buffsNode.addChild(honeyBuffNode)
-        buffsNode.addChild(axeBuffNode)
-        buffsNode.addChild(swatterBuffNode)
-        buffsNode.addChild(crossBuffNode)
+        buffsNode.addChild(buffsGridNode) // Add container for grid items
         buffsNode.addChild(rocketBuffNode)
         buffsNode.addChild(superJumpBuffNode)
-        buffsNode.addChild(bootsBuffNode)
         buffsNode.addChild(crocRideBuffNode)
-        // --- End performance improvement ---
+        
+        // All bottom-anchored UI should respect the safe area.
+        let bottomSafeArea = view?.safeAreaInsets.bottom ?? 0
+        let screenBottomY = -(size.height / 2)
         
         descendBg.fillColor = UIColor(red: 231/255, green: 76/255, blue: 60/255, alpha: 1)
         descendBg.strokeColor = .white
         descendBg.lineWidth = 3
-        descendBg.position = CGPoint(x: 0, y: -(size.height / 2) + 100)
+        descendBg.position = CGPoint(x: 0, y: screenBottomY + bottomSafeArea + 100)
         descendBg.isHidden = true
         uiNode.addChild(descendBg)
         descendButton.text = "DESCEND!"
@@ -718,7 +717,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         pauseBg.fillColor = .black.withAlphaComponent(0.5)
         pauseBg.strokeColor = .white
         pauseBg.lineWidth = 2
-        pauseBg.position = CGPoint(x: 0, y: -(size.height / 2) + 60)
+        pauseBg.position = CGPoint(x: 0, y: screenBottomY + bottomSafeArea + 60)
         let pauseIcon = SKLabelNode(text: "II")
         pauseIcon.fontName = Configuration.Fonts.pauseIcon.name
         pauseIcon.fontSize = Configuration.Fonts.pauseIcon.size
@@ -732,8 +731,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         cannonJumpBg.fillColor = UIColor(red: 142/255, green: 68/255, blue: 173/255, alpha: 1.0) // Purple
         cannonJumpBg.strokeColor = .white
         cannonJumpBg.lineWidth = 3
-       // cannonJumpBg.position = CGPoint(x: -(size.width / 2) + 100 + hudMargin, y: -(size.height / 2) + 100)
-        cannonJumpBg.position = CGPoint(x: 100, y: -(size.height / 2) + 60)
+        cannonJumpBg.position = CGPoint(x: 100, y: screenBottomY + bottomSafeArea + 60)
         
         cannonJumpBg.isHidden = true // Hide until unlocked
         uiNode.addChild(cannonJumpBg)
@@ -764,7 +762,13 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private func setupRaceHUD() {
         guard gameMode == .beatTheBoat else { return }
         
-        raceProgressNode.position = CGPoint(x: 0, y: scoreLabel.position.y - 600)
+        // Position the race progress bar at the bottom of the screen,
+        // respecting the safe area.
+        let bottomSafeArea = view?.safeAreaInsets.bottom ?? 0
+        let verticalMargin: CGFloat = 20.0 // Padding from the safe area edge
+        let yPosition = -(size.height / 2) + bottomSafeArea + verticalMargin
+        
+        raceProgressNode.position = CGPoint(x: 0, y: yPosition)
         uiNode.addChild(raceProgressNode)
         
         let barWidth: CGFloat = 200
@@ -922,82 +926,190 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
     }
 
-    // --- Performance Improvement: Update existing HUD nodes ---
-    // This function now shows/hides and updates pre-created nodes
-    // instead of destroying and recreating them every frame.
+    /// Calculates the required width for a buff item display node.
+    private func calculateBuffItemWidth(count: Int) -> CGFloat {
+        let iconWidth: CGFloat = 24
+        let horizontalPadding: CGFloat = 8
+        let spacing: CGFloat = 4
+        
+        var totalWidth = horizontalPadding + iconWidth + horizontalPadding
+        
+        if count > 1 {
+            let label = SKLabelNode(fontNamed: Configuration.Fonts.buffIndicator.name)
+            label.fontSize = Configuration.Fonts.buffIndicator.size
+            label.text = "x\(count)"
+            totalWidth += spacing + label.frame.width
+        }
+        
+        return totalWidth
+    }
+
+    /// Creates a complete visual node for a buff item, including icon, count, and background.
+    private func createBuffItemNode(iconName: String, count: Int, borderColor: UIColor) -> SKNode {
+        let node = SKNode()
+        let itemHeight: CGFloat = 34
+        
+        // 1. Calculate width and create background
+        let totalWidth = calculateBuffItemWidth(count: count)
+        let bg = SKShapeNode(rectOf: CGSize(width: totalWidth, height: itemHeight), cornerRadius: 12)
+        bg.fillColor = .black.withAlphaComponent(0.5)
+        bg.strokeColor = borderColor
+        bg.lineWidth = 2
+        bg.position = CGPoint(x: totalWidth / 2, y: 0) // Center the background shape in its frame
+        node.addChild(bg)
+        
+        // 2. Create and position icon
+        let icon = SKSpriteNode(imageNamed: iconName)
+        icon.size = CGSize(width: 24, height: 24)
+        let horizontalPadding: CGFloat = 8
+        icon.position = CGPoint(x: horizontalPadding + icon.size.width / 2, y: 0)
+        node.addChild(icon)
+        
+        // 3. Create and position count label if needed
+        if count > 1 {
+            let label = SKLabelNode(fontNamed: Configuration.Fonts.buffIndicator.name)
+            label.text = "x\(count)"
+            label.fontSize = Configuration.Fonts.buffIndicator.size
+            label.fontColor = .white
+            label.verticalAlignmentMode = .center
+            label.horizontalAlignmentMode = .left
+            
+            let spacing: CGFloat = 4
+            label.position = CGPoint(x: icon.position.x + icon.size.width / 2 + spacing, y: 0)
+            node.addChild(label)
+        }
+        
+        return node
+    }
+
     private func updateBuffsHUD() {
-        var yOffset: CGFloat = 0
-        let buffNodes: [SKNode?] = [
-            vestBuffNode, honeyBuffNode, axeBuffNode, swatterBuffNode,
-            crossBuffNode, rocketBuffNode, superJumpBuffNode,
-            bootsBuffNode, crocRideBuffNode
-        ]
+        // 1. Hide timed/special buff nodes initially. They will be re-enabled and positioned later if active.
+        rocketBuffNode.isHidden = true
+        superJumpBuffNode.isHidden = true
+        crocRideBuffNode.isHidden = true
         
-        // Hide all nodes initially, we will un-hide the active ones.
-        buffNodes.forEach { $0?.isHidden = true }
-        
-        func updateAndPositionBuffNode(_ node: SKNode, text: String, showIcon: Bool = true) {
-            // Find the label by name using a recursive search.
-            if let label = node.childNode(withName: "//label") as? SKLabelNode {
-                label.text = text
-                
-                // Adjust label position based on whether the icon is shown,
-                // to keep text centered or left-aligned as needed.
-                if let icon = node.childNode(withName: "//icon") {
-                    icon.isHidden = !showIcon
-                    if showIcon {
-                        label.horizontalAlignmentMode = .left
-                        label.position = CGPoint(x: -30, y: 0)
-                    } else {
-                        label.horizontalAlignmentMode = .center
-                        label.position = CGPoint(x: 0, y: 0)
-                    }
-                }
+        // 2. Define the buffs to be displayed in the grid.
+        struct BuffDisplayInfo {
+            let count: Int
+            let iconName: String
+            let specialState: SpecialState?
+            
+            enum SpecialState {
+                case bootsActive
+                case bootsInactive
             }
-            node.position.y = yOffset
-            node.isHidden = false
+        }
+
+        var gridBuffs: [BuffDisplayInfo] = []
+        
+        if frog.buffs.vest > 0 {
+            gridBuffs.append(.init(count: frog.buffs.vest, iconName: "lifevest", specialState: nil))
+        }
+        if frog.buffs.honey > 0 {
+            gridBuffs.append(.init(count: frog.buffs.honey, iconName: "honeyPot", specialState: nil))
+        }
+        if frog.buffs.axe > 0 {
+            gridBuffs.append(.init(count: frog.buffs.axe, iconName: "ax", specialState: nil))
+        }
+        if frog.buffs.swatter > 0 {
+            gridBuffs.append(.init(count: frog.buffs.swatter, iconName: "swatter", specialState: nil))
+        }
+        if frog.buffs.cross > 0 {
+            gridBuffs.append(.init(count: frog.buffs.cross, iconName: "cross", specialState: nil))
+        }
+        if frog.buffs.bootsCount > 0 {
+            let state: BuffDisplayInfo.SpecialState = frog.isWearingBoots ? .bootsActive : .bootsInactive
+            gridBuffs.append(.init(count: frog.buffs.bootsCount, iconName: "rainboots", specialState: state))
+        }
+        
+        // 3. Clear and rebuild the grid.
+        buffsGridNode.removeAllChildren()
+
+        let itemHeight: CGFloat = 34
+        let rowSpacing: CGFloat = 6
+        let columnSpacing: CGFloat = 6
+        let itemsPerRow = 2
+        var lastItemWidth: CGFloat = 0
+
+        for (index, buffInfo) in gridBuffs.enumerated() {
+            let borderColor: UIColor
+            if let state = buffInfo.specialState {
+                switch state {
+                case .bootsActive: borderColor = .green
+                case .bootsInactive: borderColor = .blue
+                }
+            } else {
+                borderColor = .orange
+            }
+            
+            let node = createBuffItemNode(
+                iconName: buffInfo.iconName,
+                count: buffInfo.count,
+                borderColor: borderColor
+            )
+            
+            let row = index / itemsPerRow
+            let col = index % itemsPerRow
+            
+            let xPos = (col == 0) ? 0 : lastItemWidth + columnSpacing
+            let yPos = -CGFloat(row) * (itemHeight + rowSpacing)
+            
+            node.position = CGPoint(x: xPos, y: yPos)
+            buffsGridNode.addChild(node)
+            
+            if col == 0 {
+                lastItemWidth = node.calculateAccumulatedFrame().width
+            } else {
+                lastItemWidth = 0 // Reset for the next row
+            }
+        }
+
+        // 4. Position the timed buffs below the grid.
+        let gridHeight = buffsGridNode.calculateAccumulatedFrame().height
+        var yOffset: CGFloat = gridBuffs.isEmpty ? 0 : -(gridHeight + 10)
+        
+        // Rocket
+        if frog.rocketTimer > 0 {
+            if let label = rocketBuffNode.childNode(withName: "//label") as? SKLabelNode {
+                label.text = "\(Int(ceil(Double(frog.rocketTimer) / 60.0)))s"
+                if let icon = rocketBuffNode.childNode(withName: "//icon") { icon.isHidden = false }
+                label.horizontalAlignmentMode = .left
+                label.position = CGPoint(x: -30, y: 0)
+            }
+            rocketBuffNode.position.y = yOffset
+            rocketBuffNode.isHidden = false
+            yOffset -= 30
+        } else if frog.rocketState == .landing {
+            if let label = rocketBuffNode.childNode(withName: "//label") as? SKLabelNode {
+                label.text = "⚠ DESCEND"
+                if let icon = rocketBuffNode.childNode(withName: "//icon") { icon.isHidden = true }
+                label.horizontalAlignmentMode = .center
+                label.position = CGPoint(x: 0, y: 0)
+            }
+            rocketBuffNode.position.y = yOffset
+            rocketBuffNode.isHidden = false
             yOffset -= 30
         }
         
-        if frog.buffs.vest > 0 {
-            updateAndPositionBuffNode(vestBuffNode, text: "VEST x\(frog.buffs.vest)")
-        }
-        if frog.buffs.honey > 0 {
-            updateAndPositionBuffNode(honeyBuffNode, text: "x\(frog.buffs.honey)")
-        }
-        if frog.buffs.axe > 0 {
-            updateAndPositionBuffNode(axeBuffNode, text: "🪓 AXE x\(frog.buffs.axe)")
-        }
-        if frog.buffs.swatter > 0 {
-            updateAndPositionBuffNode(swatterBuffNode, text: "x\(frog.buffs.swatter)")
-        }
-        if frog.buffs.cross > 0 {
-            updateAndPositionBuffNode(crossBuffNode, text: "x\(frog.buffs.cross)")
-        }
-        
-        if frog.rocketTimer > 0 {
-            let sec = Int(ceil(Double(frog.rocketTimer) / 60.0))
-            updateAndPositionBuffNode(rocketBuffNode, text: "\(sec)s")
-        } else if frog.rocketState == .landing {
-            updateAndPositionBuffNode(rocketBuffNode, text: "⚠ DESCEND", showIcon: false)
-        }
-        
+        // Super Jump
         if frog.buffs.superJumpTimer > 0 {
-            let sec = Int(ceil(Double(frog.buffs.superJumpTimer) / 60.0))
-            updateAndPositionBuffNode(superJumpBuffNode, text: "⚡️ \(sec)s")
-        }
-        
-        if frog.buffs.bootsCount > 0 {
-            let label = frog.isWearingBoots ? "ACTIVE" : "x\(frog.buffs.bootsCount)"
-            updateAndPositionBuffNode(bootsBuffNode, text: label)
-            if let bg = bootsBuffNode.children.first as? SKShapeNode {
-                bg.strokeColor = frog.isWearingBoots ? .green : .blue
+            if let label = superJumpBuffNode.childNode(withName: "//label") as? SKLabelNode {
+                label.text = "\(Int(ceil(Double(frog.buffs.superJumpTimer) / 60.0)))s"
             }
+            superJumpBuffNode.position.y = yOffset
+            superJumpBuffNode.isHidden = false
+            yOffset -= 30
         }
         
+        // Croc Ride
         if let croc = ridingCrocodile, croc.isCarryingFrog {
-            let remaining = Int(ceil(croc.remainingRideTime()))
-            updateAndPositionBuffNode(crocRideBuffNode, text: "🐊 RIDE \(remaining)s")
+            if let label = crocRideBuffNode.childNode(withName: "//label") as? SKLabelNode {
+                let remaining = Int(ceil(croc.remainingRideTime()))
+                label.text = "🐊 RIDE \(remaining)s"
+            }
+            crocRideBuffNode.position.y = yOffset
+            crocRideBuffNode.isHidden = false
+            yOffset -= 30
         }
     }
     
@@ -1011,7 +1123,13 @@ class GameScene: SKScene, CollisionManagerDelegate {
             ChallengeManager.shared.recordScoreUpdate(currentScore: score)
         }
         coinLabel.text = "\(totalCoins)"
-        updateBuffsHUD()
+        
+        // --- Performance Optimization: Conditional HUD Update ---
+        // Only rebuild the buff display if the buffs have actually changed.
+        if frog.buffs != lastKnownBuffs {
+            updateBuffsHUD()
+            lastKnownBuffs = frog.buffs
+        }
 
         // Update Cannon Jump Button
         if PersistenceManager.shared.hasCannonJump {
@@ -1120,6 +1238,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         spawnInitialPads()
         drawHearts()
         updateBuffsHUD()
+        lastKnownBuffs = frog.buffs // Initialize buff state for comparison
         descendBg.isHidden = true
         setWeather(.sunny, duration: 0.0)
         stopDrowningGracePeriod()
@@ -1142,12 +1261,16 @@ class GameScene: SKScene, CollisionManagerDelegate {
     
     private func setupRace() {
         // Spawn the boat just behind the starting line
+        ToolTips.showToolTip(forKey: "race", in: self)
+
         let boatInstance = Boat(position: CGPoint(x: Configuration.Dimensions.riverWidth / 2 - 250, y: -50), wakeTargetNode: worldNode)
+        boatInstance.speedMultiplier = self.boatSpeedMultiplier
         worldNode.addChild(boatInstance)
         self.boat = boatInstance
         
         // Create the finish line
-        let finishY = Configuration.GameRules.boatRaceFinishY
+        
+        let finishY = Configuration.GameRules.boatRaceFinishY + CGFloat(ChallengeManager.shared.stats.currentWinningStreak * 1000)
         let path = CGMutablePath()
         path.move(to: CGPoint(x: 0, y: finishY))
         path.addLine(to: CGPoint(x: Configuration.Dimensions.riverWidth, y: finishY))
@@ -1234,64 +1357,85 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let dt = currentTime - lastUpdateTime
         lastUpdateTime = currentTime
         
-        // Increment frame counter for throttling
         frameCount += 1
         
-        // 1. EARLY EXIT: Pause logic
         guard coordinator?.currentState == .playing && !isGameEnding && !isInCutscene else { return }
         
-        // 2. CHECK PENDING EVENTS (Low Cost)
         checkPendingDesertTransition()
         
-        // 3. DEFINE ACTIVE WINDOW (Optimization Core)
-        // We only care about entities roughly one screen height above and below the camera
         let camY = cam.position.y
         let viewHeight = size.height
         let activeLowerBound = camY - viewHeight
         let activeUpperBound = camY + viewHeight
         
-        // 4. FILTER ACTIVE ENTITIES
-        // Swift's `filter` is fast, but for very large arrays, maintaining a separate "active" set is better.
-        // However, given the array sizes here, filter is sufficient and safer for now.
+        // --- Performance Optimization: Clear active entity arrays ---
+        // Use removeAll with keepingCapacity to avoid de-allocating the array's buffer.
+        activePads.removeAll(keepingCapacity: true)
+        activeEnemies.removeAll(keepingCapacity: true)
+        activeCoins.removeAll(keepingCapacity: true)
+        activeCrocodiles.removeAll(keepingCapacity: true)
+        activeTreasureChests.removeAll(keepingCapacity: true)
+        activeSnakes.removeAll(keepingCapacity: true)
+        activeFlies.removeAll(keepingCapacity: true)
         
-        // Optimization: Only filter pads that actually DO something (moving, shrinking, logs)
-        // Static pads don't need an .update() call, they only need collision checks.
-        let activePads = pads.filter { $0.position.y > activeLowerBound && $0.position.y < activeUpperBound }
-        
-        // 5. UPDATE ENTITIES
+        // --- Main Entity Update Loop ---
         frog.update(dt: dt, weather: currentWeather)
         
-        // Only update pads that have logic (skip static ones to save CPU)
-        for pad in activePads where (pad.type == .moving || pad.type == .log || pad.type == .shrinking || pad.type == .waterLily) {
-            pad.update(dt: dt)
+        // --- Performance Optimization: Single-pass filtering and updating ---
+        // Iterate through each entity list once to update it and determine if it's "active" (on-screen).
+        
+        for pad in pads {
+            if pad.position.y > activeLowerBound && pad.position.y < activeUpperBound {
+                // Only update pads that have logic (e.g., moving, shrinking)
+                if pad.type == .moving || pad.type == .log || pad.type == .shrinking || pad.type == .waterLily {
+                    pad.update(dt: dt)
+                }
+                activePads.append(pad)
+            }
         }
         
-        // Filter and update enemies
-        let activeEnemies = enemies.filter { $0.position.y > activeLowerBound && $0.position.y < activeUpperBound }
-        for enemy in activeEnemies {
-            enemy.update(dt: dt, target: frog.position)
+        for enemy in enemies {
+            if enemy.position.y > activeLowerBound && enemy.position.y < activeUpperBound {
+                enemy.update(dt: dt, target: frog.position)
+                activeEnemies.append(enemy)
+            }
         }
         
-        // Filter and update crocodiles
-        let activeCrocs = crocodiles.filter { $0.position.y > activeLowerBound && $0.position.y < activeUpperBound }
-        for crocodile in activeCrocs {
-            crocodile.update(dt: dt, frogPosition: frog.position, frogZHeight: frog.zHeight)
+        for crocodile in crocodiles {
+            if crocodile.position.y > activeLowerBound && crocodile.position.y < activeUpperBound {
+                crocodile.update(dt: dt, frogPosition: frog.position, frogZHeight: frog.zHeight)
+                activeCrocodiles.append(crocodile)
+            }
         }
         
-        // Filter flies
-        let activeFlies = flies.filter { $0.position.y > activeLowerBound && $0.position.y < activeUpperBound }
-        for fly in activeFlies { fly.update(dt: dt) }
+        for fly in flies {
+            if fly.position.y > activeLowerBound && fly.position.y < activeUpperBound {
+                fly.update(dt: dt)
+                activeFlies.append(fly)
+            }
+        }
+        
+        for coin in coins {
+            if coin.position.y > activeLowerBound && coin.position.y < activeUpperBound {
+                activeCoins.append(coin)
+            }
+        }
+        
+        for chest in treasureChests {
+            if chest.position.y > activeLowerBound && chest.position.y < activeUpperBound {
+                activeTreasureChests.append(chest)
+            }
+        }
 
-        // Update Snakes (Respond to logic)
-        // Note: We don't filter snakes strictly by Y for update because they move horizontally and might be just offscreen
         var snakesToRespawn: [Snake] = []
         for snake in snakes {
-            // Optimization: Only update physics if relatively close
+            // Snakes are wide, so give them a larger vertical activity window
             if abs(snake.position.y - camY) < viewHeight * 1.5 {
                 let reachedEnd = snake.update(dt: dt, pads: activePads)
                 if reachedEnd && !snake.isDestroyed {
                     snakesToRespawn.append(snake)
                 }
+                activeSnakes.append(snake)
             }
         }
         snakesToRespawn.forEach { respawnSnake($0) }
@@ -1302,27 +1446,23 @@ class GameScene: SKScene, CollisionManagerDelegate {
             frog.velocity = .zero
         }
         
-        // 6. OPTIMIZED COLLISION DETECTION
-        // Pass ONLY the active entities to the collision manager.
-        // This reduces O(N*M) checks significantly.
-        let activeCoins = coins.filter { $0.position.y > activeLowerBound && $0.position.y < activeUpperBound }
-        let activeChests = treasureChests.filter { $0.position.y > activeLowerBound && $0.position.y < activeUpperBound }
-        
+        // --- Optimized Collision Detection ---
+        // Pass only the active entities to the collision manager.
         collisionManager.update(
             frog: frog,
             pads: activePads,
             enemies: activeEnemies,
             coins: activeCoins,
-            crocodiles: activeCrocs,
-            treasureChests: activeChests,
-            snakes: snakes, // Snakes count is low, pass all
+            crocodiles: activeCrocodiles,
+            treasureChests: activeTreasureChests,
+            snakes: activeSnakes,
             flies: activeFlies,
             boat: boat
         )
         
-        // 7. VISUALS & LOGIC
+        // --- Visuals & Logic ---
         checkWeatherChange()
-        updateWaterVisuals() // Already optimized in previous code
+        updateWaterVisuals()
         updateRaceState(dt: dt)
         updateDrowningGracePeriod(dt: dt)
         
@@ -1342,22 +1482,19 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         updateMoonlightPosition()
         updateCamera()
-        
-        // Optimization: Don't update HUD text every single frame if values haven't changed.
-        // (Assuming updateHUDVisuals handles internal checks, otherwise consider throttling this too)
         updateHUDVisuals()
         
-        // 8. GENERATION & CLEANUP
-        // Check generation only if we are near the top
+        // --- Generation & Cleanup ---
         if let lastPad = pads.last, lastPad.position.y < cam.position.y + size.height {
             generateNextLevelSlice(lastPad: lastPad)
         }
         
-        // THROTTLED CLEANUP: Only run cleanup every 30 frames (0.5s at 60fps)
+        // THROTTLED CLEANUP: Only run cleanup every 30 frames
         if frameCount % 30 == 0 {
             cleanupOffscreenEntities()
         }
     }
+
     private func updateRaceState(dt: TimeInterval) {
         guard gameMode == .beatTheBoat, raceState == .racing, let boat = boat, !isGameEnding else { return }
         
@@ -1451,7 +1588,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         switch result {
         case .win:
-            coinsWon += Configuration.GameRules.boatRaceReward
+            coinsWon += Configuration.GameRules.boatRaceReward + self.raceRewardBonus
             SoundManager.shared.play("coin") // TODO: Add a proper victory sound
         case .lose:
             SoundManager.shared.play("gameOver")
@@ -3193,7 +3330,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
     @objc func handleUpgrade(_ notification: Notification) {
         guard let id = notification.userInfo?["id"] as? String else { return }
         applyUpgrade(id: id)
-        updateBuffsHUD()
+        // No need to call updateBuffsHUD directly, the main loop will catch the change.
     }
     private func applyUpgrade(id: String) {
         switch id {
@@ -3275,7 +3412,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
             score: score,
             coinsCollected: coinsCollectedThisRun,
             padsLanded: padsLandedThisRun,
-            consecutiveJumps: bestConsecutiveJumps
+            consecutiveJumps: bestConsecutiveJumps,
+            consecutiveRaces:ChallengeManager.shared.stats.currentWinningStreak
         )
     }
 }

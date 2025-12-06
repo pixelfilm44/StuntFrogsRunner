@@ -53,15 +53,17 @@ class HelpViewController: UIViewController {
     
     // MARK: - UI Elements
     
-    private lazy var containerView: UIView = {
-        let view = UIView()
-        view.backgroundColor = UIColor(red: 30/255, green: 30/255, blue: 40/255, alpha: 1)
-        view.layer.cornerRadius = 24
-        view.layer.borderWidth = 3
-        view.layer.borderColor = UIColor.white.cgColor
-        view.clipsToBounds = true
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
+    private lazy var containerView: UIImageView = {
+        let imageView = UIImageView()
+        if let image = UIImage(named: "toolTipBackdrop") {
+            // This image is assumed to be a 9-patch style image, where the corners and edges
+            // are preserved when scaling. These insets define the non-scalable parts.
+            let capInsets = UIEdgeInsets(top: 50, left: 50, bottom: 50, right: 50)
+            imageView.image = image.resizableImage(withCapInsets: capInsets, resizingMode: .stretch)
+        }
+        imageView.isUserInteractionEnabled = true // Allow subviews (like buttons) to receive touches
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
     }()
     
     private lazy var closeButton: UIButton = {
@@ -108,24 +110,22 @@ class HelpViewController: UIViewController {
     }()
     
     private lazy var nextButton: UIButton = {
-        let button = UIButton(type: .system)
+        let button = UIButton(type: .custom)
+        button.setBackgroundImage(UIImage(named: "primaryButton"), for: .normal)
         button.setTitle("NEXT →", for: .normal)
         button.titleLabel?.font = UIFont.systemFont(ofSize: 18, weight: .bold)
-        button.setTitleColor(.white, for: .normal)
-        button.backgroundColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
-        button.layer.cornerRadius = 20
+        button.setTitleColor(UIColor(red: 186/255, green: 96/255, blue: 2/255, alpha: 1), for: .normal)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(handleNext), for: .touchUpInside)
         return button
     }()
     
     private lazy var prevButton: UIButton = {
-        let button = UIButton(type: .system)
+        let button = UIButton(type: .custom)
+        button.setBackgroundImage(UIImage(named: "secondaryButton"), for: .normal)
         button.setTitle("← PREV", for: .normal)
         button.titleLabel?.font = UIFont.systemFont(ofSize: 18, weight: .bold)
-        button.setTitleColor(.white, for: .normal)
-        button.backgroundColor = UIColor(red: 100/255, green: 100/255, blue: 110/255, alpha: 1)
-        button.layer.cornerRadius = 20
+        button.setTitleColor(UIColor(red: 93/255, green: 173/255, blue: 226/255, alpha: 1), for: .normal)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(handlePrev), for: .touchUpInside)
         button.isHidden = true
@@ -272,12 +272,8 @@ class HelpViewController: UIViewController {
         
         if currentPage == slides.count - 1 {
             nextButton.setTitle("GOT IT!", for: .normal)
-            nextButton.backgroundColor = UIColor(red: 241/255, green: 196/255, blue: 15/255, alpha: 1)
-            nextButton.setTitleColor(UIColor(red: 211/255, green: 84/255, blue: 0/255, alpha: 1), for: .normal)
         } else {
             nextButton.setTitle("NEXT →", for: .normal)
-            nextButton.backgroundColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
-            nextButton.setTitleColor(.white, for: .normal)
         }
     }
     
