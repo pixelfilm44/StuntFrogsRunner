@@ -17,7 +17,11 @@ class PersistenceManager {
         static let honeyItems = "sf_consumable_honey_items"
         static let vestItems = "sf_consumable_vest_items"
         static let cannonJump = "sf_upgrade_cannonJump" // NEW Key
-
+        static let crossItems = "sf_consumable_cross_items"
+        static let swatterItems = "sf_consumable_swatter_items"
+        static let axeItems = "sf_consumable_axe_items"
+        static let doubleSuperJumpTime = "sf_upgrade_double_superjump_time"
+        static let doubleRocketTime = "sf_upgrade_double_rocket_time"
     }
     
     private init() {}
@@ -73,6 +77,57 @@ class PersistenceManager {
     func useVestItem() -> Bool {
         if vestItems > 0 {
             defaults.set(vestItems - 1, forKey: Keys.vestItems)
+            return true
+        }
+        return false
+    }
+    
+    var crossItems: Int {
+        return defaults.integer(forKey: Keys.crossItems)
+    }
+    
+    func addCrossItems(_ amount: Int) {
+        let newTotal = crossItems + amount
+        defaults.set(newTotal, forKey: Keys.crossItems)
+    }
+    
+    func useCrossItem() -> Bool {
+        if crossItems > 0 {
+            defaults.set(crossItems - 1, forKey: Keys.crossItems)
+            return true
+        }
+        return false
+    }
+    
+    var swatterItems: Int {
+        return defaults.integer(forKey: Keys.swatterItems)
+    }
+    
+    func addSwatterItems(_ amount: Int) {
+        let newTotal = swatterItems + amount
+        defaults.set(newTotal, forKey: Keys.swatterItems)
+    }
+    
+    func useSwatterItem() -> Bool {
+        if swatterItems > 0 {
+            defaults.set(swatterItems - 1, forKey: Keys.swatterItems)
+            return true
+        }
+        return false
+    }
+    
+    var axeItems: Int {
+        return defaults.integer(forKey: Keys.axeItems)
+    }
+    
+    func addAxeItems(_ amount: Int) {
+        let newTotal = axeItems + amount
+        defaults.set(newTotal, forKey: Keys.axeItems)
+    }
+    
+    func useAxeItem() -> Bool {
+        if axeItems > 0 {
+            defaults.set(axeItems - 1, forKey: Keys.axeItems)
             return true
         }
         return false
@@ -136,6 +191,24 @@ class PersistenceManager {
     
     func unlockRocketJump() {
         defaults.set(true, forKey: Keys.rocketJump)
+    }
+    
+    // MARK: - Permanent Power-Up Upgrades
+    
+    var hasDoubleSuperJumpTime: Bool {
+        return defaults.bool(forKey: Keys.doubleSuperJumpTime)
+    }
+    
+    func unlockDoubleSuperJumpTime() {
+        defaults.set(true, forKey: Keys.doubleSuperJumpTime)
+    }
+    
+    var hasDoubleRocketTime: Bool {
+        return defaults.bool(forKey: Keys.doubleRocketTime)
+    }
+    
+    func unlockDoubleRocketTime() {
+        defaults.set(true, forKey: Keys.doubleRocketTime)
     }
     
     // MARK: - Help Tutorial

@@ -152,6 +152,9 @@ class GameOverViewController: UIViewController {
                 case .drowned:
                     titleLabel.text = "SPLASH!"
                     scoreLabel.text = "You drowned in the river."
+                case .missedLaunchPad:
+                    titleLabel.text = "MISSED IT!"
+                    scoreLabel.text = "You missed the launch pad."
                 }
             }
         } else {

@@ -35,6 +35,7 @@ struct Configuration {
         static let night = SKColor(red: 12/255, green: 21/255, blue: 32/255, alpha: 1)
         static let winter = SKColor(red: 160/255, green: 190/255, blue: 220/255, alpha: 1)
         static let desert = SKColor(red: 240/255, green: 210/255, blue: 120/255, alpha: 1) // Sandy sky for desert
+        static let space = SKColor.black // Deep space
         static let blackVoid = SKColor.black // Instant death water for desert
     }
     
@@ -181,10 +182,10 @@ struct Configuration {
     
     struct GameRules {
         static let coinsForUpgradeTrigger = 10
-        static let rocketDuration: TimeInterval = 7.0
+        static let rocketDuration: TimeInterval = 30.0
         static let rocketLandingDuration: TimeInterval = 5.0
         static let bootsDuration: TimeInterval = 5.0
-        static let superJumpDuration: TimeInterval = 10.0
+        static let superJumpDuration: TimeInterval = 90.0
         
         // MARK: - Beat the Boat Challenge
         static let boatRaceFinishY: CGFloat = 10000.0 // 2000m * 10 score units/meter
@@ -198,6 +199,38 @@ struct Configuration {
         static func isInstantDeathWater(for weather: WeatherType) -> Bool {
             return weather == .desert
         }
+        
+        // MARK: - Launch Pad Settings (Desert → Space)
+        
+        /// Score at which the launch pad appears (end of desert, before space transition)
+        /// Desert spans 2400-3000, launch pad appears at 2900 (100m before space)
+        static let launchPadSpawnScore: Int = 2900
+        
+        /// Score at which space begins (after successful launch pad jump)
+        static let spaceStartScore: Int = 3000
+        
+        /// Duration of fade to black transition during launch
+        static let launchFadeOutDuration: TimeInterval = 1.0
+        
+        /// Duration of fade from black transition during launch
+        static let launchFadeInDuration: TimeInterval = 1.0
+        
+        /// Pause duration while screen is fully black during launch
+        static let launchBlackScreenDuration: TimeInterval = 0.5
+        
+        // MARK: - Warp Pad Settings (End of Space → Return to Day)
+        
+        /// Score at which the warp pad appears (end of space)
+        static let warpPadSpawnScore: Int = 25000
+        
+        /// Duration of fade to black transition
+        static let warpFadeOutDuration: TimeInterval = 1.0
+        
+        /// Duration of fade from black transition
+        static let warpFadeInDuration: TimeInterval = 1.0
+        
+        /// Pause duration while screen is fully black
+        static let warpBlackScreenDuration: TimeInterval = 0.5
     }
     
     /// Progressive difficulty settings - scales every 500m traveled
@@ -287,11 +320,11 @@ struct Configuration {
         /// Minimum score before snakes can appear
         static let snakeStartScore: Int = 3000
         /// Base probability of spawning a snake (once unlocked)
-        static let baseSnakeProbability: Double = 0.08
+        static let baseSnakeProbability: Double = 0.12  // Increased from 0.08 for better visibility
         /// Additional snake probability per level after unlock
-        static let snakeProbabilityPerLevel: Double = 0.03
+        static let snakeProbabilityPerLevel: Double = 0.04  // Increased from 0.03
         /// Maximum snake spawn probability
-        static let maxSnakeProbability: Double = 0.25
+        static let maxSnakeProbability: Double = 0.35  // Increased from 0.25
         /// Maximum snakes on screen at once
         static let snakeMaxOnScreen: Int = 3
         
@@ -342,13 +375,30 @@ struct Configuration {
         static let lifevest4PackCost = 500
         static let honey4PackCost = 500
         static let cannonJumpCost = 1000
+        static let cross4PackCost = 500
+        static let swatter4PackCost = 500
+        static let axe4PackCost = 500
     }
     
     struct GameCenter {
         static let leaderboardID = "TopScores"
     }
+    
+    // MARK: - Debug Settings
+    struct Debug {
+        /// Set this to a non-zero value to start the game at a specific score for testing
+        /// Examples:
+        /// - 3000: Start at snake spawn threshold (space biome)
+        /// - 10000: Start in desert
+        /// - 19500: Start near space transition
+        /// - 20000: Start in space
+        static let startingScore: Int = 0  // Set to 0 to disable
+        
+        /// Enable to see weather transitions more quickly
+        static let debugMode: Bool = true
+    }
 }
 
 enum WeatherType: String, CaseIterable {
-    case sunny, night, rain, winter, desert
+    case sunny, night, rain, winter, desert, space
 }

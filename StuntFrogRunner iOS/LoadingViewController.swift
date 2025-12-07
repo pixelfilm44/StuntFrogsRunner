@@ -68,7 +68,8 @@ class LoadingViewController: UIViewController {
         
         // VFX Assets
         "spark",
-        "firefly"
+        "firefly",
+        "helpBackdrop"
     ]
     
     /// All audio assets to preload (sound effects)

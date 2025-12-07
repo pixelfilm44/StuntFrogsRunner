@@ -42,6 +42,12 @@ class HelpViewController: UIViewController {
             emoji: ""
         ),
         HelpSlide(
+            title: "Super Jump!",
+            description: "Grab the lightning bolt power-up to double your jump power and become invincible. Keep an eye on the timer!",
+            imageName: "lightning",
+            emoji: ""
+        ),
+        HelpSlide(
             title: "Upgrades",
             description: "Visit the shop to upgrade your jump and health. Complete challenges for bonus rewards!",
             imageName: nil,
@@ -55,7 +61,7 @@ class HelpViewController: UIViewController {
     
     private lazy var containerView: UIImageView = {
         let imageView = UIImageView()
-        if let image = UIImage(named: "toolTipBackdrop") {
+        if let image = UIImage(named: "helpBackdrop") {
             // This image is assumed to be a 9-patch style image, where the corners and edges
             // are preserved when scaling. These insets define the non-scalable parts.
             let capInsets = UIEdgeInsets(top: 50, left: 50, bottom: 50, right: 50)
@@ -63,6 +69,13 @@ class HelpViewController: UIViewController {
         }
         imageView.isUserInteractionEnabled = true // Allow subviews (like buttons) to receive touches
         imageView.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Add a thin brown border
+        imageView.layer.borderWidth = 3
+        imageView.layer.borderColor = UIColor(red: 160/255, green: 82/255, blue: 45/255, alpha: 1.0).cgColor
+        imageView.layer.cornerRadius = 15
+        imageView.clipsToBounds = true
+        
         return imageView
     }()
     
@@ -139,6 +152,27 @@ class HelpViewController: UIViewController {
         setupUI()
         setupSlides()
         updateNavigationButtons()
+    }
+    
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        
+        // Prepare for the animation by positioning the container view off-screen (above).
+        containerView.transform = CGAffineTransform(translationX: 0, y: -view.bounds.height)
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        
+        // Animate the container view into its final position with a spring/bounce effect.
+        UIView.animate(withDuration: 0.8,
+                       delay: 0,
+                       usingSpringWithDamping: 0.6,
+                       initialSpringVelocity: 0.2,
+                       options: .curveEaseOut,
+                       animations: {
+            self.containerView.transform = .identity
+        }, completion: nil)
     }
     
     // MARK: - Setup

@@ -14,6 +14,7 @@ enum RaceLossReason {
     case outrun
     case outOfHealth
     case drowned
+    case missedLaunchPad
 }
 
 enum RaceResult: Equatable {
@@ -25,7 +26,7 @@ protocol GameCoordinatorDelegate: AnyObject {
     func didRequestResume()
     func didSelectUpgrade(_ upgradeId: String)
     func gameDidEnd(score: Int, coins: Int, raceResult: RaceResult?)
-    func triggerUpgradeMenu(hasFullHealth: Bool)
+    func triggerUpgradeMenu(hasFullHealth: Bool, distanceTraveled: Int)
     func showShop()
     func didFinishLoading()
     func pauseGame()
@@ -168,12 +169,13 @@ class GameCoordinator: GameCoordinatorDelegate {
         }, completion: nil)
     }
     
-    func triggerUpgradeMenu(hasFullHealth: Bool) {
+    func triggerUpgradeMenu(hasFullHealth: Bool, distanceTraveled: Int) {
         guard currentState == .playing else { return }
         currentState = .upgradeSelection
         let upgradeVC = UpgradeViewController()
         upgradeVC.coordinator = self
         upgradeVC.hasFullHealth = hasFullHealth
+        upgradeVC.distanceTraveled = distanceTraveled
         upgradeVC.modalPresentationStyle = .overFullScreen
         upgradeVC.modalTransitionStyle = .crossDissolve
         window?.rootViewController?.present(upgradeVC, animated: false)

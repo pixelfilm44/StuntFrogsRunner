@@ -130,7 +130,7 @@ class ShopViewController: UIViewController {
         ])
     }
     
-    enum UpgradeType { case jump, health, logJumper, superJump, rocketJump, lifevestPack, honeyPack, cannonJump }
+    enum UpgradeType { case jump, health, logJumper, superJump, rocketJump, lifevestPack, honeyPack, cannonJump, crossPack, swatterPack, axePack }
     
     private func createItemView(type: UpgradeType) -> UIView {
         let cardView = UIView()
@@ -231,6 +231,27 @@ class ShopViewController: UIViewController {
             maxLevel = -1 // Indicates no max level
             title.text = "Honey Jars (4-Pack)"
             desc.text = "Get a honey jar every time you start. You have: \(currentItems)"
+        case .crossPack:
+            let currentItems = PersistenceManager.shared.crossItems
+            currentLevel = currentItems
+            cost = Configuration.Shop.cross4PackCost
+            maxLevel = -1 // Indicates no max level
+            title.text = "Crosses (4-Pack)"
+            desc.text = "Protect against snakes. You have: \(currentItems)"
+        case .swatterPack:
+            let currentItems = PersistenceManager.shared.swatterItems
+            currentLevel = currentItems
+            cost = Configuration.Shop.swatter4PackCost
+            maxLevel = -1 // Indicates no max level
+            title.text = "Dragonfly Swatters (4-Pack)"
+            desc.text = "Swat away dragonflies. You have: \(currentItems)"
+        case .axePack:
+            let currentItems = PersistenceManager.shared.axeItems
+            currentLevel = currentItems
+            cost = Configuration.Shop.axe4PackCost
+            maxLevel = -1 // Indicates no max level
+            title.text = "Axes (4-Pack)"
+            desc.text = "Chop through logs. You have: \(currentItems)"
         }
         
         let userCoins = PersistenceManager.shared.totalCoins
@@ -263,7 +284,7 @@ class ShopViewController: UIViewController {
             
             let buttonTitle: String
             switch type {
-            case .lifevestPack, .honeyPack:
+            case .lifevestPack, .honeyPack, .crossPack, .swatterPack, .axePack:
                 buttonTitle = "BUY"
             case .logJumper, .superJump, .rocketJump, .cannonJump:
                 buttonTitle = isPurchased ? "OWNED" : "UNLOCK"
@@ -416,6 +437,9 @@ class ShopViewController: UIViewController {
         stackView.addArrangedSubview(createSectionHeader(title: "CONSUMABLES"))
         stackView.addArrangedSubview(createItemView(type: .lifevestPack))
         stackView.addArrangedSubview(createItemView(type: .honeyPack))
+        stackView.addArrangedSubview(createItemView(type: .crossPack))
+        stackView.addArrangedSubview(createItemView(type: .swatterPack))
+        stackView.addArrangedSubview(createItemView(type: .axePack))
     }
     
     private func attemptPurchase(type: UpgradeType, cost: Int) {
@@ -432,6 +456,9 @@ class ShopViewController: UIViewController {
             case .lifevestPack: PersistenceManager.shared.addVestItems(4)
             case .honeyPack: PersistenceManager.shared.addHoneyItems(4)
             case .cannonJump: PersistenceManager.shared.unlockCannonJump()
+            case .crossPack: PersistenceManager.shared.addCrossItems(4)
+            case .swatterPack: PersistenceManager.shared.addSwatterItems(4)
+            case .axePack: PersistenceManager.shared.addAxeItems(4)
             }
             
             refreshData()

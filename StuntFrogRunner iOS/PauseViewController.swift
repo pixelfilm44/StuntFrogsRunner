@@ -13,12 +13,9 @@ class PauseViewController: UIViewController {
     weak var coordinator: GameCoordinator?
     
     // MARK: - UI Elements
-    private lazy var containerView: UIView = {
-        let view = UIView()
-        view.backgroundColor = UIColor.black.withAlphaComponent(0.8)
-        view.layer.cornerRadius = 20
-        view.layer.borderWidth = 2
-        view.layer.borderColor = UIColor.white.cgColor
+    private lazy var containerView: UIImageView = {
+        let view = UIImageView(image: UIImage(named: "pauseBackdrop"))
+        view.isUserInteractionEnabled = true
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
     }()
@@ -37,9 +34,8 @@ class PauseViewController: UIViewController {
         let button = UIButton(type: .system)
         button.setTitle("RESUME", for: .normal)
         button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .bold)
-        button.setTitleColor(.black, for: .normal)
-        button.backgroundColor = .green
-        button.layer.cornerRadius = 25
+        button.setTitleColor(.white, for: .normal)
+        button.setBackgroundImage(UIImage(named: "primaryButton"), for: .normal)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.heightAnchor.constraint(equalToConstant: 50).isActive = true
         button.widthAnchor.constraint(equalToConstant: 180).isActive = true
@@ -52,8 +48,7 @@ class PauseViewController: UIViewController {
         button.setTitle("QUIT TO MENU", for: .normal)
         button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .bold)
         button.setTitleColor(.white, for: .normal)
-        button.backgroundColor = .red
-        button.layer.cornerRadius = 25
+        button.setBackgroundImage(UIImage(named: "secondaryButton"), for: .normal)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.heightAnchor.constraint(equalToConstant: 50).isActive = true
         button.widthAnchor.constraint(equalToConstant: 180).isActive = true

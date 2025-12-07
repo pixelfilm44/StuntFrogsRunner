@@ -17,9 +17,11 @@ class SoundManager: NSObject, AVAudioPlayerDelegate {
         case menu = "menu_music"
         case gameplay = "gameplay_music"
         case gameplay2 = "gameplay_music2"
+        case gameplay3 = "gameplay_music3"
         case rocketFlight = "rocket_flight_music"
         case crocRomp = "crocRomp"
         case race = "race"
+        case superJump = "superjump"
     }
     
     // Track to play after current track finishes (for sequential playback)
@@ -31,6 +33,7 @@ class SoundManager: NSObject, AVAudioPlayerDelegate {
         case night = "night"
         case winter = "wind"
         case desert = "windrattle"
+        case space = "space" // You'll need to create this audio file
     }
     
     private override init() {
@@ -87,15 +90,16 @@ class SoundManager: NSObject, AVAudioPlayerDelegate {
             musicPlayer = try AVAudioPlayer(contentsOf: url)
             musicPlayer?.delegate = self
             
-            // Set up sequential playback: gameplay_music -> gameplay_music2
-            if name == Music.gameplay.rawValue {
-                musicPlayer?.numberOfLoops = 0 // Play once, then trigger next track
-                nextMusic = .gameplay2
-            } else if name == Music.gameplay2.rawValue {
-                musicPlayer?.numberOfLoops = -1 // Loop indefinitely
-                nextMusic = nil
+            // Set up random cycling for gameplay music tracks
+            let gameplayTracks: [Music] = [.gameplay, .gameplay2, .gameplay3]
+            if let currentTrack = Music(rawValue: name), gameplayTracks.contains(currentTrack) {
+                musicPlayer?.numberOfLoops = 0 // Play once, then trigger next random track
+                
+                // Pick a random track that's different from the current one
+                var availableTracks = gameplayTracks.filter { $0 != currentTrack }
+                nextMusic = availableTracks.randomElement()
             } else {
-                musicPlayer?.numberOfLoops = -1 // Loop indefinitely
+                musicPlayer?.numberOfLoops = -1 // Loop indefinitely for non-gameplay tracks
                 nextMusic = nil
             }
             
@@ -374,6 +378,8 @@ class VFXManager {
             return .white.withAlphaComponent(0.25)
         case .desert:
             return .orange.withAlphaComponent(0.20)
+        case .space:
+            return .black.withAlphaComponent(0.85) // Very dark for space
         }
     }
 
@@ -392,6 +398,10 @@ class VFXManager {
             emitter = createFirefliesEmitter(width: sceneSize.width, height: sceneSize.height)
             emitter?.position = .zero
             emitter?.zPosition = Layer.pad + 1 // Fireflies should be in the world, not stuck to screen
+        case .space:
+            emitter = createStarsEmitter(width: sceneSize.width, height: sceneSize.height)
+            emitter?.position = .zero
+            emitter?.zPosition = Layer.pad + 1
         case .sunny:
             emitter = nil
         case .desert:
@@ -666,6 +676,30 @@ class VFXManager {
         node.particleScale = 0.15
         node.particleColor = UIColor(red: 1.0, green: 1.0, blue: 0.0, alpha: 1) // Bright yellow
         node.particleColorBlendFactor = 1.0
+        return node
+    }
+    
+    func createStarsEmitter(width: CGFloat, height: CGFloat) -> SKEmitterNode {
+        let node = SKEmitterNode()
+        node.particleTexture = SKTexture(imageNamed: "spark")
+        node.particleBirthRate = 3
+        node.particleLifetime = 8.0
+        // Stars appear throughout the screen
+        node.particlePositionRange = CGVector(dx: width, dy: height)
+        node.particleSpeed = 5
+        node.particleSpeedRange = 3
+        node.emissionAngleRange = CGFloat.pi * 2
+        
+        // Twinkling effect via alpha sequence
+        let twinkle = SKKeyframeSequence(keyframeValues: [0.3, 1.0, 0.5, 1.0, 0.3], times: [0, 0.25, 0.5, 0.75, 1])
+        node.particleAlphaSequence = twinkle
+        
+        node.particleScale = 0.1
+        node.particleScaleRange = 0.05
+        node.particleColor = .white
+        node.particleColorBlendFactor = 1.0
+        node.particleColorRedRange = 0.2
+        node.particleColorBlueRange = 0.3  // Slight color variation for realism
         return node
     }
     

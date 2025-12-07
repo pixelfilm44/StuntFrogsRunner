@@ -164,7 +164,7 @@
 				DEVELOPMENT_TEAM = 6J6976TDAN;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "StuntFrogRunner-iOS-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Stuntfrog Mania";
+				INFOPLIST_KEY_CFBundleDisplayName = Stuntfrog;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.arcade-games";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
@@ -205,7 +205,7 @@
 				DEVELOPMENT_TEAM = 6J6976TDAN;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "StuntFrogRunner-iOS-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Stuntfrog Mania";
+				INFOPLIST_KEY_CFBundleDisplayName = Stuntfrog;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.arcade-games";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;

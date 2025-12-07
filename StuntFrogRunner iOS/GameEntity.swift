@@ -52,13 +52,13 @@ class Frog: GameEntity {
     
     struct Buffs: Equatable {
         var honey: Int = 0
-        var rocketTimer: Int = 0
+        var rocketTimer: TimeInterval = 0
         var bootsCount: Int = 0
         var vest: Int = 0
         var axe: Int = 0
         var swatter: Int = 0
         var cross: Int = 0
-        var superJumpTimer: Int = 0
+        var superJumpTimer: TimeInterval = 0
         var cannonJumps: Int = 0
 
     }
@@ -70,14 +70,14 @@ class Frog: GameEntity {
     var buffs = Buffs()
     
     var rocketState: RocketState = .none
-    var rocketTimer: Int = 0
-    var landingTimer: Int = 0
+    var rocketTimer: TimeInterval = 0
+    var landingTimer: TimeInterval = 0
     
     var maxHealth: Int = 3
     var currentHealth: Int = 3
     var isInvincible: Bool = false
-    var invincibilityTimer: Int = 0
-    var recoilTimer: Int = 0  // Timer for recoil animation duration
+    var invincibilityTimer: TimeInterval = 0
+    var recoilTimer: TimeInterval = 0  // Timer for recoil animation duration
     
     var onPad: Pad?
     var isFloating: Bool = false
@@ -195,11 +195,11 @@ class Frog: GameEntity {
     }
     
     func update(dt: TimeInterval, weather: WeatherType) {
-        if buffs.rocketTimer > 0 { buffs.rocketTimer -= 1 }
-        if buffs.superJumpTimer > 0 { buffs.superJumpTimer -= 1 }
+        if buffs.rocketTimer > 0 { buffs.rocketTimer = max(0, buffs.rocketTimer - dt) }
+        if buffs.superJumpTimer > 0 { buffs.superJumpTimer = max(0, buffs.superJumpTimer - dt) }
         
         if invincibilityTimer > 0 {
-            invincibilityTimer -= 1
+            invincibilityTimer = max(0, invincibilityTimer - dt)
             isInvincible = true
         } else if isSuperJumping {
             isInvincible = true
@@ -209,13 +209,13 @@ class Frog: GameEntity {
         
         // Update recoil timer
         if recoilTimer > 0 {
-            recoilTimer -= 1
+            recoilTimer = max(0, recoilTimer - dt)
         }
         
         vestNode.isHidden = (buffs.vest == 0)
         
         if rocketState != .none {
-            updateRocketPhysics()
+            updateRocketPhysics(dt: dt)
             updateVisuals()
             return
         }
@@ -225,7 +225,9 @@ class Frog: GameEntity {
         zHeight += zVelocity
         
         if zHeight > 0 {
-            zVelocity -= Configuration.Physics.gravityZ
+            // Adjust gravity based on weather - reduced gravity in space for floaty jumps
+            let gravity = weather == .space ? Configuration.Physics.gravityZ * 0.3 : Configuration.Physics.gravityZ
+            zVelocity -= gravity
             velocity.dx *= Configuration.Physics.frictionAir
             velocity.dy *= Configuration.Physics.frictionAir
         } else {
@@ -263,10 +265,18 @@ class Frog: GameEntity {
         zVelocity = -32.0
     }
     
+    /// Steers the rocket left or right while in rocket mode
+    /// - Parameter direction: -1 for left, 1 for right, 0 to stop steering
+    func steerRocket(_ direction: CGFloat) {
+        guard rocketState != .none else { return }
+        let rocketSteeringSpeed: CGFloat = 5.0
+        velocity.dx = direction * rocketSteeringSpeed
+    }
+    
     func hit() {
-        invincibilityTimer = 120
+        invincibilityTimer = 2.0
         isInvincible = true
-        recoilTimer = 20  // Show recoil animation for ~0.33 seconds (20 frames at 60fps)
+        recoilTimer = 0.33
     }
     
     /// Plays a drowning animation where the frog sinks underwater and disappears.
@@ -433,22 +443,30 @@ class Frog: GameEntity {
         bodyNode.zRotation = lastFacingAngle  // Preserve last facing direction
     }
     
-    private func updateRocketPhysics() {
+    private func updateRocketPhysics(dt: TimeInterval) {
         position.x += velocity.dx
-        velocity.dx *= 0.9
+        
+        // Apply friction only if no steering input is being applied
+        // (steering should be set by the game scene based on touch input)
+        if velocity.dx.magnitude < 0.1 {
+            velocity.dx *= 0.9
+        } else {
+            // Lighter friction when actively steering
+            velocity.dx *= 0.95
+        }
         
         if rocketState == .flying {
-            rocketTimer -= 1
+            rocketTimer = max(0, rocketTimer - dt)
             velocity.dy = 4.0
             position.y += velocity.dy
             zHeight += (60 - zHeight) * 0.1
             
             if rocketTimer <= 0 {
                 rocketState = .landing
-                landingTimer = Int(Configuration.GameRules.rocketLandingDuration * 60)
+                landingTimer = Configuration.GameRules.rocketLandingDuration
             }
         } else if rocketState == .landing {
-            landingTimer -= 1
+            landingTimer = max(0, landingTimer - dt)
             if landingTimer <= 0 {
                 descend()
                 return
@@ -510,7 +528,7 @@ class Frog: GameEntity {
                 frogSprite.alpha = 1.0
             } else if invincibilityTimer > 0 {
                 frogSprite.colorBlendFactor = 0.0
-                let flash = (invincibilityTimer / 10) % 2 == 0
+                let flash = (invincibilityTimer / 0.1) /* was /10 */.truncatingRemainder(dividingBy: 2) == 0
                 frogSprite.alpha = flash ? 0.5 : 1.0
             } else {
                 frogSprite.colorBlendFactor = 0.0
@@ -680,7 +698,7 @@ class Frog: GameEntity {
 
 // MARK: - Pad / Enemy / Coin (Unchanged)
 class Pad: GameEntity {
-    enum PadType { case normal, moving, ice, log, grave, shrinking, waterLily }
+    enum PadType { case normal, moving, ice, log, grave, shrinking, waterLily, launchPad, warp }
     var type: PadType = .normal
     var moveDirection: CGFloat = 1.0
     var moveSpeed: CGFloat = 2.0
@@ -697,6 +715,9 @@ class Pad: GameEntity {
     private static let iceTexture = SKTexture(imageNamed: "lilypadIce")
     private static let snowTexture = SKTexture(imageNamed: "lilypadSnow")
     private static let desertTexture = SKTexture(imageNamed: "lilypadDesert")
+    private static let spaceTexture = SKTexture(imageNamed: "lilypadSpace")
+    private static let launchPadTexture = SKTexture(imageNamed: "launchPad")
+    private static let warpPadTexture = SKTexture(imageNamed: "warpPad")
 
     private static let graveTexture = SKTexture(imageNamed: "lilypadGrave")
     private static let shrinkTexture = SKTexture(imageNamed: "lilypadShrink")
@@ -705,6 +726,7 @@ class Pad: GameEntity {
     private static let waterLilyRainTexture = SKTexture(imageNamed: "lilypadWaterRain")
     private static let waterLilySnowTexture = SKTexture(imageNamed: "lilypadWaterSnow")
     private static let waterLilySandTexture = SKTexture(imageNamed: "lilypadWaterSand")
+    private static let waterLilySpaceTexture = SKTexture(imageNamed: "lilypadWaterSpace")
     
     /// The base radius for this pad (before any scaling from shrinking)
     private(set) var baseRadius: CGFloat = Configuration.Dimensions.minPadRadius
@@ -748,6 +770,38 @@ class Pad: GameEntity {
             let sprite = SKSpriteNode(texture: texture)
             sprite.size = CGSize(width: 90, height: 90)
             addChild(sprite)
+        } else if type == .launchPad {
+            // Launch pad is special - larger and uses its own texture
+            let texture = Pad.launchPadTexture
+            let sprite = SKSpriteNode(texture: texture)
+            sprite.size = CGSize(width: 120, height: 120)
+            addChild(sprite)
+            self.padSprite = sprite
+            
+            // Add a pulsing glow effect to make it stand out
+            let pulseUp = SKAction.scale(to: 1.1, duration: 0.8)
+            pulseUp.timingMode = .easeInEaseOut
+            let pulseDown = SKAction.scale(to: 1.0, duration: 0.8)
+            pulseDown.timingMode = .easeInEaseOut
+            sprite.run(SKAction.repeatForever(SKAction.sequence([pulseUp, pulseDown])))
+        } else if type == .warp {
+            // Warp pad - special portal texture with swirling animation
+            let texture = Pad.warpPadTexture
+            let sprite = SKSpriteNode(texture: texture)
+            sprite.size = CGSize(width: 120, height: 120)
+            addChild(sprite)
+            self.padSprite = sprite
+            
+            // Add a swirling rotation effect to make it look active
+            let rotate = SKAction.rotate(byAngle: CGFloat.pi * 2, duration: 2.0)
+            sprite.run(SKAction.repeatForever(rotate))
+            
+            // Add a pulsing glow effect
+            let pulseUp = SKAction.fadeAlpha(to: 1.0, duration: 0.6)
+            pulseUp.timingMode = .easeInEaseOut
+            let pulseDown = SKAction.fadeAlpha(to: 0.7, duration: 0.6)
+            pulseDown.timingMode = .easeInEaseOut
+            sprite.run(SKAction.repeatForever(SKAction.sequence([pulseUp, pulseDown])))
         } else {
             // Use PNG textures for all other pad types
             let texture: SKTexture
@@ -789,6 +843,8 @@ class Pad: GameEntity {
                 texture = Pad.waterLilySnowTexture
             case .desert:
                 texture = Pad.waterLilySandTexture
+            case .space:
+                texture = Pad.waterLilySpaceTexture
             }
         } else {
             switch weather {
@@ -803,6 +859,8 @@ class Pad: GameEntity {
                 texture = Pad.snowTexture
             case .desert:
                 texture = Pad.desertTexture
+            case .space:
+                texture = Pad.spaceTexture
             }
         }
         
@@ -935,13 +993,18 @@ class Enemy: GameEntity {
     var type: String = "BEE"
     private var originalPosition: CGPoint
     private var angle: CGFloat = 0.0
+    private var currentWeather: WeatherType = .sunny
+    private var enemySprite: SKSpriteNode?
     
     // Preloaded textures for performance
     private static let beeTexture = SKTexture(imageNamed: "bee")
+    private static let beeSpaceTexture = SKTexture(imageNamed: "beeSpace")
     private static let dragonflyTexture = SKTexture(imageNamed: "dragonfly")
+    private static let asteroidTexture = SKTexture(imageNamed: "asteroid")
     
-    init(position: CGPoint, type: String = "BEE") {
+    init(position: CGPoint, type: String = "BEE", weather: WeatherType = .sunny) {
         self.originalPosition = position
+        self.currentWeather = weather
         super.init(texture: nil, color: .clear, size: CGSize(width: 30, height: 30))
         self.position = position
         self.type = type
@@ -959,17 +1022,42 @@ class Enemy: GameEntity {
         
         switch type {
         case "DRAGONFLY":
-            let sprite = SKSpriteNode(texture: Enemy.dragonflyTexture)
+            let texture = currentWeather == .space ? Enemy.asteroidTexture : Enemy.dragonflyTexture
+            let sprite = SKSpriteNode(texture: texture)
             sprite.size = CGSize(width: 30, height: 30)
             addChild(sprite)
+            self.enemySprite = sprite
         case "GHOST":
             let ghostSprite = SKSpriteNode(imageNamed: "ghostFrog")
             ghostSprite.size = CGSize(width: 65, height: 65)
             addChild(ghostSprite)
+            self.enemySprite = ghostSprite
         default: // BEE
-            let sprite = SKSpriteNode(texture: Enemy.beeTexture)
+            let texture = currentWeather == .space ? Enemy.beeSpaceTexture : Enemy.beeTexture
+            let sprite = SKSpriteNode(texture: texture)
             sprite.size = CGSize(width: 30, height: 30)
             addChild(sprite)
+            self.enemySprite = sprite
+        }
+    }
+    
+    /// Updates the enemy's visual appearance when weather changes
+    func updateWeather(_ weather: WeatherType) {
+        guard weather != currentWeather, let sprite = enemySprite else { return }
+        currentWeather = weather
+        
+        let newTexture: SKTexture?
+        switch type {
+        case "DRAGONFLY":
+            newTexture = weather == .space ? Enemy.asteroidTexture : Enemy.dragonflyTexture
+        case "BEE":
+            newTexture = weather == .space ? Enemy.beeSpaceTexture : Enemy.beeTexture
+        default:
+            newTexture = nil
+        }
+        
+        if let texture = newTexture {
+            sprite.texture = texture
         }
     }
     func update(dt: TimeInterval, target: CGPoint? = nil) {

@@ -77,7 +77,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private let countdownLabelShadow = SKLabelNode(fontNamed: Configuration.Fonts.primaryHeavy)
     private let cannonJumpButton = SKLabelNode(fontNamed: Configuration.Fonts.primaryHeavy)
     private let cannonJumpBg = SKShapeNode(rectOf: CGSize(width: 100, height: 60), cornerRadius: 30)
-    private let cannonJumpIcon = SKSpriteNode(imageNamed: "helmet")
+    private let cannonJumpIcon = SKSpriteNode(imageNamed: "cannon")
     private let jumpPromptLabel = SKLabelNode(fontNamed: Configuration.Fonts.primaryHeavy)
     private let jumpPromptBg = SKShapeNode(rectOf: CGSize(width: 300, height: 80), cornerRadius: 20)
     
@@ -115,6 +115,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private var isDragging = false
     private var lastHapticDragStep: Int = 0
     private var hasTriggeredMaxPullHaptic: Bool = false
+    
+    // Rocket steering state
+    private var rocketSteeringTouch: UITouch?
+    private var rocketSteeringDirection: CGFloat = 0  // -1 for left, 1 for right, 0 for none
     private var lastUpdateTime: TimeInterval = 0
     private var score: Int = 0
     private var totalCoins: Int = 0
@@ -124,12 +128,23 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private let weatherChangeInterval: Int = 600 // in meters
     private var nextWeatherChangeScore: Int = 600
     private var isDesertTransitionPending: Bool = false
+    private var hasSpawnedLaunchPad: Bool = false
+    private var hasHitLaunchPad: Bool = false
+    private var launchPadY: CGFloat = 0
+    private var isLaunchingToSpace: Bool = false
+    private var hasSpawnedWarpPad: Bool = false
+    private var hasHitWarpPad: Bool = false
+    private var warpPadY: CGFloat = 0
+    private let launchPadMissDistance: CGFloat = 300
     private var previousRocketState: RocketState = .none
+    private var previousSuperJumpState: Bool = false
     private var ridingCrocodile: Crocodile? = nil  // Currently riding crocodile
     private var crocRideVignetteNode: SKSpriteNode?  // Vignette overlay for croc ride
     private var baseMusic: SoundManager.Music = .gameplay
     private var drowningGracePeriodTimer: TimeInterval?
     private var lastKnownBuffs: Frog.Buffs?
+    private var lastKnownRocketTimer: TimeInterval = 0
+    private var lastKnownRocketState: RocketState = .none
     
     // MARK: - Cutscene State
     private var isInCutscene = false
@@ -483,8 +498,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         switch currentWeather {
         case .night:
             return "waterNight"
-        case.desert:
+        case .desert:
             return "waterSand"
+        case .space:
+            return "waterSpace" // You'll need to create this asset
         default:
             return "water"
         }
@@ -669,6 +686,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
             lbl.fontColor = .white
             lbl.verticalAlignmentMode = .center
             lbl.name = "label"
+            lbl.zPosition = 1 // Ensure the label is drawn on top of the icon.
             bg.addChild(lbl)
 
             if let iconName = iconName {
@@ -1070,9 +1088,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // Rocket
         if frog.rocketTimer > 0 {
-            if let label = rocketBuffNode.childNode(withName: "//label") as? SKLabelNode {
-                label.text = "\(Int(ceil(Double(frog.rocketTimer) / 60.0)))s"
-                if let icon = rocketBuffNode.childNode(withName: "//icon") { icon.isHidden = false }
+            if let bg = rocketBuffNode.childNode(withName: "background"),
+               let label = bg.childNode(withName: "label") as? SKLabelNode {
+                label.text = "\(Int(ceil(frog.rocketTimer)))s"
+                if let icon = bg.childNode(withName: "icon") { icon.isHidden = false }
                 label.horizontalAlignmentMode = .left
                 label.position = CGPoint(x: -30, y: 0)
             }
@@ -1080,9 +1099,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
             rocketBuffNode.isHidden = false
             yOffset -= 30
         } else if frog.rocketState == .landing {
-            if let label = rocketBuffNode.childNode(withName: "//label") as? SKLabelNode {
+            if let bg = rocketBuffNode.childNode(withName: "background"),
+               let label = bg.childNode(withName: "label") as? SKLabelNode {
                 label.text = "⚠ DESCEND"
-                if let icon = rocketBuffNode.childNode(withName: "//icon") { icon.isHidden = true }
+                if let icon = bg.childNode(withName: "icon") { icon.isHidden = true }
                 label.horizontalAlignmentMode = .center
                 label.position = CGPoint(x: 0, y: 0)
             }
@@ -1093,8 +1113,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // Super Jump
         if frog.buffs.superJumpTimer > 0 {
-            if let label = superJumpBuffNode.childNode(withName: "//label") as? SKLabelNode {
-                label.text = "\(Int(ceil(Double(frog.buffs.superJumpTimer) / 60.0)))s"
+            if let bg = superJumpBuffNode.childNode(withName: "background"),
+               let label = bg.childNode(withName: "label") as? SKLabelNode {
+                label.text = "\(Int(ceil(frog.buffs.superJumpTimer)))s"
+                if let icon = bg.childNode(withName: "icon") { icon.isHidden = false }
             }
             superJumpBuffNode.position.y = yOffset
             superJumpBuffNode.isHidden = false
@@ -1103,7 +1125,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // Croc Ride
         if let croc = ridingCrocodile, croc.isCarryingFrog {
-            if let label = crocRideBuffNode.childNode(withName: "//label") as? SKLabelNode {
+            if let bg = crocRideBuffNode.childNode(withName: "background"),
+               let label = bg.childNode(withName: "label") as? SKLabelNode {
                 let remaining = Int(ceil(croc.remainingRideTime()))
                 label.text = "🐊 RIDE \(remaining)s"
             }
@@ -1125,10 +1148,15 @@ class GameScene: SKScene, CollisionManagerDelegate {
         coinLabel.text = "\(totalCoins)"
         
         // --- Performance Optimization: Conditional HUD Update ---
-        // Only rebuild the buff display if the buffs have actually changed.
-        if frog.buffs != lastKnownBuffs {
+        // Only rebuild the buff display if the buffs, rocket timer, or rocket state have changed.
+        let buffsChanged = frog.buffs != lastKnownBuffs
+        let rocketChanged = frog.rocketTimer != lastKnownRocketTimer || frog.rocketState != lastKnownRocketState
+        
+        if buffsChanged || rocketChanged {
             updateBuffsHUD()
             lastKnownBuffs = frog.buffs
+            lastKnownRocketTimer = frog.rocketTimer
+            lastKnownRocketState = frog.rocketState
         }
 
         // Update Cannon Jump Button
@@ -1191,6 +1219,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         slingshotDot.isHidden = true
         crosshairNode.isHidden = true
         
+        // Reset rocket steering state
+        rocketSteeringTouch = nil
+        rocketSteeringDirection = 0
+        
         // Reset race-specific elements
         boat?.removeFromParent()
         boat = nil
@@ -1206,12 +1238,36 @@ class GameScene: SKScene, CollisionManagerDelegate {
         frog.rocketState = .none
         frog.buffs = Frog.Buffs()
         
-        // Apply starting consumables from inventory
-        if PersistenceManager.shared.useVestItem() {
-            frog.buffs.vest += 1
+        // Apply starting consumables from inventory (one 4-pack of each type owned)
+        // Lifevests
+        for _ in 0..<4 {
+            if PersistenceManager.shared.useVestItem() {
+                frog.buffs.vest += 1
+            }
         }
-        if PersistenceManager.shared.useHoneyItem() {
-            frog.buffs.honey += 1
+        // Honey Pots
+        for _ in 0..<4 {
+            if PersistenceManager.shared.useHoneyItem() {
+                frog.buffs.honey += 1
+            }
+        }
+        // Crosses
+        for _ in 0..<4 {
+            if PersistenceManager.shared.useCrossItem() {
+                frog.buffs.cross += 1
+            }
+        }
+        // Fly Swatters
+        for _ in 0..<4 {
+            if PersistenceManager.shared.useSwatterItem() {
+                frog.buffs.swatter += 1
+            }
+        }
+        // Axes
+        for _ in 0..<4 {
+            if PersistenceManager.shared.useAxeItem() {
+                frog.buffs.axe += 1
+            }
         }
         
         // Grant cannon jumps if purchased
@@ -1228,24 +1284,54 @@ class GameScene: SKScene, CollisionManagerDelegate {
         frog.resetPullOffset()
         
         worldNode.addChild(frog)
+        
+        // MARK: - Debug Starting Score
+        // For testing different biomes (desert, space, etc.)
+        if Configuration.Debug.debugMode && Configuration.Debug.startingScore > 0 {
+            score = Configuration.Debug.startingScore
+            // Move frog to match the debug starting score so distance increments properly
+            frog.position.y = CGFloat(Configuration.Debug.startingScore * 10)
+            // Update the HUD to show the debug starting score immediately
+            scoreLabel.text = "\(score)m"
+        } else {
+            score = 0
+        }
+        
         coinsCollectedThisRun = 0
         padsLandedThisRun = 0
         consecutiveJumps = 0
         bestConsecutiveJumps = 0
         crocodilesSpawnedThisRun = 0
         previousRocketState = .none
+        previousSuperJumpState = false
         nextWeatherChangeScore = weatherChangeInterval
         spawnInitialPads()
         drawHearts()
         updateBuffsHUD()
         lastKnownBuffs = frog.buffs // Initialize buff state for comparison
         descendBg.isHidden = true
-        setWeather(.sunny, duration: 0.0)
+        
+        // MARK: - Initialize Weather Based on Starting Score
+        if Configuration.Debug.debugMode && Configuration.Debug.startingScore > 0 {
+            // Determine the correct weather based on the starting score
+            let startWeather = weatherForScore(Configuration.Debug.startingScore)
+            setWeather(startWeather, duration: 0.0)
+            // Calculate the next weather change point
+            let weatherIndex = WeatherType.allCases.firstIndex(of: startWeather) ?? 0
+            nextWeatherChangeScore = (weatherIndex + 1) * weatherChangeInterval
+        } else {
+            setWeather(.sunny, duration: 0.0)
+        }
+        
         stopDrowningGracePeriod()
         
         // Reset cutscene state for a new game
         isInCutscene = false
         isDesertTransitionPending = false
+        hasSpawnedLaunchPad = false
+        hasHitLaunchPad = false
+        launchPadY = 0
+        isLaunchingToSpace = false
 
         if gameMode == .beatTheBoat {
             raceState = .countdown
@@ -1339,7 +1425,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
     }
 
     private func spawnInitialPads() {
-        var yPos: CGFloat = 0
+        // Start spawning pads at the frog's current Y position (accounts for debug mode)
+        var yPos: CGFloat = frog.position.y
         for _ in 0..<5 {
             let pad = Pad(type: .normal, position: CGPoint(x: size.width / 2, y: yPos))
             worldNode.addChild(pad)
@@ -1360,6 +1447,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
         frameCount += 1
         
         guard coordinator?.currentState == .playing && !isGameEnding && !isInCutscene else { return }
+        
+        // Apply continuous rocket steering while touch is held
+        if frog.rocketState != .none && rocketSteeringTouch != nil && rocketSteeringDirection != 0 {
+            frog.steerRocket(rocketSteeringDirection)
+        }
         
         checkPendingDesertTransition()
         
@@ -1427,18 +1519,14 @@ class GameScene: SKScene, CollisionManagerDelegate {
             }
         }
 
-        var snakesToRespawn: [Snake] = []
         for snake in snakes {
             // Snakes are wide, so give them a larger vertical activity window
             if abs(snake.position.y - camY) < viewHeight * 1.5 {
-                let reachedEnd = snake.update(dt: dt, pads: activePads)
-                if reachedEnd && !snake.isDestroyed {
-                    snakesToRespawn.append(snake)
-                }
+                // Update the snake (returns true if it moved off screen, but we don't respawn)
+                _ = snake.update(dt: dt, pads: activePads)
                 activeSnakes.append(snake)
             }
         }
-        snakesToRespawn.forEach { respawnSnake($0) }
         
         // Ride Logic
         if let croc = ridingCrocodile, croc.isCarryingFrog {
@@ -1462,6 +1550,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // --- Visuals & Logic ---
         checkWeatherChange()
+        checkLaunchPadInteraction()
         updateWaterVisuals()
         updateRaceState(dt: dt)
         updateDrowningGracePeriod(dt: dt)
@@ -1479,6 +1568,14 @@ class GameScene: SKScene, CollisionManagerDelegate {
             SoundManager.shared.playMusic(baseMusic)
         }
         previousRocketState = frog.rocketState
+        
+        // Super Jump music management
+        let currentSuperJumpState = frog.isSuperJumping
+        if previousSuperJumpState && !currentSuperJumpState {
+            // Super jump just ended, resume gameplay music
+            SoundManager.shared.playMusic(baseMusic)
+        }
+        previousSuperJumpState = currentSuperJumpState
         
         updateMoonlightPosition()
         updateCamera()
@@ -1590,8 +1687,33 @@ class GameScene: SKScene, CollisionManagerDelegate {
         case .win:
             coinsWon += Configuration.GameRules.boatRaceReward + self.raceRewardBonus
             SoundManager.shared.play("coin") // TODO: Add a proper victory sound
-        case .lose:
-            SoundManager.shared.play("gameOver")
+        case .lose(let reason):
+            // If the frog died from health loss, play the death animation
+            if reason == .outOfHealth {
+                SoundManager.shared.play("gameOver")
+                isUserInteractionEnabled = false
+                
+                // Stop all frog movement immediately
+                frog.velocity = .zero
+                frog.zVelocity = 0
+                
+                // Play the frog's death animation (spins and falls)
+                frog.playDeathAnimation { [weak self] in
+                    guard let self = self else { return }
+                    
+                    // Small delay after frog disappears before showing game over
+                    let delay = SKAction.wait(forDuration: 0.4)
+                    let showGameOver = SKAction.run { [weak self] in
+                        guard let self = self else { return }
+                        self.reportChallengeProgress()
+                        self.coordinator?.gameDidEnd(score: self.score, coins: coinsWon, raceResult: self.raceResult)
+                    }
+                    self.run(SKAction.sequence([delay, showGameOver]))
+                }
+                return
+            } else {
+                SoundManager.shared.play("gameOver")
+            }
         }
         
         isUserInteractionEnabled = false
@@ -1603,6 +1725,68 @@ class GameScene: SKScene, CollisionManagerDelegate {
             self.coordinator?.gameDidEnd(score: self.score, coins: coinsWon, raceResult: self.raceResult)
         }
         run(SKAction.sequence([delay, showGameOver]))
+    }
+    
+    // MARK: - Launch Pad Detection
+    
+    /// Checks if the frog has interacted with the launch pad or missed it
+    private func checkLaunchPadInteraction() {
+        // Only check if launch pad has spawned and hasn't been hit yet
+        guard hasSpawnedLaunchPad && !hasHitLaunchPad else { return }
+        
+        // Check if frog is using rocket and passes over/near the launch pad
+        if frog.rocketState == .flying {
+            let distanceFromLaunchPad = abs(frog.position.y - launchPadY)
+            let horizontalDistance = abs(frog.position.x - (Configuration.Dimensions.riverWidth / 2))
+            
+            // If rocket passes near the launch pad (within reasonable distance)
+            if frog.position.y >= launchPadY && 
+               distanceFromLaunchPad < 150 && 
+               horizontalDistance < 150 {
+                print("🚀 Frog passed over launch pad with rocket!")
+                hasHitLaunchPad = true
+                
+                // Find the launch pad and trigger the sequence
+                if let launchPad = pads.first(where: { $0.type == .launchPad }) {
+                    isLaunchingToSpace = true
+                    launchToSpace(from: launchPad)
+                }
+                return
+            }
+        }
+        
+        // Check if frog has passed the launch pad without hitting it
+        if frog.position.y > launchPadY + launchPadMissDistance {
+            // Game over - missed the launch pad!
+            print("❌ Frog missed the launch pad! Game Over.")
+            handleMissedLaunchPad()
+        }
+    }
+    
+    private func handleMissedLaunchPad() {
+        // Prevent multiple game overs
+        guard !isGameEnding else { return }
+        
+        // In endless mode, this is just a regular game over
+        if gameMode == .endless {
+            playEnemyDeathSequence()
+        }
+        // In race mode, this is a specific race loss
+        else if gameMode == .beatTheBoat {
+            raceResult = .lose(reason: .missedLaunchPad)
+            playEnemyDeathSequence()
+        }
+    }
+    
+    // MARK: - Weather Helper for Debug Mode
+    /// Determines the correct weather type for a given score value
+    private func weatherForScore(_ score: Int) -> WeatherType {
+        let weatherIndex = score / weatherChangeInterval
+        let allWeathers = WeatherType.allCases
+        
+        // Clamp to valid weather index
+        let clampedIndex = min(weatherIndex, allWeathers.count - 1)
+        return allWeathers[clampedIndex]
     }
     
     private func checkWeatherChange() {
@@ -1622,6 +1806,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
             // The cutscene should not start mid-jump.
             // Set a flag to trigger it once the frog has landed safely.
             isDesertTransitionPending = true
+        } else if nextWeather == .space {
+            // Space weather should be instant, no gradual transition
+            // It's triggered by the launch pad cutscene, not by weather cycling
+            // This branch shouldn't normally be hit, but handle it just in case
+            setWeather(nextWeather, duration: 0.0)
         } else {
             // For all other weather types, use the gradual transition
             setWeather(nextWeather, duration: 60.0)
@@ -1630,8 +1819,15 @@ class GameScene: SKScene, CollisionManagerDelegate {
 
     private func setWeather(_ type: WeatherType, duration: TimeInterval) {
         let oldWeather = self.currentWeather
+        
+        // Force instant transitions for space weather
+        var actualDuration = duration
+        if type == .space || oldWeather == .space {
+            actualDuration = 0.0
+        }
+        
         // No change if weather is the same, unless it's an instant setup (duration 0)
-        if oldWeather == type && duration > 0 { return }
+        if oldWeather == type && actualDuration > 0 { return }
 
         // --- Game Logic ---
         if oldWeather == .rain {
@@ -1647,7 +1843,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
         
         // --- Visual & Audio Transitions ---
-        VFXManager.shared.transitionWeather(from: oldWeather, to: type, in: self, duration: duration)
+        VFXManager.shared.transitionWeather(from: oldWeather, to: type, in: self, duration: actualDuration)
         
         // Handle leaf spawning based on weather change
         if type == .sunny && oldWeather != .sunny {
@@ -1662,30 +1858,31 @@ class GameScene: SKScene, CollisionManagerDelegate {
         case .night: .night
         case .sunny: nil
         case .desert: .desert
-        }
+        case .space: .space
+                }
         SoundManager.shared.playWeatherSFX(sfx)
 
         // --- In-World Object Transitions ---
         for pad in pads {
-            pad.updateColor(weather: type, duration: duration)
+            pad.updateColor(weather: type, duration: actualDuration)
         }
 
-        let needsWaterTextureSwap = (oldWeather == .night && type != .night) || (oldWeather != .night && type == .night) || (oldWeather == .desert && type != .desert) || (oldWeather != .desert && type == .desert)
-        transitionWaterColor(needsTextureSwap: needsWaterTextureSwap, duration: duration)
+        let needsWaterTextureSwap = (oldWeather == .night && type != .night) || (oldWeather != .night && type == .night) || (oldWeather == .desert && type != .desert) || (oldWeather != .desert && type == .desert) || (oldWeather == .space && type != .space) || (oldWeather != .space && type == .space)
+        transitionWaterColor(needsTextureSwap: needsWaterTextureSwap, duration: actualDuration)
 
         // Handle moonlight visibility with a fade for smooth transitions.
         if let moon = moonlightNode {
             if type == .night {
                 moon.isHidden = false
-                if duration > 0 {
-                    moon.run(SKAction.fadeAlpha(to: 1.0, duration: duration))
+                if actualDuration > 0 {
+                    moon.run(SKAction.fadeAlpha(to: 1.0, duration: actualDuration))
                 } else {
                     moon.alpha = 1.0
                 }
             } else if oldWeather == .night {
-                if duration > 0 {
+                if actualDuration > 0 {
                     // Hide after fade out to stop processing it.
-                    let fadeOut = SKAction.fadeAlpha(to: 0.0, duration: duration)
+                    let fadeOut = SKAction.fadeAlpha(to: 0.0, duration: actualDuration)
                     let hide = SKAction.run { moon.isHidden = true }
                     moon.run(SKAction.sequence([fadeOut, hide]))
                 } else {
@@ -1827,6 +2024,130 @@ class GameScene: SKScene, CollisionManagerDelegate {
         SoundManager.shared.playMusic(baseMusic)
     }
     
+    // MARK: - Space Launch
+    
+    private func launchToSpace(from pad: Pad) {
+        // Disable user interaction during the launch sequence
+        isUserInteractionEnabled = false
+        isInCutscene = true
+        
+        // Stop all frog movement
+        frog.velocity = .zero
+        frog.onPad = pad
+        
+        print("🚀 Launch to space initiated!")
+        
+        // Play launch sound
+        SoundManager.shared.play("rocket")
+        SoundManager.shared.stopMusic(fadeDuration: 1.0)
+        
+        // Haptic feedback for launch
+        HapticsManager.shared.playNotification(.success)
+        
+        // Create sparkle effects around the launch pad
+        VFXManager.shared.spawnSparkles(at: pad.position, in: self)
+        
+        // Animate the frog shooting upward
+        let launchHeight: CGFloat = 800
+        let launchDuration: TimeInterval = 2.0
+        
+        let shootUp = SKAction.moveBy(x: 0, y: launchHeight, duration: launchDuration)
+        shootUp.timingMode = .easeIn
+        
+        let spinAction = SKAction.rotate(byAngle: .pi * 4, duration: launchDuration)
+        
+        let launchGroup = SKAction.group([shootUp, spinAction])
+        
+        frog.run(launchGroup) { [weak self] in
+            guard let self = self else { return }
+            
+            // Start fading to black
+            self.fadeToBlackAndTransitionToSpace()
+        }
+    }
+    
+    private func fadeToBlackAndTransitionToSpace() {
+        // Create a black overlay that covers the entire screen
+        let blackOverlay = SKSpriteNode(color: .black, size: self.size)
+        blackOverlay.position = .zero
+        blackOverlay.zPosition = Layer.overlay + 100 // Above everything
+        blackOverlay.alpha = 0
+        
+        cam.addChild(blackOverlay)
+        
+        // Fade to black
+        let fadeOut = SKAction.fadeIn(withDuration: 2.0)
+        
+        blackOverlay.run(fadeOut) { [weak self] in
+            guard let self = self else { return }
+            
+            // After fade is complete, transition to space weather
+            self.transitionToSpace()
+            
+            // Wait a moment then fade back in
+            let wait = SKAction.wait(forDuration: 0.5)
+            let fadeIn = SKAction.fadeOut(withDuration: 2.0)
+            let remove = SKAction.removeFromParent()
+            
+            blackOverlay.run(SKAction.sequence([wait, fadeIn, remove]))
+        }
+    }
+    
+    private func transitionToSpace() {
+        print("🌌 Transitioning to space weather!")
+        
+        // Set the weather to space - INSTANT transition (duration: 0)
+        setWeather(.space, duration: 0.0)
+        
+        // Instantly update all existing pads to space appearance
+        for pad in pads {
+            pad.updateColor(weather: .space, duration: 0.0)
+        }
+        
+        // Reset launch flags - allow warp pad to potentially spawn later
+        hasSpawnedLaunchPad = false
+        hasHitLaunchPad = false
+        launchPadY = 0
+        isLaunchingToSpace = false
+        
+        // Position frog at a new starting point
+        if let firstPad = pads.first {
+            frog.position = CGPoint(x: Configuration.Dimensions.riverWidth / 2, y: firstPad.position.y + 100)
+            frog.zHeight = 0
+            frog.velocity = .zero
+        }
+        
+        // Re-enable user interaction
+        isInCutscene = false
+        isUserInteractionEnabled = true
+        
+        // Play space music (you'll need to add this to SoundManager)
+        SoundManager.shared.playMusic(.gameplay) // Use gameplay for now, or create a new space track
+        
+        // Optional: Show a "WELCOME TO SPACE" message
+        showSpaceWelcomeMessage()
+    }
+    
+    private func showSpaceWelcomeMessage() {
+        let welcomeLabel = SKLabelNode(fontNamed: Configuration.Fonts.primaryHeavy)
+        welcomeLabel.text = "🌌 SPACE 🌌"
+        welcomeLabel.fontSize = 60
+        welcomeLabel.fontColor = .white
+        welcomeLabel.position = .zero
+        welcomeLabel.zPosition = Layer.ui + 50
+        welcomeLabel.alpha = 0
+        
+        cam.addChild(welcomeLabel)
+        
+        // Fade in, hold, then fade out
+        let fadeIn = SKAction.fadeIn(withDuration: 1.0)
+        let wait = SKAction.wait(forDuration: 2.0)
+        let fadeOut = SKAction.fadeOut(withDuration: 1.0)
+        let remove = SKAction.removeFromParent()
+        
+        welcomeLabel.run(SKAction.sequence([fadeIn, wait, fadeOut, remove]))
+    }
+    
     /// Recreates water tiles with the appropriate texture for current weather
     private func recreateWaterTiles() {
         waterTilesNode.removeAllChildren()
@@ -1840,7 +2161,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         case .night: return Configuration.Colors.night
         case .winter: return Configuration.Colors.winter
         case .desert: return Configuration.Colors.desert
-
+        case .space: return Configuration.Colors.space
         }
     }
     
@@ -1873,14 +2194,20 @@ class GameScene: SKScene, CollisionManagerDelegate {
         treasureChests.removeAll { if $0.position.y < thresholdY { $0.removeFromParent(); return true }; return false }
         flies.removeAll { if $0.position.y < thresholdY { $0.removeFromParent(); return true }; return false }
         flotsam.removeAll { if $0.position.y < thresholdY { $0.removeFromParent(); return true }; return false }
-        // Cleanup snakes that have fallen behind the frog (passed/despawned)
+        
+        // Cleanup snakes that have fallen behind the frog OR moved off screen
+        // Snakes move horizontally (left to right), so we need to check both Y and X positions
         snakes.removeAll { snake in
-            if snake.position.y < thresholdY || snake.isDestroyed {
+            let isBelowCamera = snake.position.y < thresholdY
+            let isOffScreenRight = snake.position.x > Configuration.Dimensions.riverWidth + 100
+            
+            if isBelowCamera || isOffScreenRight || snake.isDestroyed {
                 snake.removeFromParent()
                 return true
             }
             return false
         }
+        
         crocodiles.removeAll { croc in
             // Don't remove the crocodile the frog is riding
             if croc === ridingCrocodile { return false }
@@ -1921,21 +2248,43 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let scoreVal = Int(frog.position.y / 10)
         let difficultyLevel = Configuration.Difficulty.level(forScore: scoreVal)
         
-        // Pad type selection based on difficulty level
-        if difficultyLevel >= Configuration.Difficulty.movingPadStartLevel && Double.random(in: 0...1) < Configuration.Difficulty.movingPadProbability {
-            type = .moving
-        } else if difficultyLevel >= Configuration.Difficulty.icePadStartLevel && Double.random(in: 0...1) < Configuration.Difficulty.icePadProbability {
-            type = .ice
+        // DEBUG: Log when we reach snake spawn threshold
+        if scoreVal == 3000 {
+            print("🎯 Reached snake spawn threshold! Score: \(scoreVal)")
         }
-        if scoreVal > 150 && Double.random(in: 0...1) < 0.15 { type = .waterLily }
-        if currentWeather == .night && Double.random(in: 0...1) < 0.15 { type = .grave }
-        let shrinkingChance = Configuration.Difficulty.shrinkingProbability(forLevel: difficultyLevel)
-        if Double.random(in: 0...1) < shrinkingChance { type = .shrinking }
+        
+        // Check if we should spawn the launch pad (end of desert, before space)
+        if currentWeather == .desert && !hasSpawnedLaunchPad && scoreVal >= Configuration.GameRules.launchPadSpawnScore {
+            type = .launchPad
+            hasSpawnedLaunchPad = true
+            
+            // Center the launch pad in the river for dramatic effect
+            newX = Configuration.Dimensions.riverWidth / 2
+            launchPadY = newY
+            
+            print("🚀 Spawning launch pad at score: \(scoreVal), Y position: \(newY)")
+        } else {
+            // Normal pad type selection based on difficulty level
+            if difficultyLevel >= Configuration.Difficulty.movingPadStartLevel && Double.random(in: 0...1) < Configuration.Difficulty.movingPadProbability {
+                type = .moving
+            } else if difficultyLevel >= Configuration.Difficulty.icePadStartLevel && Double.random(in: 0...1) < Configuration.Difficulty.icePadProbability {
+                type = .ice
+            }
+            if scoreVal > 150 && Double.random(in: 0...1) < 0.15 { type = .waterLily }
+            if currentWeather == .night && Double.random(in: 0...1) < 0.15 { type = .grave }
+            let shrinkingChance = Configuration.Difficulty.shrinkingProbability(forLevel: difficultyLevel)
+            if Double.random(in: 0...1) < shrinkingChance { type = .shrinking }
+        }
         
         let pad = Pad(type: type, position: CGPoint(x: newX, y: newY), radius: newPadRadius)
         pad.updateColor(weather: currentWeather)
         worldNode.addChild(pad)
         pads.append(pad)
+        
+        // Don't spawn anything on launch pads - they're special!
+        if type == .launchPad {
+            return
+        }
         
         // Spawn crocodile near water lily pads
         // Only spawn if: score >= 2500 and we haven't reached max crocodiles this run
@@ -2018,7 +2367,12 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Snake spawning - snakes appear after 3000m
         // They move from left to right across the screen
         let snakeProb = Configuration.Difficulty.snakeProbability(forScore: scoreVal)
-        if Double.random(in: 0...1) < snakeProb && snakes.count < Configuration.Difficulty.snakeMaxOnScreen {
+        
+        // Count only active (visible) snakes on screen
+        let activeSnakesCount = snakes.filter { !$0.isDestroyed }.count
+        
+        if Double.random(in: 0...1) < snakeProb && activeSnakesCount < Configuration.Difficulty.snakeMaxOnScreen {
+            print("🐍 Snake spawn triggered! Score: \(scoreVal), Probability: \(snakeProb), Active snakes: \(activeSnakesCount)")
             spawnSnake(nearY: newY)
         }
     }
@@ -2106,27 +2460,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let snakeX: CGFloat = -30  // Start just off the left edge
         let snakeY = nearY + CGFloat.random(in: -50...50)
         
+        print("🐍 Spawning snake at position: (\(snakeX), \(snakeY)), Camera Y: \(cam.position.y)")
+        
         let snake = Snake(position: CGPoint(x: snakeX, y: snakeY))
         worldNode.addChild(snake)
         snakes.append(snake)
-    }
-    
-    /// Respawns a snake that has reached the right edge of the screen
-    private func respawnSnake(_ oldSnake: Snake) {
-        // Remove the old snake
-        oldSnake.removeFromParent()
-        if let idx = snakes.firstIndex(of: oldSnake) {
-            snakes.remove(at: idx)
-        }
-        
-        // Spawn a new snake on the left at a similar Y position (adjusted for camera movement)
-        let newSnakeX: CGFloat = -30
-        // Spawn ahead of the current camera position
-        let newSnakeY = cam.position.y + CGFloat.random(in: 0...size.height * 0.5)
-        
-        let newSnake = Snake(position: CGPoint(x: newSnakeX, y: newSnakeY))
-        worldNode.addChild(newSnake)
-        snakes.append(newSnake)
     }
     
     func didHitObstacle(pad: Pad) {
@@ -2159,6 +2497,14 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Stop the drowning grace period if it was active
         if drowningGracePeriodTimer != nil {
             stopDrowningGracePeriod()
+        }
+        
+        // Check if landed on launch pad - trigger space transition!
+        if pad.type == .launchPad && !isLaunchingToSpace {
+            hasHitLaunchPad = true
+            isLaunchingToSpace = true
+            launchToSpace(from: pad)
+            return
         }
         
         // Check for cannon jump landing BEFORE landing logic
@@ -2575,9 +2921,13 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Put frog into a "hit" state (for invincibility frames)
         frog.hit()
         
-        // Bounce the frog toward the nearest safe lilypad, just like falling in water.
-        // This gives the player a chance to recover instead of getting stuck.
-        bounceTowardNearestPad()
+        // Move the frog to the right away from the boat
+        let pushDistance: CGFloat = 80
+        frog.position.x += pushDistance
+        
+        // Constrain to river bounds
+        let rightEdge = Configuration.Dimensions.riverWidth - 30
+        frog.position.x = min(frog.position.x, rightEdge)
     }
     
     func didCrash(into snake: Snake) {
@@ -2647,7 +2997,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
             let trigger = SKAction.run { [weak self] in
                 guard let self = self else { return }
                 let hasFullHealth = self.frog.currentHealth >= self.frog.maxHealth
-                self.coordinator?.triggerUpgradeMenu(hasFullHealth: hasFullHealth)
+                self.coordinator?.triggerUpgradeMenu(hasFullHealth: hasFullHealth, distanceTraveled: self.score)
             }
             run(SKAction.sequence([wait, trigger]))
         }
@@ -3069,8 +3419,14 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
         
         if frog.rocketState != .none {
-            let dir: CGFloat = location.x < cam.position.x ? -1 : 1
-            frog.velocity.dx += dir * 1.5
+            // Store the touch and determine which side was touched
+            rocketSteeringTouch = touch
+            let touchX = touch.location(in: self).x
+            let screenMidpoint = cam.position.x
+            rocketSteeringDirection = touchX < screenMidpoint ? -1 : 1
+            
+            // Apply initial steering
+            frog.steerRocket(rocketSteeringDirection)
             return
         }
         
@@ -3098,11 +3454,36 @@ class GameScene: SKScene, CollisionManagerDelegate {
     }
     
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard !isGameEnding, isDragging, let touch = touches.first else { return }
+        guard !isGameEnding else { return }
+        
+        // Handle rocket steering if in rocket mode
+        if frog.rocketState != .none, let steeringTouch = rocketSteeringTouch, touches.contains(steeringTouch) {
+            let touchX = steeringTouch.location(in: self).x
+            let screenMidpoint = cam.position.x
+            let newDirection: CGFloat = touchX < screenMidpoint ? -1 : 1
+            
+            // Only update if direction changed
+            if newDirection != rocketSteeringDirection {
+                rocketSteeringDirection = newDirection
+                frog.steerRocket(rocketSteeringDirection)
+            }
+            return
+        }
+        
+        // Handle normal drag for jump trajectory
+        guard isDragging, let touch = touches.first else { return }
         dragCurrent = touch.location(in: self)
         updateTrajectoryVisuals()
     }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // Handle rocket steering release
+        if let steeringTouch = rocketSteeringTouch, touches.contains(steeringTouch) {
+            rocketSteeringTouch = nil
+            rocketSteeringDirection = 0
+            frog.steerRocket(0)  // Stop steering
+            return
+        }
+        
         trajectoryDots.forEach { $0.isHidden = true }
         slingshotNode.path = nil
         slingshotDot.isHidden = true
@@ -3182,6 +3563,13 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
     }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // Handle rocket steering cancellation
+        if let steeringTouch = rocketSteeringTouch, touches.contains(steeringTouch) {
+            rocketSteeringTouch = nil
+            rocketSteeringDirection = 0
+            frog.steerRocket(0)  // Stop steering
+        }
+        
         isDragging = false
         lastHapticDragStep = 0
         hasTriggeredMaxPullHaptic = false
@@ -3354,15 +3742,32 @@ class GameScene: SKScene, CollisionManagerDelegate {
             }
         case "ROCKET":
             frog.rocketState = .flying
-            frog.rocketTimer = Int(Configuration.GameRules.rocketDuration * 60)
+            let baseDuration = Configuration.GameRules.rocketDuration
+            frog.rocketTimer = PersistenceManager.shared.hasDoubleRocketTime ? baseDuration * 2 : baseDuration
             frog.zHeight = max(frog.zHeight, 40)
             SoundManager.shared.play("rocket")
             SoundManager.shared.playMusic(.rocketFlight)
             ChallengeManager.shared.recordRocketUsed()
         case "SUPERJUMP":
-            frog.buffs.superJumpTimer = Int(Configuration.GameRules.superJumpDuration * 60)
+            let baseDuration = Configuration.GameRules.superJumpDuration
+            frog.buffs.superJumpTimer = PersistenceManager.shared.hasDoubleSuperJumpTime ? baseDuration * 2 : baseDuration
+            SoundManager.shared.playMusic(.superJump)
         case "CANNONBALL":
             frog.buffs.cannonJumps += 1
+        case "DOUBLESUPERJUMPTIME":
+            // Permanent upgrade - unlock double super jump time for this and all future games
+            PersistenceManager.shared.unlockDoubleSuperJumpTime()
+            // Also extend the current super jump if active
+            if frog.buffs.superJumpTimer > 0 {
+                frog.buffs.superJumpTimer *= 2
+            }
+        case "DOUBLEROCKETTIME":
+            // Permanent upgrade - unlock double rocket time for this and all future games
+            PersistenceManager.shared.unlockDoubleRocketTime()
+            // Also extend the current rocket if active
+            if frog.rocketState == .flying {
+                frog.rocketTimer *= 2
+            }
         default: break
         }
     }
