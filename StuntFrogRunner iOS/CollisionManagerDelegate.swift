@@ -358,9 +358,20 @@ class CollisionManager {
             let dx = frog.position.x - chest.position.x
             let dy = frog.position.y - chest.position.y
             let distSq = (dx * dx) + (dy * dy)
-            // Check horizontal proximity and z-height proximity (frog must be near the chest level)
+            
+            // Check horizontal proximity and z-height proximity
+            // Allow collection during rocket flight regardless of z-height
             let zDiff = abs(frog.zHeight - chest.zHeight)
-            if distSq < chestRadiusSq && zDiff < 25 {
+            let canCollect: Bool
+            if frog.rocketState != .none {
+                // During rocket flight, ignore z-height and just check horizontal distance
+                canCollect = distSq < chestRadiusSq
+            } else {
+                // Normal collection requires being near the chest level
+                canCollect = distSq < chestRadiusSq && zDiff < 25
+            }
+            
+            if canCollect {
                 delegate?.didCollect(treasureChest: chest)
             }
         }

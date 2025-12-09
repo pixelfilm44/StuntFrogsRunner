@@ -585,7 +585,7 @@ class Frog: GameEntity {
         }
     }
     
-    func jump(vector: CGVector, intensity: CGFloat) {
+    func jump(vector: CGVector, intensity: CGFloat, weather: WeatherType) {
         resetPullOffset()
         
         // NOTE: SuperJump multiplier is now applied in GameScene.touchesEnded
@@ -601,7 +601,9 @@ class Frog: GameEntity {
         // --- Dynamic Jump Animation ---
         // Calculate air time based on physics to sync animations.
         // Assumes physics runs at a consistent 60fps as gravity is not scaled by dt.
-        let timeToPeak = (zVel / Configuration.Physics.gravityZ) / 60.0 // in seconds
+        // Use the same gravity as actual physics - reduced in space!
+        let gravity = weather == .space ? Configuration.Physics.gravityZ * 0.3 : Configuration.Physics.gravityZ
+        let timeToPeak = (zVel / gravity) / 60.0 // in seconds
         
         if timeToPeak > 0 {
             let totalAirTime = timeToPeak * 2.0
@@ -666,7 +668,7 @@ class Frog: GameEntity {
         SoundManager.shared.play("land")
     }
     
-    func bounce() {
+    func bounce(weather: WeatherType) {
         // High bounce to give time for air jump
         let zVel: CGFloat = 22.0
         zVelocity = zVel
@@ -674,7 +676,9 @@ class Frog: GameEntity {
         velocity.dy *= -0.5
         
         // --- Dynamic Bounce Animation (same as jump) ---
-        let timeToPeak = (zVel / Configuration.Physics.gravityZ) / 60.0 // in seconds
+        // Use the same gravity as actual physics - reduced in space!
+        let gravity = weather == .space ? Configuration.Physics.gravityZ * 0.3 : Configuration.Physics.gravityZ
+        let timeToPeak = (zVel / gravity) / 60.0 // in seconds
         
         if timeToPeak > 0 {
             let totalAirTime = timeToPeak * 2.0
@@ -1257,7 +1261,7 @@ class TreasureChest: GameEntity {
 class Snake: GameEntity {
     
     /// Movement speed (pixels per frame)
-    private let moveSpeed: CGFloat = 2.5
+    private let moveSpeed: CGFloat = 12.5
     
     /// Visual nodes
     private let bodySprite = SKSpriteNode()

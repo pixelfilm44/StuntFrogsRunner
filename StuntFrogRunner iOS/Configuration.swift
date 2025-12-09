@@ -32,10 +32,10 @@ struct Configuration {
     struct Colors {
         static let sunny = SKColor(red: 52/255, green: 152/255, blue: 219/255, alpha: 1)
         static let rain = SKColor(red: 44/255, green: 62/255, blue: 80/255, alpha: 1)
-        static let night = SKColor(red: 12/255, green: 21/255, blue: 32/255, alpha: 1)
+        static let night = SKColor(red: 12/255, green: 21/255, blue: 32/255, alpha: 0.75)
         static let winter = SKColor(red: 160/255, green: 190/255, blue: 220/255, alpha: 1)
         static let desert = SKColor(red: 240/255, green: 210/255, blue: 120/255, alpha: 1) // Sandy sky for desert
-        static let space = SKColor.black // Deep space
+        static let space = SKColor(red: 15/255, green: 10/255, blue: 35/255, alpha: 0.5) // Deep purple space (more visible than pure black)
         static let blackVoid = SKColor.black // Instant death water for desert
     }
     
@@ -200,6 +200,12 @@ struct Configuration {
             return weather == .desert
         }
         
+        /// Desert biome rules:
+        /// - No bees or dragonflies spawn (replaced by snakes)
+        /// - No rain/precipitation
+        /// - Snakes spawn on lily pads starting at score 2400
+        /// - Instant death when falling in water
+        
         // MARK: - Launch Pad Settings (Desert → Space)
         
         /// Score at which the launch pad appears (end of desert, before space transition)
@@ -221,7 +227,7 @@ struct Configuration {
         // MARK: - Warp Pad Settings (End of Space → Return to Day)
         
         /// Score at which the warp pad appears (end of space)
-        static let warpPadSpawnScore: Int = 25000
+        static let warpPadSpawnScore: Int = 4000
         
         /// Duration of fade to black transition
         static let warpFadeOutDuration: TimeInterval = 1.0
@@ -243,7 +249,7 @@ struct Configuration {
             return score / scalingInterval
         }
         
-        // MARK: - Enemy Spawning
+        // MARK: - Enemy Spawning (Bees/Dragonflies - Not in Desert)
         
         /// Base probability of spawning an enemy (at level 0)
         static let baseEnemyProbability: Double = 0.15
@@ -252,7 +258,9 @@ struct Configuration {
         /// Maximum enemy spawn probability
         static let maxEnemyProbability: Double = 0.65
         
-        static func enemyProbability(forLevel level: Int) -> Double {
+        static func enemyProbability(forLevel level: Int, weather: WeatherType) -> Double {
+            // No bees or dragonflies in desert - replaced by snakes
+            guard weather != .desert else { return 0.0 }
             return min(maxEnemyProbability, baseEnemyProbability + (Double(level) * enemyProbabilityPerLevel))
         }
         
@@ -273,12 +281,13 @@ struct Configuration {
             return min(maxLogProbability, baseLogProbability + (Double(effectiveLevel) * logProbabilityPerLevel))
         }
         
-        // MARK: - Enemy Types
+        // MARK: - Enemy Types (Not in Desert)
         
         /// Difficulty level when dragonflies start appearing
         static let dragonflyStartLevel: Int = 2
         /// Probability of dragonfly (vs bee) once unlocked, scales with level
-        static func dragonflyProbability(forLevel level: Int) -> Double {
+        static func dragonflyProbability(forLevel level: Int, weather: WeatherType) -> Double {
+            guard weather != .desert else { return 0.0 }
             guard level >= dragonflyStartLevel else { return 0.0 }
             let effectiveLevel = level - dragonflyStartLevel
             return min(0.5, 0.2 + (Double(effectiveLevel) * 0.1))
@@ -315,25 +324,44 @@ struct Configuration {
             return 0.15
         }
         
-        // MARK: - Snake Spawning
+        // MARK: - Snake Spawning (Desert Only)
         
-        /// Minimum score before snakes can appear
-        static let snakeStartScore: Int = 3000
-        /// Base probability of spawning a snake (once unlocked)
-        static let baseSnakeProbability: Double = 0.12  // Increased from 0.08 for better visibility
+        /// Minimum score before snakes can appear (start of desert biome)
+        static let snakeStartScore: Int = 2400  // Changed from 3000 to start at desert
+        /// Base probability of spawning a snake in desert (once unlocked)
+        static let baseSnakeProbability: Double = 0.15  // Increased for desert prominence
         /// Additional snake probability per level after unlock
-        static let snakeProbabilityPerLevel: Double = 0.04  // Increased from 0.03
+        static let snakeProbabilityPerLevel: Double = 0.05
         /// Maximum snake spawn probability
-        static let maxSnakeProbability: Double = 0.35  // Increased from 0.25
+        static let maxSnakeProbability: Double = 0.40
         /// Maximum snakes on screen at once
         static let snakeMaxOnScreen: Int = 3
         
-        static func snakeProbability(forScore score: Int) -> Double {
-            guard score >= snakeStartScore else { return 0.0 }
+        /// Calculates the probability of a snake spawning. Snakes spawn primarily in desert, but start appearing slightly before the cutscene.
+        static func snakeProbability(forScore score: Int, weather: WeatherType) -> Double {
+            // DEBUG: Log all parameters
+            let debugLog = score >= 2400 && score <= 2500
+            
+            // Allow snakes to start spawning at the score threshold, even if desert cutscene hasn't played yet
+            guard score >= snakeStartScore else {
+                if debugLog { print("🐍❌ Score \(score) < start score \(snakeStartScore)") }
+                return 0.0
+            }
+            
             let snakeStartLevel = snakeStartScore / scalingInterval
             let currentLevel = level(forScore: score)
             let effectiveLevel = currentLevel - snakeStartLevel
-            return min(maxSnakeProbability, baseSnakeProbability + (Double(effectiveLevel) * snakeProbabilityPerLevel))
+            
+            // Higher probability in desert, but still spawn in other weathers at reduced rate
+            let weatherMultiplier: Double = weather == .desert ? 1.0 : 0.5
+            let baseProbability = min(maxSnakeProbability, baseSnakeProbability + (Double(effectiveLevel) * snakeProbabilityPerLevel))
+            let finalProbability = baseProbability * weatherMultiplier
+            
+            if debugLog {
+                print("🐍📊 Snake prob calc: score=\(score), weather=\(weather), startLevel=\(snakeStartLevel), currentLevel=\(currentLevel), effectiveLevel=\(effectiveLevel), baseProb=\(baseProbability), multiplier=\(weatherMultiplier), final=\(finalProbability)")
+            }
+            
+            return finalProbability
         }
         
         // MARK: - Cactus Spawning (Desert Only)
@@ -372,12 +400,12 @@ struct Configuration {
         static let logJumperCost = 300
         static let superJumpCost = 500
         static let rocketJumpCost = 500
-        static let lifevest4PackCost = 500
-        static let honey4PackCost = 500
+        static let lifevest4PackCost = 100
+        static let honey4PackCost = 100
         static let cannonJumpCost = 1000
-        static let cross4PackCost = 500
-        static let swatter4PackCost = 500
-        static let axe4PackCost = 500
+        static let cross4PackCost = 100
+        static let swatter4PackCost = 100
+        static let axe4PackCost = 100
     }
     
     struct GameCenter {
@@ -401,4 +429,14 @@ struct Configuration {
 
 enum WeatherType: String, CaseIterable {
     case sunny, night, rain, winter, desert, space
+    
+    /// Returns whether this weather type can have precipitation (rain/snow)
+    var hasPrecipitation: Bool {
+        switch self {
+        case .rain, .winter:
+            return true
+        case .sunny, .night, .desert, .space:
+            return false
+        }
+    }
 }

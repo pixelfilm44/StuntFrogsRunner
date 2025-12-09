@@ -53,6 +53,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
     // --- Performance Improvement: Ripple Pool ---
     // A pool of reusable sprite nodes for water ripples.
     private lazy var rippleTexture: SKTexture = self.createRippleTexture()
+    private lazy var cartoonArcTexture: SKTexture = self.createCartoonArcTexture()
     private var ripplePool: [SKSpriteNode] = []
     private let ripplePoolSize = 20
     private var frameCount: Int = 0
@@ -501,7 +502,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         case .desert:
             return "waterSand"
         case .space:
-            return "waterSpace" // You'll need to create this asset
+            // Use night water texture for space (or create waterSpace asset)
+            return "waterNight"
         default:
             return "water"
         }
@@ -555,6 +557,28 @@ class GameScene: SKScene, CollisionManagerDelegate {
                                                       endCenter: center, endRadius: radius,
                                                       options: [])
             }
+        }
+        return SKTexture(image: image)
+    }
+    
+    /// Creates a cartoon-style arc ripple texture (half-circle outline)
+    private func createCartoonArcTexture() -> SKTexture {
+        let size = CGSize(width: 128, height: 64) // Half height for arc
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { context in
+            let ctx = context.cgContext
+            
+            // Draw a thick arc (half circle outline)
+            ctx.setStrokeColor(UIColor.white.cgColor)
+            ctx.setLineWidth(6)
+            ctx.setLineCap(.round)
+            
+            // Create arc path (bottom half of circle)
+            let center = CGPoint(x: size.width / 2, y: size.height)
+            let radius: CGFloat = size.width / 2 - 3
+            
+            ctx.addArc(center: center, radius: radius, startAngle: .pi, endAngle: 0, clockwise: false)
+            ctx.strokePath()
         }
         return SKTexture(image: image)
     }
@@ -636,9 +660,228 @@ class GameScene: SKScene, CollisionManagerDelegate {
 
     /// Spawns animated water ripples parented to the specified node.
     private func spawnWaterRipple(for node: SKNode) {
-        // Spawns a single, subtle black shadow instead of a bright ripple.
-        let shadowColor: UIColor = .white
-        spawnRipples(parentedTo: node, color: shadowColor, rippleCount: 1, isDramatic: true)
+        // In space, spawn laser blast instead of ripples
+        if currentWeather == .space {
+            spawnLaserBlast(from: node)
+            return
+        }
+        
+        // Spawns cartoon-style circle ripples that appear immediately
+        spawnCartoonCircleRipples(at: node.position)
+    }
+    
+    /// Spawns a laser blast from the edge of the lily pad that shoots across the screen (space weather only)
+    private func spawnLaserBlast(from node: SKNode) {
+        // Choose a random direction (left or right to shoot across the screen)
+        let shootRight = Bool.random()
+        let angle: CGFloat = shootRight ? 0 : .pi  // 0° for right, 180° for left
+        
+        // Get the lily pad's radius to position the laser at the edge
+        let padRadius: CGFloat
+        if let pad = node as? Pad {
+            padRadius = pad.scaledRadius
+        } else {
+            padRadius = 40  // Default fallback
+        }
+        
+        // Calculate the starting position at the edge of the lily pad
+        let edgeOffsetX = shootRight ? padRadius : -padRadius
+        let startPosition = CGPoint(
+            x: node.position.x + edgeOffsetX,
+            y: node.position.y
+        )
+        
+        // Create a short red laser bolt
+        let laserLength: CGFloat = 40  // Short bolt
+        let laserWidth: CGFloat = 6
+        
+        let laser = SKShapeNode(rectOf: CGSize(width: laserLength, height: laserWidth))
+        laser.fillColor = .red
+        laser.strokeColor = UIColor(red: 1.0, green: 0.3, blue: 0.0, alpha: 1.0)  // Orange-red outline
+        laser.lineWidth = 2
+        laser.position = startPosition
+        laser.zPosition = Layer.pad + 1 // Above the lily pad
+        laser.zRotation = angle
+        laser.name = "spaceLaser" // Tag for collision detection
+        
+        // Add a bright glowing core
+        let core = SKShapeNode(rectOf: CGSize(width: laserLength * 0.6, height: laserWidth * 0.5))
+        core.fillColor = UIColor(red: 1.0, green: 0.9, blue: 0.8, alpha: 1.0)  // Bright yellow-white core
+        core.strokeColor = .clear
+        core.zPosition = 1
+        laser.addChild(core)
+        
+        worldNode.addChild(laser)
+        
+        // Calculate travel distance and speed
+        let screenWidth = Configuration.Dimensions.riverWidth
+        let travelDistance: CGFloat = shootRight ? (screenWidth - startPosition.x + 100) : (startPosition.x + 100)
+        let speed: CGFloat = 800  // pixels per second
+        let travelDuration = TimeInterval(travelDistance / speed)
+        
+        // Animate: move across the screen
+        let moveDistance = shootRight ? travelDistance : -travelDistance
+        let move = SKAction.moveBy(x: moveDistance, y: 0, duration: travelDuration)
+        move.timingMode = .linear
+        
+        let remove = SKAction.removeFromParent()
+        
+        // Check for collisions during travel
+        let checkCollisions = SKAction.run { [weak self, weak laser] in
+            guard let self = self, let laser = laser else { return }
+            self.checkLaserCollisions(laser: laser, direction: angle, length: laserLength)
+        }
+        
+        // Check collisions every 0.05 seconds during travel
+        let collisionCheck = SKAction.sequence([
+            checkCollisions,
+            SKAction.wait(forDuration: 0.05)
+        ])
+        let repeatCollisionCheck = SKAction.repeat(collisionCheck, count: Int(travelDuration / 0.05))
+        
+        laser.run(SKAction.group([move, repeatCollisionCheck]))
+        laser.run(SKAction.sequence([SKAction.wait(forDuration: travelDuration), remove]))
+        
+        // Play laser sound
+        SoundManager.shared.play("laser")
+        
+        // Light haptic feedback
+        HapticsManager.shared.playImpact(.light)
+    }
+    
+    /// Checks if the laser beam hits any enemies and destroys them
+    private func checkLaserCollisions(laser: SKNode, direction angle: CGFloat, length: CGFloat) {
+        // Calculate the laser's endpoint based on its direction
+        let startPos = laser.position
+        let endX = startPos.x + cos(angle) * length
+        let endY = startPos.y + sin(angle) * length
+        let endPos = CGPoint(x: endX, y: endY)
+        
+        // Check all active enemies
+        var enemiesToDestroy: [Enemy] = []
+        
+        for enemy in activeEnemies {
+            // Check if enemy is within the laser's path (line segment collision)
+            if isPoint(enemy.position, nearLineFrom: startPos, to: endPos, tolerance: 20) {
+                enemiesToDestroy.append(enemy)
+            }
+        }
+        
+        // Destroy hit enemies with dramatic effects
+        for enemy in enemiesToDestroy {
+            // Remove from scene
+            enemy.removeFromParent()
+            if let idx = enemies.firstIndex(of: enemy) {
+                enemies.remove(at: idx)
+            }
+            
+            // Visual feedback - different colors based on enemy type
+            let debrisColor: UIColor
+            switch enemy.type {
+            case "BEE":
+                debrisColor = UIColor(red: 1.0, green: 0.8, blue: 0.2, alpha: 1.0)  // Yellow
+            case "DRAGONFLY":
+                debrisColor = UIColor(red: 0.2, green: 0.6, blue: 1.0, alpha: 1.0)  // Blue
+            case "GHOST":
+                debrisColor = UIColor(red: 0.8, green: 0.8, blue: 1.0, alpha: 1.0)  // Pale ghostly
+            default:
+                debrisColor = .cyan
+            }
+            
+            // Spawn debris explosion
+            VFXManager.shared.spawnDebris(at: enemy.position, in: self, color: debrisColor, intensity: 1.2)
+            
+            // Spawn sparkles for extra sci-fi effect
+            VFXManager.shared.spawnSparkles(at: enemy.position, in: self)
+            
+            // Audio and haptic feedback
+            SoundManager.shared.play("hit")
+            HapticsManager.shared.playImpact(.medium)
+            
+            // Track for challenges
+            ChallengeManager.shared.recordEnemyDefeated()
+        }
+    }
+    
+    /// Checks if a point is near a line segment (for laser collision detection)
+    private func isPoint(_ point: CGPoint, nearLineFrom start: CGPoint, to end: CGPoint, tolerance: CGFloat) -> Bool {
+        // Vector from start to end
+        let lineVec = CGPoint(x: end.x - start.x, y: end.y - start.y)
+        let lineLength = sqrt(lineVec.x * lineVec.x + lineVec.y * lineVec.y)
+        
+        // Normalize the line vector
+        let lineDir = CGPoint(x: lineVec.x / lineLength, y: lineVec.y / lineLength)
+        
+        // Vector from start to point
+        let startToPoint = CGPoint(x: point.x - start.x, y: point.y - start.y)
+        
+        // Project point onto line
+        let projection = startToPoint.x * lineDir.x + startToPoint.y * lineDir.y
+        
+        // Clamp projection to line segment
+        let clampedProjection = max(0, min(lineLength, projection))
+        
+        // Find closest point on line segment
+        let closestPoint = CGPoint(
+            x: start.x + lineDir.x * clampedProjection,
+            y: start.y + lineDir.y * clampedProjection
+        )
+        
+        // Calculate distance from point to closest point on line
+        let dx = point.x - closestPoint.x
+        let dy = point.y - closestPoint.y
+        let distance = sqrt(dx * dx + dy * dy)
+        
+        return distance <= tolerance
+    }
+    
+    /// Spawns cartoon-style circle ripples (3 concentric circles) at the specified position
+    private func spawnCartoonCircleRipples(at position: CGPoint) {
+        let circleCount = 3
+        let baseDelay: TimeInterval = 0.0 // Appear immediately
+        let delayBetweenCircles: TimeInterval = 0.08
+        
+        for i in 0..<circleCount {
+            let delay = baseDelay + (Double(i) * delayBetweenCircles)
+            
+            run(SKAction.wait(forDuration: delay)) { [weak self] in
+                self?.spawnSingleCartoonCircle(at: position, index: i)
+            }
+        }
+    }
+    
+    /// Spawns a single cartoon circle ripple
+    private func spawnSingleCartoonCircle(at position: CGPoint, index: Int) {
+        // Start slightly larger for each successive circle
+        let startRadius: CGFloat = 20.0 + (CGFloat(index) * 10.0)
+        
+        // Create a circle shape node with stroke (no fill for a ring effect)
+        let circle = SKShapeNode(circleOfRadius: startRadius)
+        circle.strokeColor = .white
+        circle.lineWidth = 4
+        circle.fillColor = .clear
+        circle.alpha = 0.9
+        circle.position = position
+        circle.zPosition = Layer.water + 1
+        
+        worldNode.addChild(circle)
+        
+        // Animate: expand outward and fade
+        let duration: TimeInterval = 0.6
+        let finalRadius: CGFloat = 80.0 + (CGFloat(index) * 20.0)
+        
+        // Create scaling animation
+        let scaleRatio = finalRadius / startRadius
+        let scaleUp = SKAction.scale(to: scaleRatio, duration: duration)
+        scaleUp.timingMode = .easeOut
+        
+        let fadeOut = SKAction.fadeOut(withDuration: duration)
+        fadeOut.timingMode = .easeIn
+        
+        let group = SKAction.group([scaleUp, fadeOut])
+        let remove = SKAction.removeFromParent()
+        
+        circle.run(SKAction.sequence([group, remove]))
     }
     
     private func setupHUD() {
@@ -720,18 +963,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let bottomSafeArea = view?.safeAreaInsets.bottom ?? 0
         let screenBottomY = -(size.height / 2)
         
-        descendBg.fillColor = UIColor(red: 231/255, green: 76/255, blue: 60/255, alpha: 1)
-        descendBg.strokeColor = .white
-        descendBg.lineWidth = 3
-        descendBg.position = CGPoint(x: 0, y: screenBottomY + bottomSafeArea + 100)
-        descendBg.isHidden = true
-        uiNode.addChild(descendBg)
-        descendButton.text = "DESCEND!"
-        descendButton.fontSize = Configuration.Fonts.descendButton.size
-        descendButton.verticalAlignmentMode = .center
-        descendButton.fontColor = .white
-        descendBg.addChild(descendButton)
-        
         pauseBg.fillColor = .black.withAlphaComponent(0.5)
         pauseBg.strokeColor = .white
         pauseBg.lineWidth = 2
@@ -744,6 +975,18 @@ class GameScene: SKScene, CollisionManagerDelegate {
         pauseIcon.fontColor = .white
         pauseBg.addChild(pauseIcon)
         uiNode.addChild(pauseBg)
+        
+        descendBg.fillColor = UIColor(red: 231/255, green: 76/255, blue: 60/255, alpha: 1)
+        descendBg.strokeColor = .white
+        descendBg.lineWidth = 3
+        descendBg.position = CGPoint(x: 0, y: screenBottomY + bottomSafeArea + 140)
+        descendBg.isHidden = true
+        uiNode.addChild(descendBg)
+        descendButton.text = "DESCEND!"
+        descendButton.fontSize = Configuration.Fonts.descendButton.size
+        descendButton.verticalAlignmentMode = .center
+        descendButton.fontColor = .white
+        descendBg.addChild(descendButton)
 
         // Cannon Jump Button
         cannonJumpBg.fillColor = UIColor(red: 142/255, green: 68/255, blue: 173/255, alpha: 1.0) // Purple
@@ -1332,6 +1575,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         hasHitLaunchPad = false
         launchPadY = 0
         isLaunchingToSpace = false
+        hasSpawnedWarpPad = false
+        hasHitWarpPad = false
+        warpPadY = 0
 
         if gameMode == .beatTheBoat {
             raceState = .countdown
@@ -1556,12 +1802,15 @@ class GameScene: SKScene, CollisionManagerDelegate {
         updateDrowningGracePeriod(dt: dt)
         
         // UI Updates
-        if frog.rocketState == .landing {
+        if frog.rocketState == .flying {
+            descendBg.isHidden = false
+        } else if frog.rocketState == .landing {
             descendBg.isHidden = false
             let s = 1.0 + sin(currentTime * 5) * 0.05
             descendBg.setScale(s)
         } else {
             descendBg.isHidden = true
+            descendBg.setScale(1.0) // Reset scale when hidden
         }
         
         if previousRocketState != .none && frog.rocketState == .none {
@@ -1731,35 +1980,59 @@ class GameScene: SKScene, CollisionManagerDelegate {
     
     /// Checks if the frog has interacted with the launch pad or missed it
     private func checkLaunchPadInteraction() {
-        // Only check if launch pad has spawned and hasn't been hit yet
-        guard hasSpawnedLaunchPad && !hasHitLaunchPad else { return }
-        
-        // Check if frog is using rocket and passes over/near the launch pad
-        if frog.rocketState == .flying {
-            let distanceFromLaunchPad = abs(frog.position.y - launchPadY)
-            let horizontalDistance = abs(frog.position.x - (Configuration.Dimensions.riverWidth / 2))
-            
-            // If rocket passes near the launch pad (within reasonable distance)
-            if frog.position.y >= launchPadY && 
-               distanceFromLaunchPad < 150 && 
-               horizontalDistance < 150 {
-                print("🚀 Frog passed over launch pad with rocket!")
-                hasHitLaunchPad = true
+        // Check launch pad interaction
+        if hasSpawnedLaunchPad && !hasHitLaunchPad {
+            // Check if frog is using rocket and passes over/near the launch pad
+            if frog.rocketState == .flying {
+                let distanceFromLaunchPad = abs(frog.position.y - launchPadY)
+                let horizontalDistance = abs(frog.position.x - (Configuration.Dimensions.riverWidth / 2))
                 
-                // Find the launch pad and trigger the sequence
-                if let launchPad = pads.first(where: { $0.type == .launchPad }) {
-                    isLaunchingToSpace = true
-                    launchToSpace(from: launchPad)
+                // If rocket passes near the launch pad (within reasonable distance)
+                if frog.position.y >= launchPadY && 
+                   distanceFromLaunchPad < 150 && 
+                   horizontalDistance < 150 {
+                    print("🚀 Frog passed over launch pad with rocket!")
+                    hasHitLaunchPad = true
+                    
+                    // Find the launch pad and trigger the sequence
+                    if let launchPad = pads.first(where: { $0.type == .launchPad }) {
+                        isLaunchingToSpace = true
+                        launchToSpace(from: launchPad)
+                    }
+                    return
                 }
+            }
+            
+            // Check if frog has passed the launch pad without hitting it
+            if frog.position.y > launchPadY + launchPadMissDistance {
+                // Game over - missed the launch pad!
+                print("❌ Frog missed the launch pad! Game Over.")
+                handleMissedLaunchPad()
                 return
             }
         }
         
-        // Check if frog has passed the launch pad without hitting it
-        if frog.position.y > launchPadY + launchPadMissDistance {
-            // Game over - missed the launch pad!
-            print("❌ Frog missed the launch pad! Game Over.")
-            handleMissedLaunchPad()
+        // Check warp pad interaction
+        if hasSpawnedWarpPad && !hasHitWarpPad {
+            // Check if frog is using rocket and passes over/near the warp pad
+            if frog.rocketState == .flying {
+                let distanceFromWarpPad = abs(frog.position.y - warpPadY)
+                let horizontalDistance = abs(frog.position.x - (Configuration.Dimensions.riverWidth / 2))
+                
+                // If rocket passes near the warp pad (within reasonable distance)
+                if frog.position.y >= warpPadY && 
+                   distanceFromWarpPad < 150 && 
+                   horizontalDistance < 150 {
+                    print("🌀 Frog passed over warp pad with rocket!")
+                    hasHitWarpPad = true
+                    
+                    // Find the warp pad and trigger the sequence
+                    if let warpPad = pads.first(where: { $0.type == .warp }) {
+                        warpBackToDay(from: warpPad)
+                    }
+                    return
+                }
+            }
         }
     }
     
@@ -1790,6 +2063,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
     }
     
     private func checkWeatherChange() {
+        // Don't change weather while in space - warp pad is the only way out!
+        if currentWeather == .space {
+            return
+        }
+        
         if score >= nextWeatherChangeScore {
             advanceWeather()
             nextWeatherChangeScore += weatherChangeInterval
@@ -1797,6 +2075,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
     }
 
     private func advanceWeather() {
+        // Don't advance weather if we're already in space - warp pad is the only way out!
+        if currentWeather == .space {
+            return
+        }
+        
         let all = WeatherType.allCases
         guard let idx = all.firstIndex(of: currentWeather) else { return }
         let nextIdx = (idx + 1) % all.count
@@ -1809,8 +2092,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         } else if nextWeather == .space {
             // Space weather should be instant, no gradual transition
             // It's triggered by the launch pad cutscene, not by weather cycling
-            // This branch shouldn't normally be hit, but handle it just in case
-            setWeather(nextWeather, duration: 0.0)
+            // Don't auto-transition to space - skip it and stay in desert
+            // Player MUST use the launch pad to enter space
+            print("⚠️ Weather cycle tried to enter space - blocked! Use launch pad instead.")
+            return
         } else {
             // For all other weather types, use the gradual transition
             setWeather(nextWeather, duration: 60.0)
@@ -1860,8 +2145,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
         case .desert: .desert
         case .space: .space
                 }
+        
+if type == .space {
+    SoundManager.shared.stopMusic()
+        }
         SoundManager.shared.playWeatherSFX(sfx)
-
         // --- In-World Object Transitions ---
         for pad in pads {
             pad.updateColor(weather: type, duration: actualDuration)
@@ -2096,6 +2384,13 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private func transitionToSpace() {
         print("🌌 Transitioning to space weather!")
         
+        // IMPORTANT: Remove the launch pad from the scene
+        if let launchPadIndex = pads.firstIndex(where: { $0.type == .launchPad }) {
+            pads[launchPadIndex].removeFromParent()
+            pads.remove(at: launchPadIndex)
+            print("🚀 Launch pad removed from scene")
+        }
+        
         // Set the weather to space - INSTANT transition (duration: 0)
         setWeather(.space, duration: 0.0)
         
@@ -2110,11 +2405,47 @@ class GameScene: SKScene, CollisionManagerDelegate {
         launchPadY = 0
         isLaunchingToSpace = false
         
-        // Position frog at a new starting point
-        if let firstPad = pads.first {
-            frog.position = CGPoint(x: Configuration.Dimensions.riverWidth / 2, y: firstPad.position.y + 100)
+        // Find a safe landing pad ahead of the frog's current position
+        var landingPad: Pad?
+        
+        // Look for the nearest pad ahead of the frog (prefer normal pads)
+        for pad in pads.sorted(by: { $0.position.y < $1.position.y }) {
+            if pad.position.y > frog.position.y && pad.type == .normal {
+                landingPad = pad
+                break
+            }
+        }
+        
+        // If no normal pad found, just use any pad ahead
+        if landingPad == nil {
+            landingPad = pads.first(where: { $0.position.y > frog.position.y && $0.type != .log })
+        }
+        
+        // If still no pad (shouldn't happen), create one
+        if landingPad == nil {
+            let newPad = Pad(
+                type: .normal,
+                position: CGPoint(
+                    x: Configuration.Dimensions.riverWidth / 2,
+                    y: frog.position.y + 200
+                )
+            )
+            newPad.updateColor(weather: .space, duration: 0.0)
+            worldNode.addChild(newPad)
+            pads.append(newPad)
+            landingPad = newPad
+        }
+        
+        // Land the frog safely on the pad
+        if let pad = landingPad {
+            frog.position = pad.position
             frog.zHeight = 0
             frog.velocity = .zero
+            frog.zVelocity = 0
+            frog.land(on: pad, weather: .space)
+            
+            // Spawn a ripple effect for dramatic landing
+            spawnWaterRipple(for: pad)
         }
         
         // Re-enable user interaction
@@ -2146,6 +2477,180 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let remove = SKAction.removeFromParent()
         
         welcomeLabel.run(SKAction.sequence([fadeIn, wait, fadeOut, remove]))
+    }
+    
+    // MARK: - Warp Back to Day
+    
+    private func warpBackToDay(from pad: Pad) {
+        // Disable user interaction during the warp sequence
+        isUserInteractionEnabled = false
+        isInCutscene = true
+        
+        // Stop all frog movement
+        frog.velocity = .zero
+        frog.onPad = pad
+        
+        print("🌀 Warp back to day initiated!")
+        
+        // Play warp sound - using rocket sound as placeholder until warp sound is added
+        SoundManager.shared.play("rocket")
+        SoundManager.shared.stopMusic(fadeDuration: 1.0)
+        
+        // Haptic feedback for warp
+        HapticsManager.shared.playNotification(.success)
+        
+        // Create sparkle/portal effects around the warp pad
+        VFXManager.shared.spawnSparkles(at: pad.position, in: self)
+        
+        // Animate the warp pad spinning faster
+        let spinAction = SKAction.rotate(byAngle: .pi * 8, duration: 2.0)
+        pad.run(spinAction)
+        
+        // Start the fade immediately
+        fadeToBlackAndWarp()
+    }
+    
+    private func fadeToBlackAndWarp() {
+        // Create a black overlay that covers the entire screen
+        let blackOverlay = SKSpriteNode(color: .black, size: self.size)
+        blackOverlay.position = .zero
+        blackOverlay.zPosition = Layer.overlay + 100 // Above everything
+        blackOverlay.alpha = 0
+        
+        cam.addChild(blackOverlay)
+        
+        // Fade to black
+        let fadeOut = SKAction.fadeIn(withDuration: Configuration.GameRules.warpFadeOutDuration)
+        
+        blackOverlay.run(fadeOut) { [weak self] in
+            guard let self = self else { return }
+            
+            // After fade is complete, reset to day weather
+            self.resetToDay()
+            
+            // Wait a moment then fade back in
+            let wait = SKAction.wait(forDuration: Configuration.GameRules.warpBlackScreenDuration)
+            let fadeIn = SKAction.fadeOut(withDuration: Configuration.GameRules.warpFadeInDuration)
+            let remove = SKAction.removeFromParent()
+            
+            blackOverlay.run(SKAction.sequence([wait, fadeIn, remove]))
+        }
+    }
+    
+    private func resetToDay() {
+        print("☀️ Resetting to sunny day weather!")
+        
+        // 1. Change weather to sunny
+        setWeather(.sunny, duration: 0.0)
+        
+        // 2. Clear all existing entities except frog
+        // Remove all pads
+        pads.forEach { $0.removeFromParent() }
+        pads.removeAll()
+        
+        // Remove all enemies
+        enemies.forEach { $0.removeFromParent() }
+        enemies.removeAll()
+        
+        // Remove all coins
+        coins.forEach { $0.removeFromParent() }
+        coins.removeAll()
+        
+        // Remove all snakes
+        snakes.forEach { $0.removeFromParent() }
+        snakes.removeAll()
+        
+        // Remove all crocodiles
+        crocodiles.forEach { $0.removeFromParent() }
+        crocodiles.removeAll()
+        
+        // Remove all treasure chests
+        treasureChests.forEach { $0.removeFromParent() }
+        treasureChests.removeAll()
+        
+        // Remove all flies
+        flies.forEach { $0.removeFromParent() }
+        flies.removeAll()
+        
+        // Remove all flotsam
+        flotsam.forEach { $0.removeFromParent() }
+        flotsam.removeAll()
+        
+        // 3. Create a new starting pad for the frog
+        let startPadY = frog.position.y + 200
+        let startPad = Pad(
+            type: .normal,
+            position: CGPoint(x: Configuration.Dimensions.riverWidth / 2, y: startPadY),
+            radius: 60
+        )
+        startPad.updateColor(weather: .sunny)
+        worldNode.addChild(startPad)
+        pads.append(startPad)
+        
+        // 4. Reset frog to the new pad
+        frog.position = startPad.position
+        frog.zHeight = 0
+        frog.velocity = .zero
+        frog.zVelocity = 0
+        frog.onPad = startPad
+        
+        // 5. Spawn new pads ahead (simple initial generation)
+        var lastY = startPad.position.y
+        for i in 1...15 {
+            let padY = lastY + CGFloat.random(in: 100...140)
+            let padX = CGFloat.random(in: 80...Configuration.Dimensions.riverWidth - 80)
+            
+            let newPad = Pad(
+                type: .normal,
+                position: CGPoint(x: padX, y: padY),
+                radius: Configuration.Dimensions.randomPadRadius()
+            )
+            newPad.updateColor(weather: .sunny)
+            worldNode.addChild(newPad)
+            pads.append(newPad)
+            lastY = padY
+        }
+        
+        // 6. Reset warp pad tracker so it can spawn again if player reaches space again
+        hasSpawnedWarpPad = false
+        hasHitWarpPad = false
+        warpPadY = 0
+        
+        // 7. Reset launch pad tracker for potential future space trips
+        hasSpawnedLaunchPad = false
+        hasHitLaunchPad = false
+        launchPadY = 0
+        isLaunchingToSpace = false
+        
+        // 8. Re-enable user interaction
+        isInCutscene = false
+        isUserInteractionEnabled = true
+        
+        // 9. Play normal music
+        SoundManager.shared.playMusic(baseMusic)
+        
+        // 10. Show a "RETURNED TO EARTH" message
+        showWarpReturnMessage()
+    }
+    
+    private func showWarpReturnMessage() {
+        let returnLabel = SKLabelNode(fontNamed: Configuration.Fonts.primaryHeavy)
+        returnLabel.text = "☀️ BACK TO EARTH ☀️"
+        returnLabel.fontSize = 40
+        returnLabel.fontColor = .white
+        returnLabel.position = .zero
+        returnLabel.zPosition = Layer.ui + 50
+        returnLabel.alpha = 0
+        
+        cam.addChild(returnLabel)
+        
+        // Fade in, hold, then fade out
+        let fadeIn = SKAction.fadeIn(withDuration: 1.0)
+        let wait = SKAction.wait(forDuration: 2.0)
+        let fadeOut = SKAction.fadeOut(withDuration: 1.0)
+        let remove = SKAction.removeFromParent()
+        
+        returnLabel.run(SKAction.sequence([fadeIn, wait, fadeOut, remove]))
     }
     
     /// Recreates water tiles with the appropriate texture for current weather
@@ -2219,6 +2724,16 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
     }
     private func generateNextLevelSlice(lastPad: Pad) {
+        // Don't spawn new pads if we're waiting for the player to hit the warp pad
+        if hasSpawnedWarpPad && !hasHitWarpPad {
+            return
+        }
+        
+        // Don't spawn new pads if we're waiting for the player to hit the launch pad
+        if hasSpawnedLaunchPad && !hasHitLaunchPad && currentWeather == .desert {
+            return
+        }
+        
         var newY: CGFloat = 0
         var newX: CGFloat = 0
         var attempts = 0
@@ -2249,8 +2764,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let difficultyLevel = Configuration.Difficulty.level(forScore: scoreVal)
         
         // DEBUG: Log when we reach snake spawn threshold
-        if scoreVal == 3000 {
-            print("🎯 Reached snake spawn threshold! Score: \(scoreVal)")
+        if scoreVal == 2400 {
+            print("🎯 Reached snake spawn threshold! Score: \(scoreVal), Weather: \(currentWeather)")
         }
         
         // Check if we should spawn the launch pad (end of desert, before space)
@@ -2263,6 +2778,17 @@ class GameScene: SKScene, CollisionManagerDelegate {
             launchPadY = newY
             
             print("🚀 Spawning launch pad at score: \(scoreVal), Y position: \(newY)")
+        }
+        // Check if we should spawn the warp pad (end of space, return to day)
+        else if currentWeather == .space && !hasSpawnedWarpPad && scoreVal >= Configuration.GameRules.warpPadSpawnScore {
+            type = .warp
+            hasSpawnedWarpPad = true
+            
+            // Center the warp pad in the river for dramatic effect
+            newX = Configuration.Dimensions.riverWidth / 2
+            warpPadY = newY
+            
+            print("🌀 Spawning warp pad at score: \(scoreVal), Y position: \(newY)")
         } else {
             // Normal pad type selection based on difficulty level
             if difficultyLevel >= Configuration.Difficulty.movingPadStartLevel && Double.random(in: 0...1) < Configuration.Difficulty.movingPadProbability {
@@ -2281,8 +2807,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         worldNode.addChild(pad)
         pads.append(pad)
         
-        // Don't spawn anything on launch pads - they're special!
-        if type == .launchPad {
+        // Don't spawn anything on special pads (launch pad, warp pad) - they're special!
+        if type == .launchPad || type == .warp {
             return
         }
         
@@ -2290,7 +2816,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Only spawn if: score >= 2500 and we haven't reached max crocodiles this run
         let canSpawnCrocodile = scoreVal >= Configuration.Difficulty.crocodileMinScore &&
                                 crocodilesSpawnedThisRun < Configuration.Difficulty.crocodileMaxPerRun
-        if type == .waterLily && canSpawnCrocodile && Double.random(in: 0...1) < Configuration.Difficulty.crocodileSpawnProbability(for: currentWeather) {
+        if type == .waterLily && currentWeather != .space && canSpawnCrocodile && Double.random(in: 0...1) < Configuration.Difficulty.crocodileSpawnProbability(for: currentWeather) {
             // Find a valid spawn position in the water (not overlapping any pads/logs)
             if let crocPosition = findCrocodileSpawnPosition(nearY: newY) {
                 // Random delay before rising (1-4 seconds)
@@ -2322,6 +2848,25 @@ class GameScene: SKScene, CollisionManagerDelegate {
                 pads.append(log)
             }
         }
+        
+        // Snake spawning based on difficulty (mirrors log spawning logic)
+        let snakeChance = Configuration.Difficulty.snakeProbability(forScore: scoreVal, weather: currentWeather)
+        let activeSnakesCount = snakes.filter { !$0.isDestroyed }.count
+        
+        // DEBUG: Log snake spawn attempts (expanded range for more visibility)
+        if scoreVal >= 2400 && scoreVal <= 2600 && frameCount % 60 == 0 {  // Log once per second
+            print("🐍 Snake spawn check - Score: \(scoreVal), Weather: \(currentWeather), Chance: \(snakeChance), Active: \(activeSnakesCount), Max: \(Configuration.Difficulty.snakeMaxOnScreen)")
+        }
+        
+        if snakeChance > 0 && Double.random(in: 0...1) < snakeChance && activeSnakesCount < Configuration.Difficulty.snakeMaxOnScreen {
+            // Spawn snake on the left edge at the same Y position as this pad
+            // Snakes will move horizontally across the screen, slithering over lily pads
+            let snakeX: CGFloat = 0  // Start just off the left edge
+            let snake = Snake(position: CGPoint(x: snakeX, y: newY))
+            worldNode.addChild(snake)
+            snakes.append(snake)
+            print("🐍 ✅ Snake spawned at Y: \(newY), Score: \(scoreVal)")
+        }
         if Double.random(in: 0...1) < 0.5 {
             let coin = Coin(position: pad.position)
             coin.zHeight = 20
@@ -2348,7 +2893,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
         
         // Enemy spawning based on difficulty - enemies spawn on lily pads
-        let enemyProb = Configuration.Difficulty.enemyProbability(forLevel: difficultyLevel)
+        let enemyProb = Configuration.Difficulty.enemyProbability(forLevel: difficultyLevel, weather: currentWeather)
         
         // Enemies can spawn on normal, moving, ice, and water lily pads.
         // They should NOT spawn on shrinking pads, graves (which spawn ghosts), or logs.
@@ -2356,25 +2901,14 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         if canSpawnEnemy && Double.random(in: 0...1) < enemyProb {
             // Enemy type selection based on difficulty
-            let dragonflyChance = Configuration.Difficulty.dragonflyProbability(forLevel: difficultyLevel)
+            let dragonflyChance = Configuration.Difficulty.dragonflyProbability(forLevel: difficultyLevel, weather: currentWeather)
             let enemyType = (Double.random(in: 0...1) < dragonflyChance) ? "DRAGONFLY" : "BEE"
             // Spawn enemy directly above the pad's position
-            let enemy = Enemy(position: CGPoint(x: newX, y: newY + 50), type: enemyType)
+            let enemy = Enemy(position: CGPoint(x: newX, y: newY + 50), type: enemyType, weather: currentWeather)
             worldNode.addChild(enemy)
             enemies.append(enemy)
         }
-        
-        // Snake spawning - snakes appear after 3000m
-        // They move from left to right across the screen
-        let snakeProb = Configuration.Difficulty.snakeProbability(forScore: scoreVal)
-        
-        // Count only active (visible) snakes on screen
-        let activeSnakesCount = snakes.filter { !$0.isDestroyed }.count
-        
-        if Double.random(in: 0...1) < snakeProb && activeSnakesCount < Configuration.Difficulty.snakeMaxOnScreen {
-            print("🐍 Snake spawn triggered! Score: \(scoreVal), Probability: \(snakeProb), Active snakes: \(activeSnakesCount)")
-            spawnSnake(nearY: newY)
-        }
+
     }
     
     /// Spawns a chain of normal lily pads, each within 50 pixels of another
@@ -2453,19 +2987,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Couldn't find a valid position
         return nil
     }
-    
-    /// Spawns a new snake on the left side of the screen at the given Y position
-    private func spawnSnake(nearY: CGFloat) {
-        // Spawn snake on the left edge, at a Y position near the new pad
-        let snakeX: CGFloat = -30  // Start just off the left edge
-        let snakeY = nearY + CGFloat.random(in: -50...50)
-        
-        print("🐍 Spawning snake at position: (\(snakeX), \(snakeY)), Camera Y: \(cam.position.y)")
-        
-        let snake = Snake(position: CGPoint(x: snakeX, y: snakeY))
-        worldNode.addChild(snake)
-        snakes.append(snake)
-    }
+
     
     func didHitObstacle(pad: Pad) {
         if frog.isCannonJumping && pad.type == .log {
@@ -2504,6 +3026,13 @@ class GameScene: SKScene, CollisionManagerDelegate {
             hasHitLaunchPad = true
             isLaunchingToSpace = true
             launchToSpace(from: pad)
+            return
+        }
+        
+        // Check if landed on warp pad - trigger return to day!
+        if pad.type == .warp && !hasHitWarpPad {
+            hasHitWarpPad = true
+            warpBackToDay(from: pad)
             return
         }
         
@@ -2824,7 +3353,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
         
         // Apply the bounce
-        frog.bounce()
+        frog.bounce(weather: currentWeather)
         
         // If we found a nearby pad, nudge velocity toward it
         if let targetPad = nearestPad {
@@ -3404,7 +3933,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
             coordinator?.pauseGame()
             return
         }
-        if frog.rocketState == .landing && descendBg.contains(locationInUI) && !descendBg.isHidden {
+        if (frog.rocketState == .flying || frog.rocketState == .landing) && descendBg.contains(locationInUI) && !descendBg.isHidden {
+            // Stop the rocket timer and initiate descent
+            frog.rocketTimer = 0
             frog.descend()
             HapticsManager.shared.playImpact(.heavy)
             return
@@ -3545,7 +4076,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
         
         // Normal grounded jump only - air jumps are handled in touchesBegan as directional taps
-        frog.jump(vector: launchVector, intensity: ratio)
+        frog.jump(vector: launchVector, intensity: ratio, weather: currentWeather)
         
         // If we just jumped out of the water, stop the grace period.
         if frog.isFloating {
@@ -3674,6 +4205,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         var simZ: CGFloat = 0
         var simZVel: CGFloat = Configuration.Physics.baseJumpZ * (0.5 + (ratio * 0.5))
         
+        // Use the same gravity as actual physics - reduced in space!
+        let gravity = currentWeather == .space ? Configuration.Physics.gravityZ * 0.3 : Configuration.Physics.gravityZ
+        
         var landingPoint = simPos
         var dotsUsed = 0
 
@@ -3683,7 +4217,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
             simPos.x += simVel.dx
             simPos.y += simVel.dy
             simZ += simZVel
-            simZVel -= Configuration.Physics.gravityZ
+            simZVel -= gravity
             simVel.dx *= Configuration.Physics.frictionAir
             simVel.dy *= Configuration.Physics.frictionAir
             
