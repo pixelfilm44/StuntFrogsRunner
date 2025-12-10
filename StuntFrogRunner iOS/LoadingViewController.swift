@@ -43,6 +43,11 @@ class LoadingViewController: UIViewController {
         "frogDrown6",
         "frogRecoil",
         "rocketRide",
+        "snake1",
+        "snake2",
+        "snake3",
+        "snake4",
+        "snake5",
         
         // Lilypad Assets
         "lilypadDay",

@@ -49,6 +49,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private var waterTilesHigh = 0
     private let flotsamNode = SKNode()
     private var moonlightNode: SKSpriteNode?
+    private var spaceGlowNode: SKSpriteNode?
     
     // --- Performance Improvement: Ripple Pool ---
     // A pool of reusable sprite nodes for water ripples.
@@ -494,6 +495,75 @@ class GameScene: SKScene, CollisionManagerDelegate {
         return node
     }
     
+    /// Creates a space background glow with purple/blue nebula effect
+    private func createSpaceBackgroundGlow() -> SKSpriteNode {
+        let nodeSize = CGSize(width: size.width * 2, height: size.height * 2)
+        
+        let renderer = UIGraphicsImageRenderer(size: nodeSize)
+        let image = renderer.image { context in
+            let ctx = context.cgContext
+            
+            // Create multiple gradient overlays for a nebula effect
+            
+            // Bottom gradient - purple glow
+            let bottomCenter = CGPoint(x: nodeSize.width / 2, y: nodeSize.height * 0.3)
+            let bottomRadius = nodeSize.height * 0.6
+            let purpleColors = [
+                UIColor(red: 0.4, green: 0.2, blue: 0.6, alpha: 0.4).cgColor,
+                UIColor(red: 0.2, green: 0.1, blue: 0.3, alpha: 0.2).cgColor,
+                UIColor.clear.cgColor
+            ]
+            let purpleLocations: [CGFloat] = [0.0, 0.5, 1.0]
+            
+            if let purpleGradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                               colors: purpleColors as CFArray,
+                                               locations: purpleLocations) {
+                ctx.drawRadialGradient(purpleGradient,
+                                       startCenter: bottomCenter, startRadius: 0,
+                                       endCenter: bottomCenter, endRadius: bottomRadius,
+                                       options: [])
+            }
+            
+            // Top gradient - blue glow
+            let topCenter = CGPoint(x: nodeSize.width * 0.7, y: nodeSize.height * 0.7)
+            let topRadius = nodeSize.height * 0.5
+            let blueColors = [
+                UIColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 0.3).cgColor,
+                UIColor(red: 0.1, green: 0.2, blue: 0.4, alpha: 0.15).cgColor,
+                UIColor.clear.cgColor
+            ]
+            let blueLocations: [CGFloat] = [0.0, 0.5, 1.0]
+            
+            if let blueGradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                             colors: blueColors as CFArray,
+                                             locations: blueLocations) {
+                ctx.drawRadialGradient(blueGradient,
+                                       startCenter: topCenter, startRadius: 0,
+                                       endCenter: topCenter, endRadius: topRadius,
+                                       options: [])
+            }
+            
+            // Add some "stars" (small white dots)
+            ctx.setFillColor(UIColor.white.cgColor)
+            for _ in 0..<50 {
+                let x = CGFloat.random(in: 0...nodeSize.width)
+                let y = CGFloat.random(in: 0...nodeSize.height)
+                let size = CGFloat.random(in: 1...3)
+                let alpha = CGFloat.random(in: 0.3...0.8)
+                ctx.setAlpha(alpha)
+                ctx.fillEllipse(in: CGRect(x: x, y: y, width: size, height: size))
+            }
+        }
+        
+        let texture = SKTexture(image: image)
+        let node = SKSpriteNode(texture: texture, size: nodeSize)
+        node.zPosition = -99
+        node.blendMode = .add
+        node.name = "spaceGlow"
+        
+        return node
+    }
+    
     /// Returns the appropriate water texture name based on current weather
     private func getWaterTextureName() -> String {
         switch currentWeather {
@@ -672,23 +742,32 @@ class GameScene: SKScene, CollisionManagerDelegate {
     
     /// Spawns a laser blast from the edge of the lily pad that shoots across the screen (space weather only)
     private func spawnLaserBlast(from node: SKNode) {
-        // Choose a random direction (left or right to shoot across the screen)
-        let shootRight = Bool.random()
-        let angle: CGFloat = shootRight ? 0 : .pi  // 0° for right, 180° for left
-        
+        // Choose a random direction in 45-degree increments (8 directions)
+        let directions: [CGFloat] = [
+            0,              // Right (0°)
+            .pi / 4,        // Up-Right (45°)
+            .pi / 2,        // Up (90°)
+            .pi * 3 / 4,    // Up-Left (135°)
+            .pi,            // Left (180°)
+            .pi * 5 / 4,    // Down-Left (225°)
+            .pi * 3 / 2,    // Down (270°)
+            .pi * 7 / 4     // Down-Right (315°)
+        ]
+        let angle = directions.randomElement()!  // Pick a random direction
         // Get the lily pad's radius to position the laser at the edge
         let padRadius: CGFloat
         if let pad = node as? Pad {
             padRadius = pad.scaledRadius
         } else {
-            padRadius = 40  // Default fallback
+            padRadius = 30  // Default fallback
         }
         
         // Calculate the starting position at the edge of the lily pad
-        let edgeOffsetX = shootRight ? padRadius : -padRadius
+        let edgeOffsetX = cos(angle) * padRadius
+        let edgeOffsetY = sin(angle) * padRadius
         let startPosition = CGPoint(
             x: node.position.x + edgeOffsetX,
-            y: node.position.y
+            y: node.position.y + edgeOffsetY
         )
         
         // Create a short red laser bolt
@@ -713,16 +792,16 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         worldNode.addChild(laser)
         
-        // Calculate travel distance and speed
-        let screenWidth = Configuration.Dimensions.riverWidth
-        let travelDistance: CGFloat = shootRight ? (screenWidth - startPosition.x + 100) : (startPosition.x + 100)
+        // Calculate travel distance based on angle direction
+        let travelDistance: CGFloat = 1000  // Fixed distance for all lasers
         let speed: CGFloat = 800  // pixels per second
         let travelDuration = TimeInterval(travelDistance / speed)
         
-        // Animate: move across the screen
-        let moveDistance = shootRight ? travelDistance : -travelDistance
-        let move = SKAction.moveBy(x: moveDistance, y: 0, duration: travelDuration)
-        move.timingMode = .linear
+        // Animate: move in the direction of the angle
+        let moveX = cos(angle) * travelDistance
+        let moveY = sin(angle) * travelDistance
+        let move = SKAction.moveBy(x: moveX, y: moveY, duration: travelDuration)
+        move.timingMode = SKActionTimingMode.linear
         
         let remove = SKAction.removeFromParent()
         
@@ -853,7 +932,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
     /// Spawns a single cartoon circle ripple
     private func spawnSingleCartoonCircle(at position: CGPoint, index: Int) {
         // Start slightly larger for each successive circle
-        let startRadius: CGFloat = 20.0 + (CGFloat(index) * 10.0)
+        let startRadius: CGFloat = 10.0 + (CGFloat(index) * 10.0)
         
         // Create a circle shape node with stroke (no fill for a ring effect)
         let circle = SKShapeNode(circleOfRadius: startRadius)
@@ -1766,8 +1845,19 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
 
         for snake in snakes {
-            // Snakes are wide, so give them a larger vertical activity window
-            if abs(snake.position.y - camY) < viewHeight * 1.5 {
+            // Snakes move horizontally across the entire river width
+            // Check if snake is in the vertical range of the camera
+            let verticalDistance = abs(snake.position.y - camY)
+            let isInVerticalRange = verticalDistance < viewHeight * 1.5
+            
+            // Snakes need a VERY wide horizontal range since they:
+            // 1. Spawn off-screen to the left (X = -50)
+            // 2. Travel all the way across the river (X = 0 to 600)
+            // Give them the full river width + generous buffer on both sides
+            let riverWidth = Configuration.Dimensions.riverWidth
+            let isInHorizontalRange = snake.position.x >= -200 && snake.position.x <= riverWidth + 200
+            
+            if isInVerticalRange && isInHorizontalRange {
                 // Update the snake (returns true if it moved off screen, but we don't respawn)
                 _ = snake.update(dt: dt, pads: activePads)
                 activeSnakes.append(snake)
@@ -1827,6 +1917,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         previousSuperJumpState = currentSuperJumpState
         
         updateMoonlightPosition()
+        updateSpaceGlowPosition()
         updateCamera()
         updateHUDVisuals()
         
@@ -2127,6 +2218,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
             }
         }
         
+        // --- Clear old weather particles immediately when switching to desert ---
+        if type == .desert {
+            weatherNode.removeAllChildren()
+        }
+        
         // --- Visual & Audio Transitions ---
         VFXManager.shared.transitionWeather(from: oldWeather, to: type, in: self, duration: actualDuration)
         
@@ -2146,10 +2242,15 @@ class GameScene: SKScene, CollisionManagerDelegate {
         case .space: .space
                 }
         
-if type == .space {
-    SoundManager.shared.stopMusic()
+        if type == .space {
+            SoundManager.shared.stopMusic()
         }
-        SoundManager.shared.playWeatherSFX(sfx)
+        
+        // Stop previous weather SFX before starting new one
+        if actualDuration > 0 {
+            SoundManager.shared.stopWeatherSFX(fadeDuration: actualDuration)
+        }
+        SoundManager.shared.playWeatherSFX(sfx, fadeDuration: actualDuration)
         // --- In-World Object Transitions ---
         for pad in pads {
             pad.updateColor(weather: type, duration: actualDuration)
@@ -2176,6 +2277,27 @@ if type == .space {
                 } else {
                     moon.alpha = 0.0
                     moon.isHidden = true
+                }
+            }
+        }
+        
+        // Handle space glow visibility
+        if let spaceGlow = spaceGlowNode {
+            if type == .space {
+                spaceGlow.isHidden = false
+                if actualDuration > 0 {
+                    spaceGlow.run(SKAction.fadeAlpha(to: 1.0, duration: actualDuration))
+                } else {
+                    spaceGlow.alpha = 1.0
+                }
+            } else if oldWeather == .space {
+                if actualDuration > 0 {
+                    let fadeOut = SKAction.fadeAlpha(to: 0.0, duration: actualDuration)
+                    let hide = SKAction.run { spaceGlow.isHidden = true }
+                    spaceGlow.run(SKAction.sequence([fadeOut, hide]))
+                } else {
+                    spaceGlow.alpha = 0.0
+                    spaceGlow.isHidden = true
                 }
             }
         }
@@ -2277,7 +2399,11 @@ if type == .space {
         let newWeather: WeatherType = .desert
 
         // --- Visual & Audio Transitions ---
+        // IMPORTANT: Remove all existing weather particles FIRST before transitioning
+        weatherNode.removeAllChildren()
+        
         VFXManager.shared.transitionWeather(from: oldWeather, to: newWeather, in: self, duration: duration)
+        SoundManager.shared.stopWeatherSFX(fadeDuration: duration)
         SoundManager.shared.playWeatherSFX(.desert, fadeDuration: duration)
 
         // --- In-World Object Transitions ---
@@ -2393,6 +2519,14 @@ if type == .space {
         
         // Set the weather to space - INSTANT transition (duration: 0)
         setWeather(.space, duration: 0.0)
+        
+        // Add starfield/nebula glow
+        let spaceGlow = createSpaceBackgroundGlow()
+        spaceGlow.position = cam.position
+        worldNode.addChild(spaceGlow)
+
+        // Make it follow camera like moonlight
+        // In update(), add similar parallax logic for space glow
         
         // Instantly update all existing pads to space appearance
         for pad in pads {
@@ -2691,6 +2825,17 @@ if type == .space {
             y: cam.position.y * parallaxFactor
         )
     }
+    
+    private func updateSpaceGlowPosition() {
+        guard let spaceGlowNode = spaceGlowNode, !spaceGlowNode.isHidden else { return }
+        
+        // Similar parallax effect for space glow, but even slower for a distant nebula feel
+        let parallaxFactor: CGFloat = 0.85
+        spaceGlowNode.position = CGPoint(
+            x: cam.position.x * parallaxFactor,
+            y: cam.position.y * parallaxFactor
+        )
+    }
     private func cleanupOffscreenEntities() {
         let thresholdY = cam.position.y - (size.height / 2) - 200
         pads.removeAll { if $0.position.y < thresholdY { $0.removeFromParent(); return true }; return false }
@@ -2702,15 +2847,22 @@ if type == .space {
         
         // Cleanup snakes that have fallen behind the frog OR moved off screen
         // Snakes move horizontally (left to right), so we need to check both Y and X positions
-        snakes.removeAll { snake in
-            let isBelowCamera = snake.position.y < thresholdY
-            let isOffScreenRight = snake.position.x > Configuration.Dimensions.riverWidth + 100
+        // IMPORTANT: Give snakes a MUCH larger Y threshold since they move horizontally
+        let snakeThresholdY = cam.position.y - (size.height / 2) - 1000  // Much more generous!
+        var i = 0
+        while i < snakes.count {
+            let snake = snakes[i]
+            let isBelowCamera = snake.position.y < snakeThresholdY
+            let isOffScreenRight = snake.position.x > Configuration.Dimensions.riverWidth + 300  // Increased buffer
+            let isOffScreenLeft = snake.position.x < -300  // Also check if stuck off left edge
             
-            if isBelowCamera || isOffScreenRight || snake.isDestroyed {
+            if isBelowCamera || isOffScreenRight || isOffScreenLeft || snake.isDestroyed {
+                print("🐍 🗑️ Cleaning up snake at X:\(snake.position.x) Y:\(snake.position.y)")
                 snake.removeFromParent()
-                return true
+                snakes.remove(at: i)
+            } else {
+                i += 1
             }
-            return false
         }
         
         crocodiles.removeAll { croc in
@@ -2853,19 +3005,31 @@ if type == .space {
         let snakeChance = Configuration.Difficulty.snakeProbability(forScore: scoreVal, weather: currentWeather)
         let activeSnakesCount = snakes.filter { !$0.isDestroyed }.count
         
-        // DEBUG: Log snake spawn attempts (expanded range for more visibility)
-        if scoreVal >= 2400 && scoreVal <= 2600 && frameCount % 60 == 0 {  // Log once per second
-            print("🐍 Snake spawn check - Score: \(scoreVal), Weather: \(currentWeather), Chance: \(snakeChance), Active: \(activeSnakesCount), Max: \(Configuration.Difficulty.snakeMaxOnScreen)")
+        // DEBUG: Log EVERY snake spawn attempt for debugging
+        if scoreVal >= 2400 {
+            print("🐍 Snake spawn attempt - Score: \(scoreVal), Weather: \(currentWeather), Chance: \(snakeChance), Active: \(activeSnakesCount), Max: \(Configuration.Difficulty.snakeMaxOnScreen), newY: \(newY), camY: \(cam.position.y)")
         }
         
-        if snakeChance > 0 && Double.random(in: 0...1) < snakeChance && activeSnakesCount < Configuration.Difficulty.snakeMaxOnScreen {
-            // Spawn snake on the left edge at the same Y position as this pad
-            // Snakes will move horizontally across the screen, slithering over lily pads
-            let snakeX: CGFloat = 0  // Start just off the left edge
-            let snake = Snake(position: CGPoint(x: snakeX, y: newY))
+        // DEBUG MODE: Force higher spawn rate for testing (remove this for production)
+        let debugSnakeChance = max(snakeChance, scoreVal >= 2400 ? 0.8 : 0.0)  // 80% chance when score >= 2400
+        
+        if debugSnakeChance > 0 && Double.random(in: 0...1) < debugSnakeChance && activeSnakesCount < Configuration.Difficulty.snakeMaxOnScreen {
+            // IMPORTANT: Spawn snake closer to the camera, not at the edge of generation
+            // Snakes move horizontally and need to be visible for ~3-4 seconds to cross the screen
+            // So spawn them within the visible range, not at the far edge where pads generate
+            let snakeX: CGFloat = -50  // Start off-screen to the left
+            
+            // Spawn snake in the MIDDLE of the screen vertically, relative to camera
+            // This ensures the player can see it crossing
+            let screenHeight = self.size.height
+            let snakeY = cam.position.y + CGFloat.random(in: -screenHeight/4...screenHeight/4)
+            
+            let snake = Snake(position: CGPoint(x: snakeX, y: snakeY))
+            snake.zPosition = Layer.item + 2  // Above coins and other items (Layer.item is 20, so this is 22)
+            
             worldNode.addChild(snake)
             snakes.append(snake)
-            print("🐍 ✅ Snake spawned at Y: \(newY), Score: \(scoreVal)")
+            print("🐍 ✅ Snake spawned at X:\(snakeX) Y:\(snakeY), Score: \(scoreVal), Total snakes: \(snakes.count), Camera Y: \(cam.position.y), Distance from camera: \(abs(snakeY - cam.position.y)))")
         }
         if Double.random(in: 0...1) < 0.5 {
             let coin = Coin(position: pad.position)

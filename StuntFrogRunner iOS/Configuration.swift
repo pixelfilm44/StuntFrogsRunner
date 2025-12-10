@@ -35,7 +35,7 @@ struct Configuration {
         static let night = SKColor(red: 12/255, green: 21/255, blue: 32/255, alpha: 0.75)
         static let winter = SKColor(red: 160/255, green: 190/255, blue: 220/255, alpha: 1)
         static let desert = SKColor(red: 240/255, green: 210/255, blue: 120/255, alpha: 1) // Sandy sky for desert
-        static let space = SKColor(red: 15/255, green: 10/255, blue: 35/255, alpha: 0.5) // Deep purple space (more visible than pure black)
+        static let space = SKColor(red: 15/255, green: 10/255, blue: 35/255, alpha: 0.1) // Deep purple space (more visible than pure black)
         static let blackVoid = SKColor.black // Instant death water for desert
     }
     
@@ -327,13 +327,13 @@ struct Configuration {
         // MARK: - Snake Spawning (Desert Only)
         
         /// Minimum score before snakes can appear (start of desert biome)
-        static let snakeStartScore: Int = 2400  // Changed from 3000 to start at desert
+        static let snakeStartScore: Int = 0  // Changed from 3000 to start at desert 2400
         /// Base probability of spawning a snake in desert (once unlocked)
-        static let baseSnakeProbability: Double = 0.15  // Increased for desert prominence
+        static let baseSnakeProbability: Double = 0.90  // Increased for testing (was 0.15)
         /// Additional snake probability per level after unlock
-        static let snakeProbabilityPerLevel: Double = 0.05
+        static let snakeProbabilityPerLevel: Double = 0.95
         /// Maximum snake spawn probability
-        static let maxSnakeProbability: Double = 0.40
+        static let maxSnakeProbability: Double = 0.90  // Increased cap (was 0.40)
         /// Maximum snakes on screen at once
         static let snakeMaxOnScreen: Int = 3
         

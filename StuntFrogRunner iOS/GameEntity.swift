@@ -1261,7 +1261,7 @@ class TreasureChest: GameEntity {
 class Snake: GameEntity {
     
     /// Movement speed (pixels per frame)
-    private let moveSpeed: CGFloat = 12.5
+    private let moveSpeed: CGFloat = 2.5
     
     /// Visual nodes
     private let bodySprite = SKSpriteNode()
@@ -1300,16 +1300,31 @@ class Snake: GameEntity {
         shadowNode.zPosition = -1
         addChild(shadowNode)
         
+        // Debug print the names of the textures being loaded
+        for (i, tex) in Snake.animationTextures.enumerated() {
+            print("🐍 Attempted to load texture 'snake\(i+1)': size = \(tex.size())")
+        }
+        
         // Snake sprite
         let texture = Snake.animationTextures.first ?? SKTexture(imageNamed: "snake1")
         let textureSize = texture.size()
-        let targetHeight: CGFloat = 50
-        let aspectRatio = textureSize.width / textureSize.height
-        bodySprite.size = CGSize(width: targetHeight * aspectRatio, height: targetHeight)
-        bodySprite.texture = texture
-        bodySprite.zPosition = 1
-        addChild(bodySprite)
+        print("🐍 First snake texture size: \(textureSize)")
+        
+        // Check if texture is valid (has actual image data)
+        if textureSize.width > 0 && textureSize.height > 0 {
+            print("🐍 Using valid snake texture for sprite")
+            // Valid texture found - use it
+            let targetHeight: CGFloat = 50
+            let aspectRatio = textureSize.width / textureSize.height
+            bodySprite.size = CGSize(width: targetHeight * aspectRatio, height: targetHeight)
+            bodySprite.texture = texture
+            bodySprite.zPosition = 1
+            addChild(bodySprite)
+        } else {
+            print("🐍 Snake texture missing or invalid! Drawing fallback or placeholder.")
+        }
     }
+      
     
     private func startAnimation() {
         // Cycle through snake1-5 frames
@@ -1345,12 +1360,13 @@ class Snake: GameEntity {
             }
         }
         
-        // Constrain Y position to stay within river bounds
+        // Constrain X position to stay within river bounds (horizontal constraint)
+        // Note: Y position should NOT be constrained - snakes exist at the camera's Y level
         let margin: CGFloat = 30
-        if position.y < margin {
-            position.y = margin
-        } else if position.y > Configuration.Dimensions.riverWidth - margin {
-            position.y = Configuration.Dimensions.riverWidth - margin
+        if position.x < -margin {
+            position.x = -margin
+        } else if position.x > Configuration.Dimensions.riverWidth + margin {
+            position.x = Configuration.Dimensions.riverWidth + margin
         }
         
         // Return true if snake has moved off the right edge
@@ -1374,7 +1390,35 @@ class Snake: GameEntity {
         
         run(SKAction.sequence([deathAnimation, remove]))
     }
+    /// Resets the snake for reuse (e.g., from a pool)
+    func reset(position: CGPoint) {
+        self.position = position
+        self.zHeight = 5
+        self.isDestroyed = false
+
+        // Stop all actions on both the main node and bodySprite
+        self.removeAllActions()
+        bodySprite.removeAllActions()
+
+        // Ensure bodySprite is visible and set to the first animation frame
+        bodySprite.alpha = 1.0
+        if let firstTexture = Snake.animationTextures.first {
+            bodySprite.texture = firstTexture
+        }
+        bodySprite.isHidden = false
+
+        // If bodySprite was removed for some reason, re-add it
+        if bodySprite.parent == nil {
+            addChild(bodySprite)
+        }
+        // Optionally, ensure shadowNode is present (shouldn't be removed, but safe)
+        if shadowNode.parent == nil {
+            addChild(shadowNode)
+        }
+    }
 }
+
+
 
 // MARK: - Crocodile
 class Crocodile: GameEntity {
