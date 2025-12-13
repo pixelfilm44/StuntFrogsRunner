@@ -52,6 +52,12 @@ class HelpViewController: UIViewController {
             description: "Visit the shop to upgrade your jump and health. Complete challenges for bonus rewards!",
             imageName: nil,
             emoji: "⬆️"
+        ),
+        HelpSlide(
+            title: "Special Thanks",
+            description: "Thank you to Ellie Mielke, Jeff StLaurent, and Anthony Caccese for their valuable feedback on this game!",
+            imageName: nil,
+            emoji: "🙏"
         )
     ]
     
@@ -62,30 +68,20 @@ class HelpViewController: UIViewController {
     private lazy var containerView: UIImageView = {
         let imageView = UIImageView()
         if let image = UIImage(named: "helpBackdrop") {
-            // This image is assumed to be a 9-patch style image, where the corners and edges
-            // are preserved when scaling. These insets define the non-scalable parts.
-            let capInsets = UIEdgeInsets(top: 50, left: 50, bottom: 50, right: 50)
-            imageView.image = image.resizableImage(withCapInsets: capInsets, resizingMode: .stretch)
+           
+            imageView.image = image
         }
         imageView.isUserInteractionEnabled = true // Allow subviews (like buttons) to receive touches
         imageView.translatesAutoresizingMaskIntoConstraints = false
         
-        // Add a thin brown border
-        imageView.layer.borderWidth = 3
-        imageView.layer.borderColor = UIColor(red: 160/255, green: 82/255, blue: 45/255, alpha: 1.0).cgColor
-        imageView.layer.cornerRadius = 15
-        imageView.clipsToBounds = true
+       
         
         return imageView
     }()
     
     private lazy var closeButton: UIButton = {
-        let button = UIButton(type: .system)
-        button.setTitle("✕", for: .normal)
-        button.titleLabel?.font = UIFont.systemFont(ofSize: 24, weight: .bold)
-        button.setTitleColor(.white, for: .normal)
-        button.backgroundColor = UIColor(red: 231/255, green: 76/255, blue: 60/255, alpha: 1)
-        button.layer.cornerRadius = 20
+        let button = UIButton(type: .custom)
+        button.setImage(UIImage(named: "closeButton"), for: .normal)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(handleClose), for: .touchUpInside)
         return button

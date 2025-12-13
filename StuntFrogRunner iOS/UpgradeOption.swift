@@ -32,6 +32,9 @@ class UpgradeViewController: UIViewController {
     /// Set to true if the player currently has full health (currentHealth == maxHealth)
     var hasFullHealth: Bool = false
     
+    /// The player's current maximum health (number of hearts)
+    var currentMaxHealth: Int = 1
+    
     /// Set to true if the upgrade selection is for a race, to filter out certain items.
     var isForRace: Bool = false
     
@@ -78,6 +81,11 @@ class UpgradeViewController: UIViewController {
             options.removeAll { $0.id == "HEARTBOOST" }
         }
         
+        // Don't offer heart container if player already has 6 heart containers (max)
+        if currentMaxHealth >= 6 {
+            options.removeAll { $0.id == "HEART" }
+        }
+        
         if PersistenceManager.shared.hasSuperJump {
             options.append(superJumpOption)
         }
@@ -108,10 +116,26 @@ class UpgradeViewController: UIViewController {
     // MARK: - UI Elements
     private lazy var containerView: UIView = {
         let view = UIView()
-        view.backgroundColor = UIColor.black.withAlphaComponent(0.85)
+        
+        // Add upgradeBackground.png as the background
+        if let backgroundImage = UIImage(named: "pauseBackdrop") {
+            let imageView = UIImageView(image: backgroundImage)
+            imageView.contentMode = .scaleToFill
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(imageView)
+            view.sendSubviewToBack(imageView)
+            
+            NSLayoutConstraint.activate([
+                imageView.topAnchor.constraint(equalTo: view.topAnchor),
+                imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                imageView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            ])
+        }
+        
+        view.backgroundColor = .clear
         view.layer.cornerRadius = 20
-        view.layer.borderWidth = 2
-        view.layer.borderColor = UIColor.white.cgColor
+        view.clipsToBounds = true
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
     }()
@@ -163,19 +187,19 @@ class UpgradeViewController: UIViewController {
         NSLayoutConstraint.activate([
             containerView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             containerView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            containerView.widthAnchor.constraint(equalToConstant: 320),
-            containerView.heightAnchor.constraint(equalToConstant: 300),
+            containerView.widthAnchor.constraint(equalToConstant: 360),
+            containerView.heightAnchor.constraint(equalToConstant: 440),
             
-            titleLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 25),
+            titleLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 50),
             titleLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
             
             subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 5),
             subtitleLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
             
-            stackView.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 25),
-            stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
-            stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
-            stackView.heightAnchor.constraint(equalToConstant: 160)
+            stackView.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 30),
+            stackView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            stackView.widthAnchor.constraint(equalToConstant: 300),
+            stackView.heightAnchor.constraint(equalToConstant: 220)
         ])
     }
     
@@ -252,18 +276,17 @@ class UpgradeViewController: UIViewController {
         // Check if this is a rare upgrade
         let isRare = (option.id == "DOUBLESUPERJUMPTIME" || option.id == "DOUBLEROCKETTIME")
         
-        if isRare {
-            // Special styling for rare items - gold/purple gradient look
-            button.backgroundColor = UIColor(red: 148/255, green: 87/255, blue: 235/255, alpha: 1) // Purple
-            button.layer.borderWidth = 3
-            button.layer.borderColor = UIColor(red: 255/255, green: 215/255, blue: 0/255, alpha: 1).cgColor // Gold
-        } else {
-            button.backgroundColor = UIColor(red: 52/255, green: 73/255, blue: 94/255, alpha: 1) // #34495e
-            button.layer.borderWidth = 2
-            button.layer.borderColor = UIColor.yellow.cgColor
+        // Use goldBadge.png for rare items, badge.png for regular items
+        let badgeImageName = isRare ? "goldBadge" : "badge"
+        if let badgeImage = UIImage(named: badgeImageName) {
+            button.setBackgroundImage(badgeImage, for: .normal)
         }
         
+        // Optional: Keep a subtle background color as fallback
+        button.backgroundColor = .clear
+        
         button.layer.cornerRadius = 15
+        button.clipsToBounds = true
         
         // Use image if iconImage is provided, otherwise use emoji label
         let iconView: UIView
@@ -271,13 +294,13 @@ class UpgradeViewController: UIViewController {
             let imageView = UIImageView(image: image)
             imageView.contentMode = .scaleAspectFit
             imageView.translatesAutoresizingMaskIntoConstraints = false
-            imageView.widthAnchor.constraint(equalToConstant: 50).isActive = true
-            imageView.heightAnchor.constraint(equalToConstant: 50).isActive = true
+            imageView.widthAnchor.constraint(equalToConstant: 40).isActive = true
+            imageView.heightAnchor.constraint(equalToConstant: 60).isActive = true
             iconView = imageView
         } else {
             let iconLabel = UILabel()
             iconLabel.text = option.icon
-            iconLabel.font = UIFont.systemFont(ofSize: 40)
+            iconLabel.font = UIFont.systemFont(ofSize: 20)
             iconLabel.textAlignment = .center
             iconView = iconLabel
         }
@@ -321,8 +344,8 @@ class UpgradeViewController: UIViewController {
             nameLabel.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 5),
             nameLabel.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -5),
             
-            descLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 5),
-            descLabel.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 5),
+            descLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 10),
+            descLabel.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 10),
             descLabel.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -5),
             
             chanceLabel.topAnchor.constraint(equalTo: descLabel.bottomAnchor, constant: 5),

@@ -434,17 +434,21 @@ class VFXManager {
     }
     
     func spawnImpactWave(at position: CGPoint, in scene: SKScene) {
-        guard let worldNode = scene.childNode(withName: "//worldNode") else { return }
-
+        // Try to find worldNode, but fallback to scene if not found
+        let parentNode = scene.childNode(withName: "//worldNode") ?? scene
+        
+        // Create the wave ring
         let wave = SKShapeNode(circleOfRadius: 30)
         wave.position = position
         wave.strokeColor = .purple
         wave.fillColor = .purple.withAlphaComponent(0.3)
         wave.lineWidth = 15
-        wave.zPosition = Layer.frog + 10 // Behind the frog but above pads
-        worldNode.addChild(wave)
+        wave.zPosition = 1000 // High zPosition to ensure visibility
+        wave.alpha = 1.0 // Start fully visible
+        parentNode.addChild(wave)
         
-        let scaleUp = SKAction.scale(to: 40, duration: 0.5)
+        // Scale up dramatically (4x size, not just 40 pixels)
+        let scaleUp = SKAction.scale(to: 12.0, duration: 1.5)
         scaleUp.timingMode = .easeOut
         
         let fadeOut = SKAction.fadeOut(withDuration: 0.5)

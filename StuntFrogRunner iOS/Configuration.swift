@@ -34,8 +34,8 @@ struct Configuration {
         static let rain = SKColor(red: 44/255, green: 62/255, blue: 80/255, alpha: 1)
         static let night = SKColor(red: 12/255, green: 21/255, blue: 32/255, alpha: 0.75)
         static let winter = SKColor(red: 160/255, green: 190/255, blue: 220/255, alpha: 1)
-        static let desert = SKColor(red: 240/255, green: 210/255, blue: 120/255, alpha: 1) // Sandy sky for desert
-        static let space = SKColor(red: 15/255, green: 10/255, blue: 35/255, alpha: 0.1) // Deep purple space (more visible than pure black)
+        static let desert = SKColor(red: 240/255, green: 210/255, blue: 120/255, alpha: 0.5) // Sandy sky for desert
+        static let space = SKColor(red: 15/255, green: 10/255, blue: 35/255, alpha: 1.0) // Deep purple space (more visible than pure black)
         static let blackVoid = SKColor.black // Instant death water for desert
     }
     
@@ -180,12 +180,39 @@ struct Configuration {
 
     }
     
+    // MARK: - Weather Thresholds
+    struct Weather {
+        /// Score at which each weather pattern begins
+        /// Adjust these values to change how long you spend in each biome
+        /// Note: Each 100 score = 10 meters traveled
+        static let sunnyStart: Int = 0      // Sunny: 0-500 (50m)
+        static let nightStart: Int = 500    // Night: 500-1000 (50m)
+        static let rainStart: Int = 1000    // Rain: 1000-1600 (60m)
+        static let winterStart: Int = 1600  // Winter: 1600-2400 (80m)
+        static let desertStart: Int = 2400  // Desert: 2400-3000 (60m)
+        static let spaceStart: Int = 3000   // Space: 3000-4000 (100m)
+        // After space at 4000, warp back to sunny
+        
+        /// Returns the weather type for a given score
+        static func weatherForScore(_ score: Int) -> WeatherType {
+            if score >= spaceStart { return .space }
+            if score >= desertStart { return .desert }
+            if score >= winterStart { return .winter }
+            if score >= rainStart { return .rain }
+            if score >= nightStart { return .night }
+            return .sunny
+        }
+        
+        /// Transition duration when weather changes
+        static let transitionDuration: TimeInterval = 2.0
+    }
+    
     struct GameRules {
         static let coinsForUpgradeTrigger = 10
-        static let rocketDuration: TimeInterval = 30.0
+        static let rocketDuration: TimeInterval = 10.0
         static let rocketLandingDuration: TimeInterval = 5.0
         static let bootsDuration: TimeInterval = 5.0
-        static let superJumpDuration: TimeInterval = 90.0
+        static let superJumpDuration: TimeInterval = 10.0
         
         // MARK: - Beat the Boat Challenge
         static let boatRaceFinishY: CGFloat = 10000.0 // 2000m * 10 score units/meter
@@ -209,11 +236,11 @@ struct Configuration {
         // MARK: - Launch Pad Settings (Desert → Space)
         
         /// Score at which the launch pad appears (end of desert, before space transition)
-        /// Desert spans 2400-3000, launch pad appears at 2900 (100m before space)
-        static let launchPadSpawnScore: Int = 2900
+        /// Launch pad appears 100m before space begins
+        static let launchPadSpawnScore: Int = Weather.spaceStart - 100
         
         /// Score at which space begins (after successful launch pad jump)
-        static let spaceStartScore: Int = 3000
+        static let spaceStartScore: Int = Weather.spaceStart
         
         /// Duration of fade to black transition during launch
         static let launchFadeOutDuration: TimeInterval = 1.0
@@ -269,11 +296,13 @@ struct Configuration {
         /// Difficulty level when logs start appearing
         static let logStartLevel: Int = 1
         /// Base probability of spawning a log (once unlocked)
-        static let baseLogProbability: Double = 0.1
+        static let baseLogProbability: Double = 0.3
         /// Additional log probability per level after unlock
-        static let logProbabilityPerLevel: Double = 0.05
+        static let logProbabilityPerLevel: Double = 0.1
         /// Maximum log spawn probability
-        static let maxLogProbability: Double = 0.4
+        static let maxLogProbability: Double = 0.6
+        /// Weather conditions where logs can spawn (natural settings, not desert/space)
+        static let logWeathers: Set<WeatherType> = [.sunny, .night, .rain, .winter]
         
         static func logProbability(forLevel level: Int) -> Double {
             guard level >= logStartLevel else { return 0.0 }
@@ -290,7 +319,7 @@ struct Configuration {
             guard weather != .desert else { return 0.0 }
             guard level >= dragonflyStartLevel else { return 0.0 }
             let effectiveLevel = level - dragonflyStartLevel
-            return min(0.5, 0.2 + (Double(effectiveLevel) * 0.1))
+            return min(0.5, 0.4 + (Double(effectiveLevel) * 0.1))
         }
         
         // MARK: - Pad Types
@@ -298,10 +327,14 @@ struct Configuration {
         /// Difficulty level when moving pads start appearing
         static let movingPadStartLevel: Int = 1
         static let movingPadProbability: Double = 0.15
+        /// Weather conditions where moving pads can spawn
+        static let movingPadWeathers: Set<WeatherType> = [.sunny, .night, .rain, .winter,.space]
         
         /// Difficulty level when ice pads start appearing
         static let icePadStartLevel: Int = 2
         static let icePadProbability: Double = 0.1
+        /// Weather conditions where ice pads can spawn (only in cold weather)
+        static let icePadWeathers: Set<WeatherType> = [.winter, .space]
         
         /// Difficulty level when shrinking pads start appearing
         static let shrinkingPadStartLevel: Int = 1
@@ -310,6 +343,29 @@ struct Configuration {
             guard level >= shrinkingPadStartLevel else { return 0.0 }
             let effectiveLevel = level - shrinkingPadStartLevel
             return min(0.35, 0.05 + (Double(effectiveLevel) * 0.05))
+        }
+        /// Weather conditions where shrinking pads can spawn
+        static let shrinkingPadWeathers: Set<WeatherType> = [.sunny, .night, .rain, .winter ]
+        
+        /// Checks if a specific pad type can spawn in the given weather
+        static func canSpawnPadType(_ padType: PadType, in weather: WeatherType) -> Bool {
+            switch padType {
+            case .moving:
+                return movingPadWeathers.contains(weather)
+            case .ice:
+                return icePadWeathers.contains(weather)
+            case .shrinking:
+                return shrinkingPadWeathers.contains(weather)
+            case .log:
+                return logWeathers.contains(weather)
+            default:
+                return true // Normal pads, graves, special pads, etc. can spawn in any weather
+            }
+        }
+        
+        /// Enum defining pad types (for type-safe weather checking)
+        enum PadType {
+            case normal, moving, ice, log, grave, shrinking, waterLily, launchPad, warp
         }
         
         // MARK: - Crocodile Spawning
@@ -327,7 +383,7 @@ struct Configuration {
         // MARK: - Snake Spawning (Desert Only)
         
         /// Minimum score before snakes can appear (start of desert biome)
-        static let snakeStartScore: Int = 0  // Changed from 3000 to start at desert 2400
+        static let snakeStartScore: Int = Weather.desertStart
         /// Base probability of spawning a snake in desert (once unlocked)
         static let baseSnakeProbability: Double = 0.90  // Increased for testing (was 0.15)
         /// Additional snake probability per level after unlock
@@ -367,17 +423,21 @@ struct Configuration {
         // MARK: - Cactus Spawning (Desert Only)
         
         /// Minimum score before cacti can appear in the desert
-        static let cactusStartScore: Int = 2000
+        static let cactusStartScore: Int = Weather.desertStart
         /// Base probability of a cactus spawning on a lily pad (once unlocked)
-        static let baseCactusProbability: Double = 0.10
+        static let baseCactusProbability: Double = 0.80
         /// Additional cactus probability per difficulty level
-        static let cactusProbabilityPerLevel: Double = 0.03
+        static let cactusProbabilityPerLevel: Double = 0.80
         /// Maximum cactus spawn probability
-        static let maxCactusProbability: Double = 0.30
+        static let maxCactusProbability: Double = 0.80
         
-        /// Calculates the probability of a cactus spawning. Returns 0 if not in desert.
+        /// Calculates the probability of a cactus spawning. Returns 0 if not in desert score range.
+        /// Checks both weather AND score to handle the desert cutscene transition properly.
         static func cactusProbability(forScore score: Int, weather: WeatherType) -> Double {
-            guard weather == .desert, score >= cactusStartScore else { return 0.0 }
+            // Check if score is in desert range (between desert start and space start)
+            let isInDesertScore = score >= cactusStartScore && score < Weather.spaceStart
+            // Allow spawning if EITHER the weather is desert OR we're in the desert score range
+            guard (weather == .desert || isInDesertScore), score >= cactusStartScore else { return 0.0 }
             let cactusStartLevel = cactusStartScore / scalingInterval
             let currentLevel = level(forScore: score)
             let effectiveLevel = currentLevel - cactusStartLevel

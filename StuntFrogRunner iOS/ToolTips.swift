@@ -25,6 +25,10 @@ public class ToolTips {
         "race": (
             title: "It's frog vs. boat.",
             message: "Try to keep up and survive."
+        ),
+        "heartOverload": (
+            title: "You love too much.",
+            message: "Sorry, but you can only have 6 hearts."
         )
         
         // Add more tooltips here with a unique key.
@@ -138,7 +142,7 @@ private class ToolTipNode: SKSpriteNode {
     var onDismiss: (() -> Void)?
 
     init(title: String, message: String, size: CGSize) {
-        let texture = SKTexture(imageNamed: "toolTipBackdrop")
+        let texture = SKTexture(imageNamed: "pauseBackdrop")
         super.init(texture: texture, color: .clear, size: size)
 
         self.isUserInteractionEnabled = true
@@ -147,7 +151,7 @@ private class ToolTipNode: SKSpriteNode {
         let titleLabel = SKLabelNode(fontNamed: "Fredoka-Bold")
         titleLabel.text = title
         titleLabel.fontSize = 28
-        titleLabel.fontColor = .black
+        titleLabel.fontColor = .white
         // Ensure title wraps if it's too long, respecting horizontal margins.
         titleLabel.lineBreakMode = .byWordWrapping
         titleLabel.numberOfLines = 0
@@ -160,7 +164,7 @@ private class ToolTipNode: SKSpriteNode {
         let messageLabel = SKLabelNode(fontNamed: "Avenir-Medium")
         messageLabel.text = message
         messageLabel.fontSize = 17
-        messageLabel.fontColor = .black
+        messageLabel.fontColor = .white
         messageLabel.lineBreakMode = .byWordWrapping
         messageLabel.numberOfLines = 0
         messageLabel.preferredMaxLayoutWidth = self.size.width - 60

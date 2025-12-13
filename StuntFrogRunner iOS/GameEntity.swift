@@ -82,6 +82,7 @@ class Frog: GameEntity {
     var onPad: Pad?
     var isFloating: Bool = false
     var isWearingBoots: Bool = false
+    var isRainEffectActive: Bool = false // Controlled externally to delay slippery effect during transitions
     
     // FIX: Re-added missing property
     var canJumpLogs: Bool = false
@@ -99,7 +100,7 @@ class Frog: GameEntity {
     private let frogSprite = SKSpriteNode()
     private let shadowNode = SKShapeNode(ellipseOf: CGSize(width: 40, height: 20))
     private let vestNode = SKShapeNode(circleOfRadius: 22)
-    private let superAura = SKShapeNode(circleOfRadius: 28)
+    private let superAura = SKShapeNode()
     private let rocketSprite = SKSpriteNode(imageNamed: "rocketRide")
     
     // Preloaded textures for performance
@@ -149,14 +150,24 @@ class Frog: GameEntity {
         shadowNode.zPosition = -1
         addChild(shadowNode)
         
-        superAura.fillColor = .clear
+        // Create blast/star-burst shape for super jump
+        let blastPath = createBlastShape(radius: 35, points: 8, innerRadius: 20)
+        superAura.path = blastPath
+        superAura.fillColor = .cyan.withAlphaComponent(0.3)
         superAura.strokeColor = .cyan
-        superAura.lineWidth = 4
+        superAura.lineWidth = 3
         superAura.zPosition = 0
         superAura.isHidden = true
-        let scaleUp = SKAction.scale(to: 1.2, duration: 0.3)
-        let scaleDown = SKAction.scale(to: 1.0, duration: 0.3)
-        superAura.run(SKAction.repeatForever(SKAction.sequence([scaleUp, scaleDown])))
+        
+        // Pulsing and rotating animation for blast effect
+        let scaleUp = SKAction.scale(to: 1.15, duration: 0.25)
+        let scaleDown = SKAction.scale(to: 0.95, duration: 0.25)
+        let pulse = SKAction.repeatForever(SKAction.sequence([scaleUp, scaleDown]))
+        
+        let rotate = SKAction.rotate(byAngle: .pi * 2, duration: 3.0)
+        let rotateForever = SKAction.repeatForever(rotate)
+        
+        superAura.run(SKAction.group([pulse, rotateForever]))
         addChild(superAura)
         
         bodyNode.zPosition = 1
@@ -192,6 +203,36 @@ class Frog: GameEntity {
         bodyNode.addChild(frogSprite)
         
       
+    }
+    
+    // Helper function to create a blast/star-burst shape
+    private func createBlastShape(radius: CGFloat, points: Int, innerRadius: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        let angleStep = (.pi * 2) / CGFloat(points)
+        
+        for i in 0..<points {
+            let outerAngle = angleStep * CGFloat(i) - .pi / 2
+            let innerAngle = angleStep * CGFloat(i) + angleStep / 2 - .pi / 2
+            
+            let outerPoint = CGPoint(
+                x: cos(outerAngle) * radius,
+                y: sin(outerAngle) * radius
+            )
+            let innerPoint = CGPoint(
+                x: cos(innerAngle) * innerRadius,
+                y: sin(innerAngle) * innerRadius
+            )
+            
+            if i == 0 {
+                path.move(to: outerPoint)
+            } else {
+                path.addLine(to: outerPoint)
+            }
+            path.addLine(to: innerPoint)
+        }
+        
+        path.closeSubpath()
+        return path
     }
     
     func update(dt: TimeInterval, weather: WeatherType) {
@@ -241,9 +282,8 @@ class Frog: GameEntity {
                     if pad.type == .moving || pad.type == .waterLily || pad.type == .log {
                         position.x += pad.moveSpeed * pad.moveDirection
                     }
-                    let isRain = (weather == .rain)
                     let isIce = (pad.type == .ice)
-                    if (isRain || isIce) && !isWearingBoots {
+                    if (isRainEffectActive || isIce) && !isWearingBoots {
                         currentFriction = 0.93
                     }
                 }
@@ -328,7 +368,7 @@ class Frog: GameEntity {
         // Stop any running jump animation and reset scale
         frogSprite.removeAction(forKey: "jumpFrameAnimation")
         bodyNode.removeAction(forKey: "jumpScaleAnimation")
-        bodyNode.setScale(1.5)
+        bodyNode.setScale(1.1)
         
         // Stop all movement
         velocity = .zero
@@ -650,10 +690,9 @@ class Frog: GameEntity {
             let texture = buffs.vest > 0 ? Frog.sitLvTexture : Frog.sitTexture
             setFrogTexture(texture, height: Frog.frogSitHeight)
         }
-        let isRain = (weather == .rain)
         let isIce = (pad.type == .ice)
         
-        if (isRain || isIce) && !isWearingBoots {
+        if (isRainEffectActive || isIce) && !isWearingBoots {
             velocity.dx *= 0.5
             velocity.dy *= 0.5
         } else {
@@ -725,12 +764,25 @@ class Pad: GameEntity {
 
     private static let graveTexture = SKTexture(imageNamed: "lilypadGrave")
     private static let shrinkTexture = SKTexture(imageNamed: "lilypadShrink")
+    private static let shrinkNightTexture = SKTexture(imageNamed: "lilypadShrinkNight")
+    private static let shrinkRainTexture = SKTexture(imageNamed: "lilypadShrinkRain")
+    private static let shrinkSnowTexture = SKTexture(imageNamed: "lilypadShrinkSnow")
+    private static let shrinkSandTexture = SKTexture(imageNamed: "lilypadShrinkSand")
+    private static let shrinkSpaceTexture = SKTexture(imageNamed: "lilypadShrinkSpace")
     private static let waterLilyTexture = SKTexture(imageNamed: "lilypadWater")
     private static let waterLilyNightTexture = SKTexture(imageNamed: "lilypadWaterNight")
     private static let waterLilyRainTexture = SKTexture(imageNamed: "lilypadWaterRain")
     private static let waterLilySnowTexture = SKTexture(imageNamed: "lilypadWaterSnow")
     private static let waterLilySandTexture = SKTexture(imageNamed: "lilypadWaterSand")
     private static let waterLilySpaceTexture = SKTexture(imageNamed: "lilypadWaterSpace")
+    
+    // LOG variants for different weather types
+    private static let logSunnyTexture = SKTexture(imageNamed: "log")
+    private static let logNightTexture = SKTexture(imageNamed: "logNight")
+    private static let logRainTexture = SKTexture(imageNamed: "logRain")
+    private static let logWinterTexture = SKTexture(imageNamed: "logWinter")
+    private static let logDesertTexture = SKTexture(imageNamed: "logDesert")
+    private static let logSpaceTexture = SKTexture(imageNamed: "logSpace")
     
     /// The base radius for this pad (before any scaling from shrinking)
     private(set) var baseRadius: CGFloat = Configuration.Dimensions.minPadRadius
@@ -763,11 +815,25 @@ class Pad: GameEntity {
         if type != .log { self.zRotation = CGFloat.random(in: 0...CGFloat.pi*2) }
     }
     required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not be implemented") }
+    
+    /// Returns the appropriate log texture based on weather
+    private static func logTextureForWeather(_ weather: WeatherType) -> SKTexture {
+        switch weather {
+        case .sunny: return logSunnyTexture
+        case .night: return logNightTexture
+        case .rain: return logRainTexture
+        case .winter: return logWinterTexture
+        case .desert: return logDesertTexture
+        case .space: return logSpaceTexture
+        }
+    }
+    
     func setupVisuals() {
         if type == .log {
-            let texture = SKTexture(imageNamed: "log")
+            let texture = Pad.logTextureForWeather(currentWeather)
             let sprite = SKSpriteNode(texture: texture, size: CGSize(width: 120, height: 40))
             addChild(sprite)
+            self.padSprite = sprite
         } else if type == .ice {
             // Use ice lilypad texture
             let texture = Pad.iceTexture
@@ -813,6 +879,7 @@ class Pad: GameEntity {
             case .grave:
                 texture = Pad.graveTexture
             case .shrinking:
+                // Use weather-specific shrinking pad texture (starts with sunny/day)
                 texture = Pad.shrinkTexture
             case .waterLily, .moving:
                 texture = Pad.waterLilyTexture
@@ -826,15 +893,43 @@ class Pad: GameEntity {
             self.padSprite = sprite
         }
     }
+    /// Converts this pad to a normal pad if its type is incompatible with the given weather
+    func convertToNormalIfIncompatible(weather: WeatherType) {
+        let shouldConvert: Bool
+        
+        switch type {
+        case .log:
+            shouldConvert = !Configuration.Difficulty.logWeathers.contains(weather)
+        case .ice:
+            shouldConvert = !Configuration.Difficulty.icePadWeathers.contains(weather)
+        case .shrinking:
+            shouldConvert = !Configuration.Difficulty.shrinkingPadWeathers.contains(weather)
+        case .moving:
+            shouldConvert = !Configuration.Difficulty.movingPadWeathers.contains(weather)
+        default:
+            shouldConvert = false // Normal pads, graves, water lilies, special pads can spawn in any weather
+        }
+        
+        if shouldConvert {
+            print("🔄 Converting \(type) pad to normal pad due to weather change to \(weather)")
+            self.type = .normal
+            self.moveSpeed = 0 // Stop movement for moving/log pads
+            currentWeather = weather // Update tracked weather
+            setupVisuals() // Re-render with new appearance
+        }
+    }
+    
     func updateColor(weather: WeatherType, duration: TimeInterval = 0) {
-        guard type == .normal || type == .moving || type == .waterLily else { return }
+        guard type == .normal || type == .moving || type == .waterLily || type == .shrinking || type == .log else { return }
         
         // Don't change if already correct
         if weather == currentWeather && padSprite?.texture != nil { return }
         currentWeather = weather
         
         let texture: SKTexture
-        if type == .waterLily || type == .moving {
+        if type == .log {
+            texture = Pad.logTextureForWeather(weather)
+        } else if type == .waterLily || type == .moving {
             switch weather {
             case .sunny:
                 texture = Pad.waterLilyTexture
@@ -849,6 +944,21 @@ class Pad: GameEntity {
                 texture = Pad.waterLilySandTexture
             case .space:
                 texture = Pad.waterLilySpaceTexture
+            }
+        } else if type == .shrinking {
+            switch weather {
+            case .sunny:
+                texture = Pad.shrinkTexture
+            case .night:
+                texture = Pad.shrinkNightTexture
+            case .rain:
+                texture = Pad.shrinkRainTexture
+            case .winter:
+                texture = Pad.shrinkSnowTexture
+            case .desert:
+                texture = Pad.shrinkSandTexture
+            case .space:
+                texture = Pad.shrinkSpaceTexture
             }
         } else {
             switch weather {
@@ -899,6 +1009,8 @@ class Pad: GameEntity {
         let newTexture: SKTexture
         if type == .waterLily || type == .moving {
             newTexture = Pad.waterLilySandTexture
+        } else if type == .shrinking {
+            newTexture = Pad.shrinkSandTexture
         } else {
             newTexture = Pad.desertTexture
         }
@@ -1000,11 +1112,22 @@ class Enemy: GameEntity {
     private var currentWeather: WeatherType = .sunny
     private var enemySprite: SKSpriteNode?
     
-    // Preloaded textures for performance
-    private static let beeTexture = SKTexture(imageNamed: "bee")
+    // Preloaded textures for performance - organized by enemy type and weather
+    // BEE variants
+    private static let beeSunnyTexture = SKTexture(imageNamed: "bee")
+    private static let beeNightTexture = SKTexture(imageNamed: "beeNight")
+    private static let beeRainTexture = SKTexture(imageNamed: "beeRain")
+    private static let beeWinterTexture = SKTexture(imageNamed: "beeWinter")
+    private static let beeDesertTexture = SKTexture(imageNamed: "beeDesert")
     private static let beeSpaceTexture = SKTexture(imageNamed: "beeSpace")
-    private static let dragonflyTexture = SKTexture(imageNamed: "dragonfly")
-    private static let asteroidTexture = SKTexture(imageNamed: "asteroid")
+    
+    // DRAGONFLY variants
+    private static let dragonflySunnyTexture = SKTexture(imageNamed: "dragonfly")
+    private static let dragonflyNightTexture = SKTexture(imageNamed: "dragonflyNight")
+    private static let dragonflyRainTexture = SKTexture(imageNamed: "dragonflyRain")
+    private static let dragonflyWinterTexture = SKTexture(imageNamed: "dragonflyWinter")
+    private static let dragonflyDesertTexture = SKTexture(imageNamed: "dragonflyDesert")
+    private static let dragonflySpaceTexture = SKTexture(imageNamed: "asteroid")
     
     init(position: CGPoint, type: String = "BEE", weather: WeatherType = .sunny) {
         self.originalPosition = position
@@ -1017,6 +1140,34 @@ class Enemy: GameEntity {
         setupVisuals()
     }
     required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not be implemented") }
+    
+    /// Returns the appropriate texture for an enemy type based on weather
+    private static func textureForEnemy(_ enemyType: String, weather: WeatherType) -> SKTexture {
+        switch enemyType {
+        case "DRAGONFLY":
+            switch weather {
+            case .sunny: return dragonflySunnyTexture
+            case .night: return dragonflyNightTexture
+            case .rain: return dragonflyRainTexture
+            case .winter: return dragonflyWinterTexture
+            case .desert: return dragonflyDesertTexture
+            case .space: return dragonflySpaceTexture
+            }
+        case "BEE":
+            switch weather {
+            case .sunny: return beeSunnyTexture
+            case .night: return beeNightTexture
+            case .rain: return beeRainTexture
+            case .winter: return beeWinterTexture
+            case .desert: return beeDesertTexture
+            case .space: return beeSpaceTexture
+            }
+        default:
+            // For GHOST or unknown types, return bee texture as fallback
+            return beeSunnyTexture
+        }
+    }
+    
     private func setupVisuals() {
         let shadow = SKShapeNode(circleOfRadius: 10)
         shadow.fillColor = .black.withAlphaComponent(0.2)
@@ -1025,8 +1176,8 @@ class Enemy: GameEntity {
         addChild(shadow)
         
         switch type {
-        case "DRAGONFLY":
-            let texture = currentWeather == .space ? Enemy.asteroidTexture : Enemy.dragonflyTexture
+        case "DRAGONFLY", "BEE":
+            let texture = Enemy.textureForEnemy(type, weather: currentWeather)
             let sprite = SKSpriteNode(texture: texture)
             sprite.size = CGSize(width: 30, height: 30)
             addChild(sprite)
@@ -1036,8 +1187,9 @@ class Enemy: GameEntity {
             ghostSprite.size = CGSize(width: 65, height: 65)
             addChild(ghostSprite)
             self.enemySprite = ghostSprite
-        default: // BEE
-            let texture = currentWeather == .space ? Enemy.beeSpaceTexture : Enemy.beeTexture
+        default:
+            // Unknown type - use bee texture as fallback
+            let texture = Enemy.textureForEnemy("BEE", weather: currentWeather)
             let sprite = SKSpriteNode(texture: texture)
             sprite.size = CGSize(width: 30, height: 30)
             addChild(sprite)
@@ -1050,19 +1202,11 @@ class Enemy: GameEntity {
         guard weather != currentWeather, let sprite = enemySprite else { return }
         currentWeather = weather
         
-        let newTexture: SKTexture?
-        switch type {
-        case "DRAGONFLY":
-            newTexture = weather == .space ? Enemy.asteroidTexture : Enemy.dragonflyTexture
-        case "BEE":
-            newTexture = weather == .space ? Enemy.beeSpaceTexture : Enemy.beeTexture
-        default:
-            newTexture = nil
-        }
+        // Ghost frogs don't change with weather
+        guard type != "GHOST" else { return }
         
-        if let texture = newTexture {
-            sprite.texture = texture
-        }
+        let newTexture = Enemy.textureForEnemy(type, weather: weather)
+        sprite.texture = newTexture
     }
     func update(dt: TimeInterval, target: CGPoint? = nil) {
         if type == "DRAGONFLY" {
@@ -1257,6 +1401,140 @@ class TreasureChest: GameEntity {
     }
 }
 
+// MARK: - Cactus
+class Cactus: GameEntity {
+    
+    /// Whether the cactus has been destroyed
+    var isDestroyed: Bool = false
+    
+    /// Visual nodes
+    private let cactusSprite = SKSpriteNode()
+    
+    /// Current weather (for potential visual variants)
+    private var currentWeather: WeatherType = .desert
+    
+    /// Preloaded textures
+    private static let cactusTexture = SKTexture(imageNamed: "cactus")
+    private static let cactusDesertTexture = SKTexture(imageNamed: "cactusDesert")
+    private static let cactusSandTexture = SKTexture(imageNamed: "cactusSand")
+    
+    /// Returns the appropriate texture based on weather
+    private static func textureForWeather(_ weather: WeatherType) -> SKTexture {
+        switch weather {
+        case .desert:
+            // Try desert-specific texture, fall back to generic cactus
+            let desertTexture = cactusDesertTexture
+            return desertTexture.size().width > 0 ? desertTexture : cactusTexture
+        default:
+            return cactusTexture
+        }
+    }
+    
+    /// Collision radius
+    var scaledRadius: CGFloat { return 20.0 }
+    
+    init(position: CGPoint, weather: WeatherType = .desert) {
+        self.currentWeather = weather
+        super.init(texture: nil, color: .clear, size: CGSize(width: 40, height: 50))
+        self.position = position
+        self.zHeight = 10  // Above the lily pad
+        self.zPosition = Layer.item + 1  // Above coins, below frog
+        setupVisuals()
+    }
+    
+    required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not be implemented") }
+    
+    private func setupVisuals() {
+        // Use weather-appropriate cactus texture
+        let texture = Cactus.textureForWeather(currentWeather)
+        let textureSize = texture.size()
+        
+        // Check if texture is valid
+        if textureSize.width > 0 && textureSize.height > 0 {
+            // Valid texture found - use it
+            let targetHeight: CGFloat = 45
+            let aspectRatio = textureSize.width / textureSize.height
+            cactusSprite.size = CGSize(width: targetHeight * aspectRatio, height: targetHeight)
+            cactusSprite.texture = texture
+            cactusSprite.zPosition = 1
+            addChild(cactusSprite)
+        } else {
+            // Fallback: Create a simple cactus shape if texture is missing
+            print("🌵 Cactus texture missing! Using fallback shape.")
+            let cactusShape = createFallbackCactus()
+            addChild(cactusShape)
+        }
+        
+        // Subtle idle animation - slight sway
+        let swayLeft = SKAction.rotate(byAngle: 0.05, duration: 1.5)
+        swayLeft.timingMode = .easeInEaseOut
+        let swayRight = swayLeft.reversed()
+        let swaySequence = SKAction.sequence([swayLeft, swayRight])
+        cactusSprite.run(SKAction.repeatForever(swaySequence))
+    }
+    
+    /// Creates a simple cactus shape as fallback if texture is missing
+    private func createFallbackCactus() -> SKNode {
+        let container = SKNode()
+        
+        // Main body (vertical rectangle)
+        let body = SKShapeNode(rectOf: CGSize(width: 12, height: 40), cornerRadius: 2)
+        body.fillColor = UIColor(red: 0.2, green: 0.6, blue: 0.3, alpha: 1.0) // Green
+        body.strokeColor = UIColor(red: 0.1, green: 0.4, blue: 0.2, alpha: 1.0) // Dark green
+        body.lineWidth = 2
+        container.addChild(body)
+        
+        // Left arm
+        let leftArm = SKShapeNode(rectOf: CGSize(width: 10, height: 8), cornerRadius: 2)
+        leftArm.fillColor = body.fillColor
+        leftArm.strokeColor = body.strokeColor
+        leftArm.lineWidth = 2
+        leftArm.position = CGPoint(x: -8, y: 8)
+        container.addChild(leftArm)
+        
+        // Right arm
+        let rightArm = SKShapeNode(rectOf: CGSize(width: 10, height: 8), cornerRadius: 2)
+        rightArm.fillColor = body.fillColor
+        rightArm.strokeColor = body.strokeColor
+        rightArm.lineWidth = 2
+        rightArm.position = CGPoint(x: 8, y: 5)
+        container.addChild(rightArm)
+        
+        return container
+    }
+    
+    /// Updates the cactus visual appearance when weather changes
+    func updateWeather(_ weather: WeatherType) {
+        guard weather != currentWeather else { return }
+        currentWeather = weather
+        
+        // Update texture for new weather
+        let newTexture = Cactus.textureForWeather(weather)
+        if newTexture.size().width > 0 && newTexture.size().height > 0 {
+            cactusSprite.texture = newTexture
+        }
+    }
+    
+    /// Destroys the cactus (called when hit by axe)
+    func destroy() {
+        guard !isDestroyed else { return }
+        isDestroyed = true
+        
+        // Stop any animations
+        cactusSprite.removeAllActions()
+        
+        // Death animation - break apart and fade
+        let breakApart = SKAction.group([
+            SKAction.scale(to: 0.2, duration: 0.3),
+            SKAction.rotate(byAngle: .pi, duration: 0.3),
+            SKAction.fadeOut(withDuration: 0.3)
+        ])
+        let remove = SKAction.removeFromParent()
+        
+        run(SKAction.sequence([breakApart, remove]))
+    }
+}
+
 // MARK: - Snake
 class Snake: GameEntity {
     
@@ -1267,10 +1545,40 @@ class Snake: GameEntity {
     private let bodySprite = SKSpriteNode()
     private let shadowNode = SKShapeNode(ellipseOf: CGSize(width: 50, height: 20))
     
-    /// Animation textures
-    private static let animationTextures: [SKTexture] = {
+    /// Current weather
+    private var currentWeather: WeatherType = .sunny
+    
+    /// Animation textures - organized by weather type
+    private static let sunnySerpentTextures: [SKTexture] = {
         return (1...5).map { SKTexture(imageNamed: "snake\($0)") }
     }()
+    private static let nightSerpentTextures: [SKTexture] = {
+        return (1...5).map { SKTexture(imageNamed: "snakeNight\($0)") }
+    }()
+    private static let rainSerpentTextures: [SKTexture] = {
+        return (1...5).map { SKTexture(imageNamed: "snakeRain\($0)") }
+    }()
+    private static let winterSerpentTextures: [SKTexture] = {
+        return (1...5).map { SKTexture(imageNamed: "snakeWinter\($0)") }
+    }()
+    private static let desertSerpentTextures: [SKTexture] = {
+        return (1...5).map { SKTexture(imageNamed: "snakeDesert\($0)") }
+    }()
+    private static let spaceSerpentTextures: [SKTexture] = {
+        return (1...5).map { SKTexture(imageNamed: "snakeSpace\($0)") }
+    }()
+    
+    /// Returns the appropriate animation textures based on weather
+    private static func animationTexturesForWeather(_ weather: WeatherType) -> [SKTexture] {
+        switch weather {
+        case .sunny: return sunnySerpentTextures
+        case .night: return nightSerpentTextures
+        case .rain: return rainSerpentTextures
+        case .winter: return winterSerpentTextures
+        case .desert: return desertSerpentTextures
+        case .space: return spaceSerpentTextures
+        }
+    }
     
     /// Animation key
     private let animationKey = "snakeAnimation"
@@ -1281,7 +1589,12 @@ class Snake: GameEntity {
     /// Whether the snake has been destroyed
     var isDestroyed: Bool = false
     
-    init(position: CGPoint) {
+    /// Current scale state (1.0 = normal, 1.2 = on lilypad)
+    private var targetScale: CGFloat = 1.0
+    private var isOnLilypad: Bool = false
+    
+    init(position: CGPoint, weather: WeatherType = .sunny) {
+        self.currentWeather = weather
         super.init(texture: nil, color: .clear, size: CGSize(width: 60, height: 40))
         self.position = position
         self.zHeight = 5  // Slightly above water level (on lilypads/logs)
@@ -1293,20 +1606,15 @@ class Snake: GameEntity {
     required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not be implemented") }
     
     private func setupVisuals() {
-        // Shadow
-        shadowNode.fillColor = .black.withAlphaComponent(0.25)
-        shadowNode.strokeColor = .clear
-        shadowNode.position.y = -10
-        shadowNode.zPosition = -1
-        addChild(shadowNode)
         
         // Debug print the names of the textures being loaded
-        for (i, tex) in Snake.animationTextures.enumerated() {
-            print("🐍 Attempted to load texture 'snake\(i+1)': size = \(tex.size())")
+        let textures = Snake.animationTexturesForWeather(currentWeather)
+        for (i, tex) in textures.enumerated() {
+            print("🐍 Attempted to load texture 'snake\(currentWeather)\(i+1)': size = \(tex.size())")
         }
         
         // Snake sprite
-        let texture = Snake.animationTextures.first ?? SKTexture(imageNamed: "snake1")
+        let texture = textures.first ?? SKTexture(imageNamed: "snake1")
         let textureSize = texture.size()
         print("🐍 First snake texture size: \(textureSize)")
         
@@ -1327,10 +1635,21 @@ class Snake: GameEntity {
       
     
     private func startAnimation() {
-        // Cycle through snake1-5 frames
-        let animateAction = SKAction.animate(with: Snake.animationTextures, timePerFrame: 0.12)
+        // Cycle through snake animation frames for current weather
+        let textures = Snake.animationTexturesForWeather(currentWeather)
+        let animateAction = SKAction.animate(with: textures, timePerFrame: 0.12)
         let repeatAnimation = SKAction.repeatForever(animateAction)
         bodySprite.run(repeatAnimation, withKey: animationKey)
+    }
+    
+    /// Updates the snake's visual appearance when weather changes
+    func updateWeather(_ weather: WeatherType) {
+        guard weather != currentWeather else { return }
+        currentWeather = weather
+        
+        // Restart animation with new weather textures
+        bodySprite.removeAction(forKey: animationKey)
+        startAnimation()
     }
     
     /// Updates the snake's position - moves left to right, avoiding logs and going over lilypads
@@ -1344,20 +1663,49 @@ class Snake: GameEntity {
         // Move from left to right
         position.x += moveSpeed
         
+        // Track if snake is currently on a lilypad
+        var currentlyOnLilypad = false
+        
         // Check for log obstacles - move around them
-        for pad in pads where pad.type == .log {
+        // Also check if snake is on top of any lilypad (for scaling effect)
+        for pad in pads {
             let dx = abs(position.x - pad.position.x)
             let dy = abs(position.y - pad.position.y)
             
-            // Log is nearby horizontally and vertically
-            if dx < 80 && dy < 60 {
-                // Move up or down to avoid the log
-                if position.y < pad.position.y {
-                    position.y -= 1.5  // Move down
-                } else {
-                    position.y += 1.5  // Move up
+            if pad.type == .log {
+                // Log is nearby horizontally and vertically - avoid it
+                if dx < 80 && dy < 60 {
+                    // Move up or down to avoid the log
+                    if position.y < pad.position.y {
+                        position.y -= 1.5  // Move down
+                    } else {
+                        position.y += 1.5  // Move up
+                    }
+                }
+            } else {
+                // Check if snake is over a lilypad (not a log)
+                // Use a slightly larger detection radius to ensure smooth transitions
+                let padRadius = pad.scaledRadius + 10  // Add some buffer
+                if dx < padRadius && dy < padRadius {
+                    currentlyOnLilypad = true
                 }
             }
+        }
+        
+        // Update scale based on whether snake is on a lilypad
+        // Use smooth interpolation to avoid sudden changes
+        if currentlyOnLilypad != isOnLilypad {
+            isOnLilypad = currentlyOnLilypad
+            targetScale = isOnLilypad ? 1.2 : 1.0
+            
+            // Apply smooth scaling animation
+            // Remove any existing scale animation to avoid conflicts
+            removeAction(forKey: "snakeScaleAnimation")
+            
+            // Create a smooth scale animation (0.15 seconds for quick but smooth transition)
+            let scaleAction = SKAction.scale(to: targetScale, duration: 0.15)
+            scaleAction.timingMode = .easeInEaseOut
+            run(scaleAction, withKey: "snakeScaleAnimation")
         }
         
         // Constrain X position to stay within river bounds (horizontal constraint)
@@ -1391,20 +1739,37 @@ class Snake: GameEntity {
         run(SKAction.sequence([deathAnimation, remove]))
     }
     /// Resets the snake for reuse (e.g., from a pool)
-    func reset(position: CGPoint) {
+    func reset(position: CGPoint, weather: WeatherType = .sunny) {
         self.position = position
         self.zHeight = 5
         self.isDestroyed = false
+        self.isOnLilypad = false
+        self.targetScale = 1.0
 
         // Stop all actions on both the main node and bodySprite
         self.removeAllActions()
         bodySprite.removeAllActions()
+        
+        // Reset scale to normal
+        self.setScale(1.0)
 
         // Ensure bodySprite is visible and set to the first animation frame
         bodySprite.alpha = 1.0
-        if let firstTexture = Snake.animationTextures.first {
-            bodySprite.texture = firstTexture
+        
+        // Update weather if it changed
+        if weather != currentWeather {
+            currentWeather = weather
+            let textures = Snake.animationTexturesForWeather(currentWeather)
+            if let firstTexture = textures.first {
+                bodySprite.texture = firstTexture
+            }
+        } else {
+            let textures = Snake.animationTexturesForWeather(currentWeather)
+            if let firstTexture = textures.first {
+                bodySprite.texture = firstTexture
+            }
         }
+        
         bodySprite.isHidden = false
 
         // If bodySprite was removed for some reason, re-add it
@@ -1415,6 +1780,9 @@ class Snake: GameEntity {
         if shadowNode.parent == nil {
             addChild(shadowNode)
         }
+        
+        // Restart animation with current weather
+        startAnimation()
     }
 }
 

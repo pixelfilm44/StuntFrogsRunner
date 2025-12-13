@@ -8,18 +8,19 @@ class ChallengesViewController: UIViewController {
     
     // MARK: - UI Elements
     
-    private lazy var backgroundView: UIView = {
-        let view = UIView()
-        view.backgroundColor = UIColor(red: 44/255, green: 62/255, blue: 80/255, alpha: 1)
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
+    private lazy var backgroundView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.image = UIImage(named: "challengesBackdrop")
+        imageView.contentMode = .scaleAspectFill
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
     }()
     
     private lazy var titleLabel: UILabel = {
         let label = UILabel()
         label.text = "CHALLENGES"
         label.font = UIFont(name: Configuration.Fonts.primaryHeavy, size: 30)
-        label.textColor = .white
+        label.textColor = .black
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -28,8 +29,14 @@ class ChallengesViewController: UIViewController {
     private lazy var segmentedControl: UISegmentedControl = {
         let control = UISegmentedControl(items: ["In Progress", "Completed"])
         control.selectedSegmentIndex = 0
-        control.backgroundColor = UIColor.black.withAlphaComponent(0.3)
-        control.selectedSegmentTintColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
+        control.backgroundColor = .blue
+        
+        
+        
+        // Set divider image (use a 1x1 transparent image to hide it)
+        let dividerImage = UIImage()
+        control.setDividerImage(dividerImage, forLeftSegmentState: .normal, rightSegmentState: .normal, barMetrics: .default)
+        
         control.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .normal)
         control.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .selected)
         control.addTarget(self, action: #selector(segmentChanged), for: .valueChanged)
@@ -193,21 +200,19 @@ class ChallengeCell: UITableViewCell {
     
     static let reuseIdentifier = "ChallengeCell"
     
-    private let containerView: UIView = {
-        let view = UIView()
-        view.backgroundColor = UIColor.black.withAlphaComponent(0.3)
-        view.layer.cornerRadius = 16
-        view.layer.borderWidth = 2
-        view.layer.borderColor = UIColor.white.withAlphaComponent(0.2).cgColor
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
+    private let containerView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.image = UIImage(named: "itemBackdrop")
+        imageView.contentMode = .scaleToFill
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
     }()
     
     private let titleLabel: UILabel = {
         let label = UILabel()
         
         label.font = UIFont(name: Configuration.Fonts.cardHeader, size: 18)
-        label.textColor = .white
+        label.textColor = .black
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
@@ -215,15 +220,15 @@ class ChallengeCell: UITableViewCell {
     private let descriptionLabel: UILabel = {
         let label = UILabel()
         label.font = UIFont.systemFont(ofSize: 14, weight: .regular)
-        label.textColor = UIColor.white.withAlphaComponent(0.7)
+        label.textColor = UIColor.black.withAlphaComponent(0.7)
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
     
     private let progressBar: UIProgressView = {
         let progress = UIProgressView(progressViewStyle: .default)
-        progress.trackTintColor = UIColor.white.withAlphaComponent(0.2)
-        progress.progressTintColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
+        progress.trackTintColor = UIColor.blue.withAlphaComponent(0.2)
+        progress.progressTintColor = UIColor(red: 0/255, green: 100/255, blue: 0/255, alpha: 1)
         progress.layer.cornerRadius = 4
         progress.clipsToBounds = true
         progress.translatesAutoresizingMaskIntoConstraints = false
@@ -233,7 +238,7 @@ class ChallengeCell: UITableViewCell {
     private let progressLabel: UILabel = {
         let label = UILabel()
         label.font = UIFont.systemFont(ofSize: 12, weight: .medium)
-        label.textColor = UIColor.white.withAlphaComponent(0.8)
+        label.textColor = UIColor.blue.withAlphaComponent(0.8)
         label.textAlignment = .right
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -242,7 +247,7 @@ class ChallengeCell: UITableViewCell {
     private let rewardLabel: UILabel = {
         let label = UILabel()
         label.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
-        label.textColor = UIColor(red: 241/255, green: 196/255, blue: 15/255, alpha: 1)
+        label.textColor = UIColor.orange
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
@@ -251,7 +256,7 @@ class ChallengeCell: UITableViewCell {
         let label = UILabel()
         label.text = "TAP TO CLAIM!"
         label.font = UIFont.systemFont(ofSize: 12, weight: .heavy)
-        label.textColor = .white
+        label.textColor = .green
         label.backgroundColor = UIColor(red: 231/255, green: 76/255, blue: 60/255, alpha: 1)
         label.textAlignment = .center
         label.layer.cornerRadius = 10
@@ -281,6 +286,13 @@ class ChallengeCell: UITableViewCell {
         containerView.addSubview(progressLabel)
         containerView.addSubview(rewardLabel)
         containerView.addSubview(claimBadge)
+        
+        // Add shadow to containerView
+        containerView.layer.shadowColor = UIColor.black.cgColor
+        containerView.layer.shadowOffset = CGSize(width: 0, height: 4)
+        containerView.layer.shadowRadius = 8
+        containerView.layer.shadowOpacity = 0.3
+        containerView.layer.masksToBounds = false
         
         NSLayoutConstraint.activate([
             containerView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
@@ -327,11 +339,9 @@ class ChallengeCell: UITableViewCell {
         
         // Style based on completion state
         if challenge.isRewardClaimed {
-            containerView.layer.borderColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 0.5).cgColor
             containerView.alpha = 0.7
             rewardLabel.text = "✅ Claimed"
         } else if challenge.isCompleted {
-            containerView.layer.borderColor = UIColor(red: 241/255, green: 196/255, blue: 15/255, alpha: 1).cgColor
             containerView.alpha = 1.0
             
             // Pulse animation for claimable rewards
@@ -339,7 +349,6 @@ class ChallengeCell: UITableViewCell {
                 self.claimBadge.transform = CGAffineTransform(scaleX: 1.05, y: 1.05)
             })
         } else {
-            containerView.layer.borderColor = UIColor.white.withAlphaComponent(0.2).cgColor
             containerView.alpha = 1.0
         }
     }

@@ -28,13 +28,17 @@ class GameViewController: UIViewController {
             print("   SKView frame: \(skView.frame)")
             print("   SKView scene: \(String(describing: skView.scene))")
             
+            // PERFORMANCE: Ensure maximum frame rate
+            skView.preferredFramesPerSecond = 60
+            
+            // PERFORMANCE: Ignore sibling order for faster rendering
+            skView.ignoresSiblingOrder = true
+            
             // Debug info for development builds
             #if DEBUG
             skView.showsFPS = true
             skView.showsNodeCount = true
             #endif
-            
-            skView.ignoresSiblingOrder = true
         } else {
             print("❌ GameViewController: View is NOT SKView!")
         }

@@ -4,6 +4,7 @@ protocol CollisionManagerDelegate: AnyObject {
     func didLand(on pad: Pad)
     func didCrash(into enemy: Enemy)
     func didCrash(into snake: Snake)
+    func didCrash(into cactus: Cactus)
     func didCrash(into boat: Boat)
     func didHitObstacle(pad: Pad)
     func didCollect(coin: Coin)
@@ -25,6 +26,7 @@ class CollisionManager {
     private let chestRadiusSq: CGFloat
     private let enemyRadiusSq: CGFloat
     private let flyRadiusSq: CGFloat
+    private let cactusRadiusSq: CGFloat
     private let frogRadius: CGFloat
     
     init() {
@@ -32,16 +34,18 @@ class CollisionManager {
         let chestR: CGFloat = 25.0  // Slightly larger than coins
         let enemyR: CGFloat = 15.0
         let flyR: CGFloat = 15.0  // Small collision radius for fly
+        let cactusR: CGFloat = 20.0  // Cactus collision radius
         let frogR = Configuration.Dimensions.frogRadius
         
         self.coinRadiusSq = pow(coinR + frogR, 2)
         self.chestRadiusSq = pow(chestR + frogR, 2)
         self.enemyRadiusSq = pow(enemyR + frogR, 2)
         self.flyRadiusSq = pow(flyR + frogR, 2)
+        self.cactusRadiusSq = pow(cactusR + frogR, 2)
         self.frogRadius = frogR
     }
     
-    func update(frog: Frog, pads: [Pad], enemies: [Enemy], coins: [Coin], crocodiles: [Crocodile] = [], treasureChests: [TreasureChest] = [], snakes: [Snake] = [], flies: [Fly] = [], boat: Boat? = nil) {
+    func update(frog: Frog, pads: [Pad], enemies: [Enemy], coins: [Coin], crocodiles: [Crocodile] = [], treasureChests: [TreasureChest] = [], snakes: [Snake] = [], cacti: [Cactus] = [], flies: [Fly] = [], boat: Boat? = nil) {
         // Check crocodile ride completion first
         for crocodile in crocodiles {
             if crocodile.isRideComplete() {
@@ -58,7 +62,7 @@ class CollisionManager {
             checkFrogBoatCollision(frog: frog, boat: boat)
         }
         
-        checkEntityCollisions(frog: frog, enemies: enemies, coins: coins, treasureChests: treasureChests, snakes: snakes, flies: flies)
+        checkEntityCollisions(frog: frog, enemies: enemies, coins: coins, treasureChests: treasureChests, snakes: snakes, cacti: cacti, flies: flies)
         checkObstacleCollisions(frog: frog, pads: pads)
         
         // NEW: Check Log-to-Pad collisions
@@ -291,7 +295,7 @@ class CollisionManager {
             } else {
                 // Circle Pad Logic
                 let currentPadRadius = pad.scaledRadius
-                let safetyBuffer = frogRadius * 0.10
+                let safetyBuffer = frogRadius * 0.02
                 let hitDistance = currentPadRadius + safetyBuffer
                 
                 // 1. Broad Phase: Simple Box Check (Fastest)
@@ -342,7 +346,7 @@ class CollisionManager {
         }
     }
     
-    private func checkEntityCollisions(frog: Frog, enemies: [Enemy], coins: [Coin], treasureChests: [TreasureChest], snakes: [Snake], flies: [Fly]) {
+    private func checkEntityCollisions(frog: Frog, enemies: [Enemy], coins: [Coin], treasureChests: [TreasureChest], snakes: [Snake], cacti: [Cactus], flies: [Fly]) {
         for coin in coins where !coin.isCollected {
             let dx = frog.position.x - coin.position.x
             let dy = frog.position.y - coin.position.y
@@ -404,12 +408,37 @@ class CollisionManager {
             let dx = frog.position.x - snake.position.x
             let dy = frog.position.y - snake.position.y
             let distSq = (dx * dx) + (dy * dy)
-            let zDiff = abs(frog.zHeight - snake.zHeight)
+            let zDiff = frog.zHeight - snake.zHeight
             
             // Snake radius collision check
             let snakeRadiusSq = pow(snake.scaledRadius + frogRadius, 2)
-            if distSq < snakeRadiusSq && zDiff < 20 {
+            
+            // Only collide if frog is not significantly above the snake
+            // Frog can jump over snakes if zHeight difference > 10
+            // (changed from zDiff < 20 to allow jumping over)
+            if distSq < snakeRadiusSq && zDiff < 10 {
                 delegate?.didCrash(into: snake)
+            }
+        }
+        
+        // Check cactus collisions (cacti are stationary on lily pads)
+        for cactus in cacti where !cactus.isDestroyed {
+            // Cacti are children of pads, so we need to get their world position
+            // Since cactus.position is (0,0) relative to its parent pad, we use the parent's position
+            guard let parentPad = cactus.parent as? SKNode else { continue }
+            
+            // Get the cactus position in world coordinates
+            let cactusWorldPos = parentPad.convert(cactus.position, to: cactus.scene ?? parentPad)
+            
+            let dx = frog.position.x - cactusWorldPos.x
+            let dy = frog.position.y - cactusWorldPos.y
+            let distSq = (dx * dx) + (dy * dy)
+            let zDiff = frog.zHeight - cactus.zHeight
+            
+            // Only collide if frog is on the same level (not jumping significantly above)
+            // Frog can jump over cacti if zHeight difference > 10
+            if distSq < cactusRadiusSq && zDiff < 10 {
+                delegate?.didCrash(into: cactus)
             }
         }
     }

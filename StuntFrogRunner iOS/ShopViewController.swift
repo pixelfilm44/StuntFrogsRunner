@@ -7,8 +7,16 @@ class ShopViewController: UIViewController {
     // MARK: - UI Elements
     private lazy var containerView: UIView = {
         let view = UIView()
-        view.backgroundColor = UIColor(red: 44/255, green: 62/255, blue: 80/255, alpha: 1)
+        view.backgroundColor = .clear
         return view
+    }()
+    
+    private lazy var backgroundImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.image = UIImage(named: "storeBackdrop")
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        return imageView
     }()
     
     private lazy var headerLabel: UILabel = {
@@ -16,7 +24,7 @@ class ShopViewController: UIViewController {
         label.text = "FROG SHOP"
     
         label.font = UIFont(name: Configuration.Fonts.primaryHeavy, size: 30)
-        label.textColor = .white
+        label.textColor = .black
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -93,6 +101,10 @@ class ShopViewController: UIViewController {
         containerView.frame = view.bounds
         containerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         
+        containerView.addSubview(backgroundImageView)
+        backgroundImageView.frame = containerView.bounds
+        backgroundImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        
         containerView.addSubview(headerLabel)
         containerView.addSubview(coinsStackView)
         containerView.addSubview(scrollView)
@@ -134,22 +146,40 @@ class ShopViewController: UIViewController {
     
     private func createItemView(type: UpgradeType) -> UIView {
         let cardView = UIView()
-        cardView.backgroundColor = UIColor.white.withAlphaComponent(0.1)
-        cardView.layer.cornerRadius = 12
-        cardView.layer.borderWidth = 2
-        cardView.layer.borderColor = UIColor.white.cgColor
-        cardView.clipsToBounds = true
+        cardView.backgroundColor = .clear
+        cardView.clipsToBounds = false
         cardView.heightAnchor.constraint(equalToConstant: 120).isActive = true
+        
+        // Add shadow
+        cardView.layer.shadowColor = UIColor.black.cgColor
+        cardView.layer.shadowOffset = CGSize(width: 0, height: 4)
+        cardView.layer.shadowOpacity = 0.3
+        cardView.layer.shadowRadius = 6
+        
+        // Add background image
+        let backgroundImageView = UIImageView()
+        backgroundImageView.image = UIImage(named: "itemBackdrop")
+        backgroundImageView.contentMode = .scaleToFill
+        backgroundImageView.clipsToBounds = true
+        backgroundImageView.translatesAutoresizingMaskIntoConstraints = false
+        cardView.addSubview(backgroundImageView)
+        
+        NSLayoutConstraint.activate([
+            backgroundImageView.topAnchor.constraint(equalTo: cardView.topAnchor),
+            backgroundImageView.leadingAnchor.constraint(equalTo: cardView.leadingAnchor),
+            backgroundImageView.trailingAnchor.constraint(equalTo: cardView.trailingAnchor),
+            backgroundImageView.bottomAnchor.constraint(equalTo: cardView.bottomAnchor)
+        ])
         
         let title = UILabel()
        
         title.font = UIFont(name: Configuration.Fonts.cardHeader, size: 18)
-        title.textColor = .white
+        title.textColor = .black
         title.translatesAutoresizingMaskIntoConstraints = false
         
         let desc = UILabel()
         desc.font = UIFont.systemFont(ofSize: 14)
-        desc.textColor = .lightGray
+        desc.textColor = .black
         desc.numberOfLines = 2
         desc.translatesAutoresizingMaskIntoConstraints = false
         
@@ -216,7 +246,7 @@ class ShopViewController: UIViewController {
             currentLevel = isPurchased ? 1 : 0
             isUnlockItem = true
             title.text = "Rocket 🚀"
-            desc.text = "Fly for 7 seconds"
+            desc.text = "Fly for 10 seconds"
         case .lifevestPack:
             let currentItems = PersistenceManager.shared.vestItems
             currentLevel = currentItems
@@ -256,18 +286,7 @@ class ShopViewController: UIViewController {
         
         let userCoins = PersistenceManager.shared.totalCoins
         
-        // Style the card based on unlock status
-        if isUnlockItem {
-            if isPurchased {
-                // Owned unlock items get a green border
-                cardView.layer.borderColor = UIColor.systemGreen.cgColor
-                cardView.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.15)
-            } else {
-                // Unpurchased unlock items get a purple/special border
-                cardView.layer.borderColor = UIColor.systemPurple.cgColor
-                cardView.backgroundColor = UIColor.systemPurple.withAlphaComponent(0.15)
-            }
-        }
+        // Note: Special styling removed - now using itemBackdrop.png for all items
         
         if isPurchased {
             costLabel.text = "OWNED"
@@ -346,7 +365,7 @@ class ShopViewController: UIViewController {
         let badge = UILabel()
         badge.text = text
         badge.font = UIFont.systemFont(ofSize: 10, weight: .bold)
-        badge.textColor = .white
+        badge.textColor = .black
         badge.backgroundColor = isPurchased ? UIColor.systemGreen : UIColor.systemPurple
         badge.layer.cornerRadius = 8
         badge.layer.masksToBounds = true
@@ -367,7 +386,7 @@ class ShopViewController: UIViewController {
         let label = UILabel()
         label.text = text
         label.font = UIFont.systemFont(ofSize: 9, weight: .bold)
-        label.textColor = .white
+        label.textColor = .black
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         
@@ -390,11 +409,11 @@ class ShopViewController: UIViewController {
         let label = UILabel()
         label.text = title
         label.font = UIFont.systemFont(ofSize: 16, weight: .heavy)
-        label.textColor = UIColor.white.withAlphaComponent(0.7)
+        label.textColor = UIColor.black.withAlphaComponent(0.7)
         label.translatesAutoresizingMaskIntoConstraints = false
         
         let line = UIView()
-        line.backgroundColor = UIColor.white.withAlphaComponent(0.3)
+        line.backgroundColor = UIColor.black.withAlphaComponent(0.3)
         line.translatesAutoresizingMaskIntoConstraints = false
         
         header.addSubview(label)
