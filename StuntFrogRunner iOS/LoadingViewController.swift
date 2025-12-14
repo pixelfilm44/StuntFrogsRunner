@@ -83,7 +83,10 @@ class LoadingViewController: UIViewController {
         "land",
         "coin",
         "hit",
-        "splash"
+        "splash",
+        "swat",
+        "chop",
+        "treasure"
     ]
     
     /// All music assets to preload
@@ -131,8 +134,8 @@ class LoadingViewController: UIViewController {
     private lazy var statusLabel: UILabel = {
         let label = UILabel()
         label.text = "Loading Assets..."
-        label.font = UIFont.systemFont(ofSize: 14, weight: .medium)
-        label.textColor = .lightGray
+        label.font = UIFont.systemFont(ofSize: 18, weight: .medium)
+        label.textColor = .black
         // Shadow for readability
         label.layer.shadowColor = UIColor.black.cgColor
         label.layer.shadowOffset = CGSize(width: 1, height: 1)

@@ -43,24 +43,24 @@ class UpgradeViewController: UIViewController {
     
     // Available Upgrades Pool
     private let baseOptions: [UpgradeOption] = [
-        UpgradeOption(id: "HONEY", name: "Honey Jar", desc: "Block 1 Bee Attack", icon: "", iconImage: "honeyPot", zone: .any),
-        UpgradeOption(id: "BOOTS", name: "Rain Boots", desc: "No Sliding for a rain season", icon: "", iconImage: "rainboots", zone: .mid),
-        UpgradeOption(id: "HEART", name: "Heart Container", desc: "+1 Max HP & Heal", icon: "", iconImage: "heart", zone: .any),
-        UpgradeOption(id: "HEARTBOOST", name: "Heart Boost", desc: "Refill All Hearts", icon: "", iconImage: "heartBoost", zone: .any),
-        UpgradeOption(id: "VEST", name: "Life Vest", desc: "Float on Water (1 Use)", icon: "", iconImage: "lifevest", zone: .any),
-        UpgradeOption(id: "AXE", name: "Woodcutter's Axe", desc: "Chops down 1 Log", icon: "",iconImage: "ax", zone: .late),
-        UpgradeOption(id: "SWATTER", name: "Fly Swatter", desc: "Swats 1 Dragonfly", icon: "",iconImage: "swatter", zone: .late),
-        UpgradeOption(id: "CROSS", name: "Holy Cross", desc: "Repels 1 Ghost", icon: "", iconImage: "cross", zone: .mid)
+        UpgradeOption(id: "HONEY", name: "Honey Jar", desc: "Block 1 bee/bat Attack", icon: "", iconImage: "honeyPot", zone: .any),
+        UpgradeOption(id: "BOOTS", name: "Rain Boots", desc: "No sliding for a rain season", icon: "", iconImage: "rainboots", zone: .mid),
+        UpgradeOption(id: "HEART", name: "Heart Container", desc: "+1 Max HP & heal", icon: "", iconImage: "heart", zone: .any),
+        UpgradeOption(id: "HEARTBOOST", name: "Heart Boost", desc: "Refill all hearts", icon: "", iconImage: "heartBoost", zone: .any),
+        UpgradeOption(id: "VEST", name: "Life Vest", desc: "Float on water once)", icon: "", iconImage: "lifevest", zone: .any),
+        UpgradeOption(id: "AXE", name: "Woodcutter's Axe", desc: "Chops down 1 log/cactus", icon: "",iconImage: "ax", zone: .late),
+        UpgradeOption(id: "SWATTER", name: "Fly Swatter", desc: "Swats 1 dragonfly", icon: "",iconImage: "swatter", zone: .late),
+        UpgradeOption(id: "CROSS", name: "Holy Cross", desc: "Repels 1 ghost", icon: "", iconImage: "cross", zone: .any)
     ]
     
     // Purchasable Upgrades (only appear if unlocked in shop)
-    private let superJumpOption = UpgradeOption(id: "SUPERJUMP", name: "Super Jump", desc: "Double Jump Range + Invincible", icon: "",iconImage: "lightning", zone: .any)
-    private let rocketJumpOption = UpgradeOption(id: "ROCKET", name: "Rocket", desc: "Fly for 7s", icon: "", iconImage: "rocket", zone: .any)
-    private let cannonBallOption = UpgradeOption(id: "CANNONBALL", name: "Cannon Ball", desc: "+1 Cannon Jump", icon: "", iconImage: "bomb", zone: .any)
+    private let superJumpOption = UpgradeOption(id: "SUPERJUMP", name: "Super Jump", desc: "Double jump range + invincible", icon: "",iconImage: "lightning", zone: .any)
+    private let rocketJumpOption = UpgradeOption(id: "ROCKET", name: "Rocket", desc: "Fly for 10s", icon: "", iconImage: "rocket", zone: .any)
+    private let cannonBallOption = UpgradeOption(id: "CANNONBALL", name: "Cannon Ball", desc: "+1 Cannon jump", icon: "", iconImage: "bomb", zone: .any)
     
     // Rare Treasure Chest Upgrades (5% chance each)
     private let doubleSuperJumpTimeOption = UpgradeOption(id: "DOUBLESUPERJUMPTIME", name: "⚡️ Legendary Super Charge", desc: "2x Super Jump Time (Permanent!)", icon: "⚡️", iconImage: "lightning", zone: .any)
-    private let doubleRocketTimeOption = UpgradeOption(id: "DOUBLEROCKETTIME", name: "🚀 Legendary Rocket Fuel", desc: "2x Rocket Time (Permanent!)", icon: "🚀", iconImage: "rocket", zone: .any)
+    private let doubleRocketTimeOption = UpgradeOption(id: "DOUBLEROCKETTIME", name: "🚀 Legendary Rocket Fuel", desc: "2x rocket time (Permanent!)", icon: "🚀", iconImage: "rocket", zone: .any)
     
     private var allOptions: [UpgradeOption] {
         let currentZone: UpgradeZone
@@ -90,8 +90,11 @@ class UpgradeViewController: UIViewController {
             options.append(superJumpOption)
         }
         // Do not allow rockets as an initial upgrade for races
+        // Rockets have a 10% chance to appear
         if PersistenceManager.shared.hasRocketJump && !isForRace {
-            options.append(rocketJumpOption)
+            if Double.random(in: 0...1) < 0.10 {
+                options.append(rocketJumpOption)
+            }
         }
         
         // Add rare upgrades if they haven't been unlocked yet

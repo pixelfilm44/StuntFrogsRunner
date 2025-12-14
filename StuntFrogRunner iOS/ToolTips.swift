@@ -87,6 +87,8 @@ public class ToolTips {
         toolTip.onDismiss = {
             scene.isPaused = false
             overlay.removeFromParent()
+            // Mark this tooltip as shown only after it's been dismissed.
+            UserDefaults.standard.set(true, forKey: defaultsKey)
         }
         
         // Store the final position, then set the initial state for our animation.
@@ -118,9 +120,6 @@ public class ToolTips {
         toolTip.run(animationGroup) {
             scene.isPaused = true
         }
-
-        // Mark this tooltip as shown so it won't appear again.
-        UserDefaults.standard.set(true, forKey: defaultsKey)
     }
 
     /// Resets the tracking for all tooltips, allowing them to be shown again.

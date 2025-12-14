@@ -41,7 +41,7 @@ class SoundManager: NSObject, AVAudioPlayerDelegate {
     }
     
     func preloadSounds() {
-        let sounds = ["jump", "land", "coin", "hit", "splash", "rocket", "ghost", "crocodileMashing", "crocodileRide", "thunder", "gameOver", "ouch", "laser"]
+        let sounds = ["jump", "land", "coin", "hit", "splash", "rocket", "ghost", "crocodileMashing", "crocodileRide", "thunder", "gameOver", "ouch", "laser","eat","splat"]
         for sound in sounds {
             if let url = Bundle.main.url(forResource: sound, withExtension: "mp3") {
                 if let player = try? AVAudioPlayer(contentsOf: url) {

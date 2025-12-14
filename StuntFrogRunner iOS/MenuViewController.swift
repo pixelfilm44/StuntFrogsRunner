@@ -302,13 +302,13 @@ class MenuViewController: UIViewController {
             titleImageView.heightAnchor.constraint(lessThanOrEqualTo: titleAreaGuide.heightAnchor, multiplier: 0.8),
 
             // Help button - top right corner
-            helpButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 32),
+            helpButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
             helpButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -32),
             helpButton.widthAnchor.constraint(equalToConstant: 44),
             helpButton.heightAnchor.constraint(equalToConstant: 44),
             
             // Feedback button - top left corner
-            feedbackButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 32),
+            feedbackButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
             feedbackButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 32),
             feedbackButton.widthAnchor.constraint(equalToConstant: 44),
             feedbackButton.heightAnchor.constraint(equalToConstant: 44),

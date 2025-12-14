@@ -24,6 +24,7 @@ enum FrogAnimationState {
     case jumping
     case recoiling   // Hit by enemy
     case cannon     // Cannon jump
+    case eating     // Eating a fly
 }
 
 // MARK: - Base Entity
@@ -78,6 +79,7 @@ class Frog: GameEntity {
     var isInvincible: Bool = false
     var invincibilityTimer: TimeInterval = 0
     var recoilTimer: TimeInterval = 0  // Timer for recoil animation duration
+    var eatingTimer: TimeInterval = 0  // Timer for eating animation duration
     
     var onPad: Pad?
     var isFloating: Bool = false
@@ -119,6 +121,14 @@ class Frog: GameEntity {
     private static let jumpLvAnimationTextures: [SKTexture] = {
         (1...6).map { SKTexture(imageNamed: "frogJumpLv\($0)") }
     }()
+    
+    // Eating animation textures
+    private static let eatAnimationTextures: [SKTexture] = {
+        (1...5).map { SKTexture(imageNamed: "frogEat\($0)") }
+    }()
+    private static let eatLvAnimationTextures: [SKTexture] = {
+        (1...5).map { SKTexture(imageNamed: "frogLvEat\($0)") }
+    }()
 
     
     // Target heights for frog sprite (aspect ratio preserved automatically)
@@ -126,6 +136,7 @@ class Frog: GameEntity {
     private static let frogJumpingHeight: CGFloat = 80
     private static let frogRecoilHeight: CGFloat = 60
     private static let cannonHeight: CGFloat = 60
+    private static let frogEatHeight: CGFloat = 40
 
     
     /// Sets the frog sprite texture while preserving the image's aspect ratio
@@ -253,6 +264,11 @@ class Frog: GameEntity {
             recoilTimer = max(0, recoilTimer - dt)
         }
         
+        // Update eating timer
+        if eatingTimer > 0 {
+            eatingTimer = max(0, eatingTimer - dt)
+        }
+        
         vestNode.isHidden = (buffs.vest == 0)
         
         if rocketState != .none {
@@ -317,6 +333,31 @@ class Frog: GameEntity {
         invincibilityTimer = 2.0
         isInvincible = true
         recoilTimer = 0.33
+    }
+    
+    /// Plays an eating animation showing the frog eating a fly
+    func playEatingAnimation() {
+        // Set eating timer to control animation state
+        let animationDuration: TimeInterval = 0.45 // 3 frames * 0.15 seconds per frame
+        eatingTimer = animationDuration
+        
+        // Choose textures based on whether the frog is wearing a vest
+        let textures = buffs.vest > 0 ? Frog.eatLvAnimationTextures : Frog.eatAnimationTextures
+        
+        // Create the eating animation
+        let timePerFrame = animationDuration / Double(textures.count)
+        let frameAnimation = SKAction.animate(with: textures, timePerFrame: timePerFrame, resize: false, restore: false)
+        
+        // After the animation completes, return to sitting state
+        let returnToSit = SKAction.run { [weak self] in
+            guard let self = self else { return }
+            self.eatingTimer = 0
+            // The sitting texture will be set by updateAnimationState when eatingTimer reaches 0
+        }
+        SoundManager.shared.play("eat")
+
+        let sequence = SKAction.sequence([frameAnimation, returnToSit])
+        frogSprite.run(sequence, withKey: "eatingAnimation")
     }
     
     /// Plays a drowning animation where the frog sinks underwater and disappears.
@@ -580,8 +621,12 @@ class Frog: GameEntity {
     private func updateAnimationState() {
         let newState: FrogAnimationState
         
-        // Priority 1: Show recoil animation if hit recently
-        if recoilTimer > 0 {
+        // Priority 1: Show eating animation if eating recently
+        if eatingTimer > 0 {
+            newState = .eating
+        }
+        // Priority 2: Show recoil animation if hit recently
+        else if recoilTimer > 0 {
             newState = .recoiling
         } else {
             // Determine animation based on whether the frog is in the air or not.
@@ -600,9 +645,9 @@ class Frog: GameEntity {
         
         // Only update texture or animation if the state has changed.
         if newState != animationState {
-            // If the new state forces a stop (e.g., recoiling), clean up any existing jump animation.
+            // If the new state forces a stop (e.g., recoiling, eating), clean up any existing jump animation.
             // Landing animations are stopped by the land() function itself.
-            if newState == .recoiling {
+            if newState == .recoiling || newState == .eating {
                 frogSprite.removeAction(forKey: "jumpFrameAnimation")
                 bodyNode.removeAction(forKey: "jumpScaleAnimation")
                 bodyNode.setScale(1.0)
@@ -621,6 +666,9 @@ class Frog: GameEntity {
                 setFrogTexture(Frog.recoilTexture, height: Frog.frogRecoilHeight)
             case .cannon:
                 setFrogTexture(Frog.cannonTexture, height: Frog.cannonHeight)
+            case .eating:
+                // Animation is triggered by playEatingAnimation(), so do nothing here.
+                break
             }
         }
     }
@@ -1111,6 +1159,7 @@ class Enemy: GameEntity {
     private var angle: CGFloat = 0.0
     private var currentWeather: WeatherType = .sunny
     private var enemySprite: SKSpriteNode?
+    var isBeingDestroyed: Bool = false  // Flag to prevent multiple collision handling
     
     // Preloaded textures for performance - organized by enemy type and weather
     // BEE variants

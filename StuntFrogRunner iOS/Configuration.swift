@@ -9,7 +9,7 @@ struct Configuration {
         static let frictionGround: CGFloat = 0.8
         static let frictionAir: CGFloat = 0.90
         static let baseJumpZ: CGFloat = 4.0
-        static let maxDragDistance: CGFloat = 150.0  // Reduced from 150 - shorter drag needed for full power
+        static let maxDragDistance: CGFloat = 300.0  // Reduced from 150 - shorter drag needed for full power
         
         static func dragPower(level: Int) -> CGFloat {
             return 0.12 + (CGFloat(level) * 0.0075)  // 0.08 orig
@@ -461,11 +461,11 @@ struct Configuration {
         static let superJumpCost = 500
         static let rocketJumpCost = 500
         static let lifevest4PackCost = 100
-        static let honey4PackCost = 100
+        static let honey4PackCost = 20
         static let cannonJumpCost = 1000
-        static let cross4PackCost = 100
-        static let swatter4PackCost = 100
-        static let axe4PackCost = 100
+        static let cross4PackCost = 20
+        static let swatter4PackCost = 20
+        static let axe4PackCost = 20
     }
     
     struct GameCenter {

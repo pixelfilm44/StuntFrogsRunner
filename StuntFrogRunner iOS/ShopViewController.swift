@@ -253,14 +253,14 @@ class ShopViewController: UIViewController {
             cost = Configuration.Shop.lifevest4PackCost
             maxLevel = -1 // Indicates no max level
             title.text = "Life Vest (4-Pack)"
-            desc.text = "Get a life vest every time you start. You have: \(currentItems)"
+            desc.text = "Get a life vest pack. You have: \(currentItems)"
         case .honeyPack:
             let currentItems = PersistenceManager.shared.honeyItems
             currentLevel = currentItems
             cost = Configuration.Shop.honey4PackCost
             maxLevel = -1 // Indicates no max level
             title.text = "Honey Jars (4-Pack)"
-            desc.text = "Get a honey jar every time you start. You have: \(currentItems)"
+            desc.text = "Get a honey jar pack. You have: \(currentItems)"
         case .crossPack:
             let currentItems = PersistenceManager.shared.crossItems
             currentLevel = currentItems
@@ -281,7 +281,7 @@ class ShopViewController: UIViewController {
             cost = Configuration.Shop.axe4PackCost
             maxLevel = -1 // Indicates no max level
             title.text = "Axes (4-Pack)"
-            desc.text = "Chop through logs. You have: \(currentItems)"
+            desc.text = "Chop through logs/cactus/snakes. You have: \(currentItems)"
         }
         
         let userCoins = PersistenceManager.shared.totalCoins

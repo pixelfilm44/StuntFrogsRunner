@@ -172,6 +172,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         setupAchievementCard()
         setupInput()
         setupRipplePool()
+        HoneyAttackAnimation.initializePool() // PERFORMANCE: Initialize honey projectile pool
+        AxeAttackAnimation.initializePool() // PERFORMANCE: Initialize axe projectile pool
+        SwatterAttackAnimation.initializePool() // PERFORMANCE: Initialize swatter projectile pool
+        CrossAttackAnimation.initializePool() // PERFORMANCE: Initialize cross sprite pool
         preloadTextures() // PERFORMANCE: Preload textures to avoid runtime loading
         startSpawningLeaves()
         //startSpawningFlotsam()
@@ -2103,6 +2107,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         guard !isGameEnding else { return }
         isGameEnding = true
         
+        // Stop weather sound effects when the race ends
+        SoundManager.shared.stopWeatherSFX(fadeDuration: 0.5)
+        
         var coinsWon = coinsCollectedThisRun
         self.raceResult = result
         
@@ -2299,6 +2306,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         self.currentWeather = type
         if type == .rain {
+            // Show the rain tooltip when entering rain weather
+            ToolTips.showToolTip(forKey: "rain", in: self)
+            
             // If instant transition (duration 0), activate rain effect immediately
             if rainSlipperyDelay == 0 {
                 frog.isRainEffectActive = true
@@ -2366,9 +2376,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
         
         // Stop previous weather SFX before starting new one
-        if actualDuration > 0 {
-            SoundManager.shared.stopWeatherSFX(fadeDuration: actualDuration)
-        }
+        // Always stop, regardless of duration (for instant transitions too)
+        SoundManager.shared.stopWeatherSFX(fadeDuration: actualDuration > 0 ? actualDuration : 0.0)
         SoundManager.shared.playWeatherSFX(sfx, fadeDuration: actualDuration)
         // --- In-World Object Transitions ---
         for pad in pads {
@@ -3299,6 +3308,17 @@ class GameScene: SKScene, CollisionManagerDelegate {
             SoundManager.shared.play("hit")
             return
         }
+        
+        // Super jump destroys logs (chopped) without using axes
+        if frog.isSuperJumping && pad.type == .log {
+            pad.removeFromParent()
+            if let idx = pads.firstIndex(of: pad) { pads.remove(at: idx) }
+            HapticsManager.shared.playNotification(.success)
+            VFXManager.shared.spawnDebris(at: pad.position, in: self, color: .brown, intensity: 1.5)
+            SoundManager.shared.play("hit")
+            return
+        }
+        
         if pad.type == .log && frog.buffs.axe > 0 {
             frog.buffs.axe -= 1
             pad.removeFromParent()
@@ -3361,6 +3381,17 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Real-time challenge updates
         ChallengeManager.shared.recordPadLanded(totalThisRun: padsLandedThisRun)
         ChallengeManager.shared.recordConsecutiveJumps(count: consecutiveJumps)
+        
+        // 20% chance to grant super jump on landing
+        if frog.buffs.superJumpTimer <= 0 && Double.random(in: 0...1) < 0.20 {
+            let baseDuration = Configuration.GameRules.superJumpDuration
+            frog.buffs.superJumpTimer = PersistenceManager.shared.hasDoubleSuperJumpTime ? baseDuration * 2 : baseDuration
+            SoundManager.shared.playMusic(.superJump)
+            HapticsManager.shared.playNotification(.success)
+            
+            // Show visual feedback
+            VFXManager.shared.spawnSparkles(at: frog.position, in: self)
+        }
         
         // Spawn ghost when frog disturbs a grave
         if pad.type == .grave && !pad.hasSpawnedGhost {
@@ -3518,6 +3549,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Create water splash particles going upward
         spawnDrowningSplash(at: frog.position)
         
+        // Stop weather sound effects
+        SoundManager.shared.stopWeatherSFX(fadeDuration: 0.5)
+        
         // Play the frog's drowning animation (sinks and disappears)
         frog.playDrowningAnimation { [weak self] in
             guard let self = self else { return }
@@ -3580,6 +3614,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
             
             let group = SKAction.group([floatAction, rotation, fadeOut])
             
+            // Stop weather sound effects
+            SoundManager.shared.stopWeatherSFX(fadeDuration: 0.5)
+            
             print("🚀 Running float animation")
             frog.run(group) { [weak self] in
                 guard let self = self else { return }
@@ -3617,6 +3654,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         frog.velocity = .zero
         frog.zVelocity = 0
         
+        // Stop weather sound effects
+        SoundManager.shared.stopWeatherSFX(fadeDuration: 0.5)
+        
         // Play the game over sound
         SoundManager.shared.play("gameOver")
         
@@ -3633,6 +3673,21 @@ class GameScene: SKScene, CollisionManagerDelegate {
             }
             self.run(SKAction.sequence([delay, showGameOver]))
         }
+    }
+    
+    /// Makes an enemy fly away when destroyed by super jump
+    private func makeEnemyFlyAway(_ enemy: SKNode) {
+        // Create a fly-away animation
+        let moveUp = SKAction.moveBy(x: CGFloat.random(in: -100...100), y: 300, duration: 0.6)
+        let fadeOut = SKAction.fadeOut(withDuration: 0.4)
+        let rotate = SKAction.rotate(byAngle: CGFloat.random(in: -CGFloat.pi...CGFloat.pi) * 2, duration: 0.6)
+        let scale = SKAction.scale(to: 0.3, duration: 0.6)
+        
+        // Combine all animations
+        let flyAway = SKAction.group([moveUp, fadeOut, rotate, scale])
+        let remove = SKAction.removeFromParent()
+        
+        enemy.run(SKAction.sequence([flyAway, remove]))
     }
     
     /// Creates expanding concentric ripples at the drowning location
@@ -3773,6 +3828,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
     func didCrash(into enemy: Enemy) {
         guard !isGameEnding else { return }
         
+        // DON'T check isBeingDestroyed here - it's already set in CollisionManager
+        // and we need to process the collision once
+        
         if frog.isCannonJumping {
             enemy.removeFromParent()
             if let idx = enemies.firstIndex(of: enemy) { enemies.remove(at: idx) }
@@ -3783,34 +3841,53 @@ class GameScene: SKScene, CollisionManagerDelegate {
             return
         }
         
-        if frog.isInvincible { return }
-        if enemy.type == "DRAGONFLY" && frog.buffs.swatter > 0 {
-            frog.buffs.swatter -= 1
-            enemy.removeFromParent()
+        // Super jump destroys enemies by making them fly away
+        if frog.isSuperJumping {
+            // Make enemy fly away with animation
+            makeEnemyFlyAway(enemy)
+            
+            // Remove from array
             if let idx = enemies.firstIndex(of: enemy) { enemies.remove(at: idx) }
+            
+            // Play feedback
             HapticsManager.shared.playNotification(.success)
             ChallengeManager.shared.recordEnemyDefeated()
-            updateBuffsHUD()
+            SoundManager.shared.play("hit")
             return
         }
+        
+        // IMPORTANT: Check GHOST + CROSS first, BEFORE invincibility check
+        // This way the cross protects the frog from taking damage
         if enemy.type == "GHOST" && frog.buffs.cross > 0 {
+            print("✝️ GHOST + CROSS collision! Starting animation...")
+            
+            // Use animated cross banishment instead of instant removal
+            CrossAttackAnimation.executeAttack(frog: frog, ghost: enemy) { [weak self] in
+                guard let self = self else { return }
+                print("✅ Cross animation complete, removing ghost from array")
+                // Remove enemy from array after animation completes
+                if let idx = self.enemies.firstIndex(of: enemy) {
+                    self.enemies.remove(at: idx)
+                }
+            }
+            
+            // Decrement cross count
             frog.buffs.cross -= 1
-            enemy.removeFromParent()
-            if let idx = enemies.firstIndex(of: enemy) { enemies.remove(at: idx) }
+            print("✝️ Cross used! Remaining: \(frog.buffs.cross)")
+            
+            // Play feedback
             HapticsManager.shared.playNotification(.success)
             ChallengeManager.shared.recordEnemyDefeated()
             updateBuffsHUD()
-            return
+            return  // IMPORTANT: Return here so frog doesn't take damage!
         }
-        if enemy.type == "BEE" && frog.buffs.honey > 0 {
-            frog.buffs.honey -= 1
-            enemy.removeFromParent()
-            if let idx = enemies.firstIndex(of: enemy) { enemies.remove(at: idx) }
-            HapticsManager.shared.playNotification(.success)
-            ChallengeManager.shared.recordEnemyDefeated()
-            updateBuffsHUD()
-            return
-        }
+        
+        if frog.isInvincible { return }
+        
+        // NOTE: Swatter, Honey, Axe, and Cross attacks are handled by CollisionManager
+        // and should never reach here. This is only for direct collisions.
+        
+        // If we reach here with a bee/dragonfly/ghost, the frog takes damage
         SoundManager.shared.play("ouch")
         HapticsManager.shared.playImpact(.heavy)
         frog.currentHealth -= 1
@@ -3863,6 +3940,23 @@ class GameScene: SKScene, CollisionManagerDelegate {
             HapticsManager.shared.playNotification(.success)
             ChallengeManager.shared.recordEnemyDefeated()
             VFXManager.shared.spawnDebris(at: snake.position, in: self, color: .green, intensity: 1.0)
+            SoundManager.shared.play("hit")
+            return
+        }
+        
+        // Super jump destroys snakes by making them fly away
+        if frog.isSuperJumping {
+            snake.isDestroyed = true
+            
+            // Make snake fly away with animation
+            makeEnemyFlyAway(snake)
+            
+            // Remove from array
+            if let idx = snakes.firstIndex(of: snake) { snakes.remove(at: idx) }
+            
+            // Play feedback
+            HapticsManager.shared.playNotification(.success)
+            ChallengeManager.shared.recordEnemyDefeated()
             SoundManager.shared.play("hit")
             return
         }
@@ -3922,6 +4016,22 @@ class GameScene: SKScene, CollisionManagerDelegate {
             HapticsManager.shared.playNotification(.success)
             ChallengeManager.shared.recordEnemyDefeated()
             VFXManager.shared.spawnDebris(at: cactusWorldPos, in: self, color: .green, intensity: 1.0)
+            SoundManager.shared.play("hit")
+            return
+        }
+        
+        // Super jump destroys cacti (chopped) without using axes
+        if frog.isSuperJumping {
+            cactus.isDestroyed = true
+            cactus.destroy()
+            
+            // Remove from array
+            if let idx = cacti.firstIndex(of: cactus) { cacti.remove(at: idx) }
+            
+            // Play feedback with brown debris (chopped effect)
+            HapticsManager.shared.playNotification(.success)
+            ChallengeManager.shared.recordEnemyDefeated()
+            VFXManager.shared.spawnDebris(at: cactusWorldPos, in: self, color: .brown, intensity: 0.8)
             SoundManager.shared.play("hit")
             return
         }
@@ -3988,20 +4098,21 @@ class GameScene: SKScene, CollisionManagerDelegate {
     func didCollect(fly: Fly) {
         guard !isGameEnding else { return }
         
+        // Play eating animation
+        frog.playEatingAnimation()
+        
         // Only heal if the frog has an empty heart slot
         if frog.currentHealth < frog.maxHealth {
             frog.currentHealth += 1
             drawHearts()
             
-            // Play healing sound and haptics
-            SoundManager.shared.play("coin")  // Use coin sound or create a unique "heal" sound
+           
             HapticsManager.shared.playNotification(.success)
             
             // Show healing indicator
             showHealingIndicator(at: fly.position)
         } else {
             // Already at full health - still play feedback but no heal
-            SoundManager.shared.play("coin")
             HapticsManager.shared.playNotification(.success)
         }
         
@@ -4053,7 +4164,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         applyTreasureChestReward(reward)
         
         // Play celebration effects
-        SoundManager.shared.play("coin")  // TODO: Add a unique chest sound if desired
+        SoundManager.shared.play("treasure")  // TODO: Add a unique chest sound if desired
         HapticsManager.shared.playNotification(.success)
         
         // Show floating reward notification
@@ -4085,16 +4196,29 @@ class GameScene: SKScene, CollisionManagerDelegate {
         rewardLabel.text = "\(reward.icon) \(reward.displayName)"
         rewardLabel.fontSize = Configuration.Fonts.treasureReward.size
         rewardLabel.fontColor = .yellow
-        rewardLabel.position = CGPoint(x: position.x, y: position.y + 30)
+        rewardLabel.position = CGPoint(x: position.x + 10, y: position.y + 30)
         rewardLabel.zPosition = Layer.ui
         
-        // Add background for readability
-        let bgSize = CGSize(width: 180, height: 40)
-        let bgNode = SKShapeNode(rectOf: bgSize, cornerRadius: 10)
-        bgNode.fillColor = .black.withAlphaComponent(0.7)
-        bgNode.strokeColor = .yellow
-        bgNode.lineWidth = 2
+        // Add background using treasureBackdrop.png
+        let bgNode = SKSpriteNode(imageNamed: "treasureBackdrop.png")
         bgNode.zPosition = -1
+        
+        // Limit the modal width to fit on screen (max 80% of screen width)
+        let maxWidth = size.width * 0.8
+        let labelWidth = rewardLabel.frame.width + 40 // Add some padding
+        
+        // Scale the background to fit the label with constraints
+        let targetWidth = min(labelWidth, maxWidth)
+        let scaleX = targetWidth / bgNode.size.width
+        
+        // Keep aspect ratio for height, but limit it too
+        let maxHeight = size.height * 0.3
+        let targetHeight = min(bgNode.size.height * scaleX, maxHeight)
+        let scaleY = targetHeight / bgNode.size.height
+        
+        bgNode.xScale = scaleX
+        bgNode.yScale = scaleY
+        
         rewardLabel.addChild(bgNode)
         
         worldNode.addChild(rewardLabel)
@@ -4356,6 +4480,113 @@ class GameScene: SKScene, CollisionManagerDelegate {
         ChallengeManager.shared.recordEnemyDefeated()
     }
     
+    func didDestroyEnemyWithHoney(_ enemy: Enemy) {
+        // Remove the enemy from the array (visual removal happens in animation)
+        if let idx = enemies.firstIndex(of: enemy) {
+            enemies.remove(at: idx)
+        }
+        
+        // Update the buffs HUD to reflect the honey count change
+        updateBuffsHUD()
+        
+        // Play honey impact sound and haptics
+        SoundManager.shared.play("splat") // Use collect sound for honey hit
+        HapticsManager.shared.playImpact(.medium)
+        
+        // Track for challenges
+        ChallengeManager.shared.recordEnemyDefeated()
+        
+        // Optional: Spawn honey-colored debris/particles
+        let honeyColor = UIColor(red: 1.0, green: 0.85, blue: 0.3, alpha: 1.0)
+        VFXManager.shared.spawnDebris(at: enemy.position, in: self, color: honeyColor, intensity: 0.6)
+    }
+    
+    func didDestroyDragonflyWithSwatter(_ dragonfly: Enemy) {
+        // Remove the dragonfly from the array (visual removal happens in animation)
+        if let idx = enemies.firstIndex(of: dragonfly) {
+            enemies.remove(at: idx)
+        }
+        
+        // Update the buffs HUD to reflect the swatter count change
+        updateBuffsHUD()
+        
+        // Play swatter impact sound and haptics
+        SoundManager.shared.play("hit")
+        HapticsManager.shared.playImpact(.medium)
+        
+        // Track for challenges
+        ChallengeManager.shared.recordEnemyDefeated()
+        
+        // Spawn dragonfly-colored debris/particles
+        let dragonflyColor = UIColor(red: 0.2, green: 0.6, blue: 0.8, alpha: 1.0) // Blue-ish
+        VFXManager.shared.spawnDebris(at: dragonfly.position, in: self, color: dragonflyColor, intensity: 0.6)
+    }
+    
+    // MARK: - Axe Attack Delegate Methods
+    
+    func didDestroySnakeWithAxe(_ snake: Snake) {
+        // Remove from array
+        if let idx = snakes.firstIndex(of: snake) {
+            snakes.remove(at: idx)
+        }
+        
+        // Audio & haptics
+        SoundManager.shared.play("hit")
+        HapticsManager.shared.playImpact(.medium)
+        
+        // Spawn green debris
+        let snakeColor = UIColor(red: 0.2, green: 0.6, blue: 0.3, alpha: 1.0)
+        VFXManager.shared.spawnDebris(at: snake.position, in: self, color: snakeColor, intensity: 0.8)
+        
+        // Track for challenges
+        ChallengeManager.shared.recordEnemyDefeated()
+        
+        print("🪓 Snake destroyed with axe!")
+    }
+    
+    func didDestroyCactusWithAxe(_ cactus: Cactus) {
+        // Remove from array
+        if let idx = cacti.firstIndex(of: cactus) {
+            cacti.remove(at: idx)
+        }
+        
+        // Audio & haptics
+        SoundManager.shared.play("hit")
+        HapticsManager.shared.playImpact(.medium)
+        
+        // Spawn light green debris (get world position from parent)
+        if let parentPad = cactus.parent as? SKNode {
+            let worldPos = parentPad.convert(cactus.position, to: self)
+            let cactusColor = UIColor(red: 0.3, green: 0.7, blue: 0.3, alpha: 1.0)
+            VFXManager.shared.spawnDebris(at: worldPos, in: self, color: cactusColor, intensity: 0.8)
+        }
+        
+        // Track for challenges (optional - if you track cactus destruction)
+        // ChallengeManager.shared.recordCactusDestroyed()
+        
+        print("🪓 Cactus destroyed with axe!")
+    }
+    
+    func didDestroyLogWithAxe(_ log: Pad) {
+        // Remove from array
+        if let idx = pads.firstIndex(of: log) {
+            pads.remove(at: idx)
+        }
+        
+        // Audio & haptics (heavier for logs)
+        SoundManager.shared.play("hit")
+        HapticsManager.shared.playImpact(.heavy)
+        
+        // Spawn brown debris
+        let logColor = UIColor(red: 0.6, green: 0.4, blue: 0.2, alpha: 1.0)
+        VFXManager.shared.spawnDebris(at: log.position, in: self, color: logColor, intensity: 0.9)
+        
+        // Track for challenges (optional - if you track log destruction)
+        // ChallengeManager.shared.recordLogDestroyed()
+        
+        print("🪓 Log destroyed with axe!")
+    }
+    
     func crocodileDidDestroy(snake: Snake) {
         // Remove the snake that the crocodile destroyed
         snake.destroy()
@@ -4490,8 +4721,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // Calculate start relative to frog's current position
         let start = CGPoint(x: frog.position.x + offset.x, y: frog.position.y + offset.y)
-        let dx = start.x - current.x
-        let dy = start.y - current.y
+        var dx = start.x - current.x
+        var dy = start.y - current.y
         let dist = sqrt(dx*dx + dy*dy)
         if dist < 10 {
             // If jump was cancelled, and cannon was armed, de-arm it.
@@ -4502,6 +4733,14 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
         
         let maxDist = Configuration.Physics.maxDragDistance
+        
+        // Clamp the drag vector to max distance to prevent super-long pulls
+        if dist > maxDist {
+            let clampRatio = maxDist / dist
+            dx *= clampRatio
+            dy *= clampRatio
+        }
+        
         let ratio = min(dist, maxDist) / maxDist
         let power = Configuration.Physics.dragPower(level: PersistenceManager.shared.jumpLevel)
         
@@ -4572,8 +4811,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // Calculate dragStart relative to frog's current position (follows moving platforms)
         let start = CGPoint(x: frog.position.x + offset.x, y: frog.position.y + offset.y)
-        let dx = start.x - current.x
-        let dy = start.y - current.y
+        var dx = start.x - current.x
+        var dy = start.y - current.y
         let dist = sqrt(dx*dx + dy*dy)
         
         // Hide visuals if drag is too small
@@ -4587,6 +4826,13 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
         
         let maxDist = Configuration.Physics.maxDragDistance
+        
+        // Clamp the drag vector to max distance to prevent super-long pulls
+        if dist > maxDist {
+            let clampRatio = maxDist / dist
+            dx *= clampRatio
+            dy *= clampRatio
+        }
         
         // Haptic feedback for pulling back
         let hapticStepThreshold: CGFloat = 30.0

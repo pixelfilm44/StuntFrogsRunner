@@ -26,21 +26,12 @@ class ChallengesViewController: UIViewController {
         return label
     }()
     
-    private lazy var segmentedControl: UISegmentedControl = {
-        let control = UISegmentedControl(items: ["In Progress", "Completed"])
-        control.selectedSegmentIndex = 0
-        control.backgroundColor = .blue
-        
-        
-        
-        // Set divider image (use a 1x1 transparent image to hide it)
-        let dividerImage = UIImage()
-        control.setDividerImage(dividerImage, forLeftSegmentState: .normal, rightSegmentState: .normal, barMetrics: .default)
-        
-        control.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .normal)
-        control.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .selected)
-        control.addTarget(self, action: #selector(segmentChanged), for: .valueChanged)
+    private lazy var segmentedControl: ImageSegmentControl = {
+        let control = ImageSegmentControl()
         control.translatesAutoresizingMaskIntoConstraints = false
+        control.onSegmentChanged = { [weak self] selectedIndex in
+            self?.segmentChanged(selectedIndex: selectedIndex)
+        }
         return control
     }()
     
@@ -68,6 +59,7 @@ class ChallengesViewController: UIViewController {
     }()
     
     private var displayedChallenges: [Challenge] = []
+    private var currentSelectedIndex: Int = 0
     
     // MARK: - Lifecycle
     
@@ -119,8 +111,9 @@ class ChallengesViewController: UIViewController {
     
     // MARK: - Actions
     
-    @objc private func segmentChanged() {
-        refreshChallenges()
+    private func segmentChanged(selectedIndex: Int) {
+        currentSelectedIndex = selectedIndex
+        refreshChallenges(selectedIndex: selectedIndex)
     }
     
     @objc private func handleBack() {
@@ -128,8 +121,10 @@ class ChallengesViewController: UIViewController {
         coordinator?.showMenu(animated: true)
     }
     
-    private func refreshChallenges() {
-        if segmentedControl.selectedSegmentIndex == 0 {
+    private func refreshChallenges(selectedIndex: Int? = nil) {
+        let index = selectedIndex ?? currentSelectedIndex
+        currentSelectedIndex = index
+        if index == 0 {
             displayedChallenges = ChallengeManager.shared.inProgressChallenges
         } else {
             displayedChallenges = ChallengeManager.shared.completedChallenges
@@ -247,7 +242,7 @@ class ChallengeCell: UITableViewCell {
     private let rewardLabel: UILabel = {
         let label = UILabel()
         label.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
-        label.textColor = UIColor.orange
+        label.textColor = UIColor.blue
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
