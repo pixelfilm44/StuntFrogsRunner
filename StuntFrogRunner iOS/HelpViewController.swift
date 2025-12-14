@@ -20,44 +20,45 @@ class HelpViewController: UIViewController {
         HelpSlide(
             title: "Welcome!",
             description: "You're a stunt frog superstar! Your goal is to run as far as you can while avoiding obstacles and collecting coins and eating flies for hearts.",
-            imageName: "stuntfrogProfile",
+            imageName: "stuntfrog",
             emoji: ""
         ),
         HelpSlide(
             title: "Sling away",
-            description: "Pull back on the frog to jump over obstacles and land on lilypads. Time your jumps carefully to avoid the water. This frog can't swim.",
+            description: "Pull back on the frog to jump over obstacles and land on lilypads. Time your jumps carefully to avoid the water.",
             imageName: "point",
+            emoji: ""
+        ),
+        HelpSlide(
+            title: "Don't get wet",
+            description: "This frog can't swim. It was tramatized as a tadpole.",
+            imageName: "cantswim",
             emoji: ""
         ),
         HelpSlide(
             title: "Collect Coins",
             description: "Grab coins along the way to spend in the shop on upgrades and power-ups.",
-            imageName: "star",
+            imageName: "fishing",
             emoji: ""
         ),
         HelpSlide(
             title: "Avoid Obstacles",
             description: "Watch out for logs, bees, dragonflies and other hazards. Each hit costs you health!",
-            imageName: "bee",
+            imageName: "avoidObstacles",
             emoji: ""
         ),
-        HelpSlide(
-            title: "Super Jump!",
-            description: "Grab the lightning bolt power-up to double your jump power and become invincible. Keep an eye on the timer!",
-            imageName: "lightning",
-            emoji: ""
-        ),
+       
         HelpSlide(
             title: "Upgrades",
             description: "Visit the shop to upgrade your jump and health. Complete challenges for bonus rewards!",
-            imageName: nil,
-            emoji: "⬆️"
+            imageName: "upgrade",
+            emoji: ""
         ),
         HelpSlide(
             title: "Special Thanks",
             description: "Thank you to Ellie Mielke, Jeff StLaurent, and Anthony Caccese for their valuable feedback on this game!",
-            imageName: nil,
-            emoji: "🙏"
+            imageName: "heart",
+            emoji: ""
         )
     ]
     
@@ -259,7 +260,7 @@ class HelpViewController: UIViewController {
         // Title label
         let titleLabel = UILabel()
         titleLabel.text = slide.title
-        titleLabel.font = UIFont.systemFont(ofSize: 28, weight: .heavy)
+        titleLabel.font = UIFont.systemFont(ofSize: 24, weight: .heavy)
         titleLabel.textColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
         titleLabel.textAlignment = .center
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -267,7 +268,7 @@ class HelpViewController: UIViewController {
         // Description label
         let descriptionLabel = UILabel()
         descriptionLabel.text = slide.description
-        descriptionLabel.font = UIFont.systemFont(ofSize: 17, weight: .medium)
+        descriptionLabel.font = UIFont.systemFont(ofSize: 16, weight: .light)
         descriptionLabel.textColor = .white
         descriptionLabel.textAlignment = .center
         descriptionLabel.numberOfLines = 0
@@ -279,9 +280,9 @@ class HelpViewController: UIViewController {
         
         NSLayoutConstraint.activate([
             visualView.centerXAnchor.constraint(equalTo: slideContainer.centerXAnchor),
-            visualView.topAnchor.constraint(equalTo: slideContainer.topAnchor, constant: 20),
-            visualView.heightAnchor.constraint(equalToConstant: 72),
-            visualView.widthAnchor.constraint(lessThanOrEqualToConstant: 72),
+            visualView.topAnchor.constraint(equalTo: slideContainer.topAnchor, constant: 10),
+            visualView.heightAnchor.constraint(equalToConstant: 200),
+            visualView.widthAnchor.constraint(lessThanOrEqualToConstant: 200),
             
             titleLabel.centerXAnchor.constraint(equalTo: slideContainer.centerXAnchor),
             titleLabel.topAnchor.constraint(equalTo: visualView.bottomAnchor, constant: 15),

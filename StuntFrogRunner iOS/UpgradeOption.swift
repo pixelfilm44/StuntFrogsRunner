@@ -86,9 +86,8 @@ class UpgradeViewController: UIViewController {
             options.removeAll { $0.id == "HEART" }
         }
         
-        if PersistenceManager.shared.hasSuperJump {
-            options.append(superJumpOption)
-        }
+        // Note: Super Jump is NOT added to regular pool - it only appears via the 20% special chance in generateOptions()
+        
         // Do not allow rockets as an initial upgrade for races
         // Rockets have a 10% chance to appear
         if PersistenceManager.shared.hasRocketJump && !isForRace {
@@ -213,63 +212,82 @@ class UpgradeViewController: UIViewController {
         var chance1: Double = 0
         var chance2: Double = 0
         
+        // 20% chance to offer Super Jump if the player has Super Jump unlocked
+        let shouldOfferSuperJump = PersistenceManager.shared.hasSuperJump && Double.random(in: 0...1) < 0.2
+        
         // 20% chance to offer a Cannon Ball if the player has Cannon Jump unlocked
         let shouldOfferCannonball = PersistenceManager.shared.hasCannonJump && Double.random(in: 0...1) < 0.2
         
-        if shouldOfferCannonball {
-            option1 = cannonBallOption
-            // Get a second option from the main pool. Force unwrap is safe
-            // because `allOptions` will have many items.
+        if shouldOfferSuperJump && shouldOfferCannonball {
+            // Both special options triggered - offer both
+            option1 = superJumpOption
+            option2 = cannonBallOption
+            
+            chance1 = calculateChance(for: option1, inPool: options, specialOffered: true)
+            chance2 = calculateChance(for: option2, inPool: options, specialOffered: true)
+        } else if shouldOfferSuperJump {
+            // Offer super jump and one regular option
+            option1 = superJumpOption
             option2 = options.shuffled().first!
             
-            // Cannonball has 20% chance to appear, then 50% chance to be shown (left or right)
-            chance1 = calculateChance(for: option1, inPool: options, cannonballOffered: true)
-            chance2 = calculateChance(for: option2, inPool: options, cannonballOffered: true)
+            chance1 = calculateChance(for: option1, inPool: options, specialOffered: true)
+            chance2 = calculateChance(for: option2, inPool: options, specialOffered: true)
+        } else if shouldOfferCannonball {
+            // Offer cannonball and one regular option
+            option1 = cannonBallOption
+            option2 = options.shuffled().first!
+            
+            chance1 = calculateChance(for: option1, inPool: options, specialOffered: true)
+            chance2 = calculateChance(for: option2, inPool: options, specialOffered: true)
         } else {
             // Pick 2 distinct random options
             let shuffled = options.shuffled()
             option1 = shuffled[0]
             option2 = shuffled[1]
             
-            chance1 = calculateChance(for: option1, inPool: options, cannonballOffered: false)
-            chance2 = calculateChance(for: option2, inPool: options, cannonballOffered: false)
+            chance1 = calculateChance(for: option1, inPool: options, specialOffered: false)
+            chance2 = calculateChance(for: option2, inPool: options, specialOffered: false)
         }
         
         let card1 = createCard(for: option1, chance: chance1)
         let card2 = createCard(for: option2, chance: chance2)
         
-        // Randomize the order so the cannonball isn't always on the left
+        // Randomize the order so special options aren't always on the left
         let cards = [card1, card2].shuffled()
         stackView.addArrangedSubview(cards[0])
         stackView.addArrangedSubview(cards[1])
     }
     
     /// Calculate the probability of seeing a specific upgrade option
-    private func calculateChance(for option: UpgradeOption, inPool pool: [UpgradeOption], cannonballOffered: Bool) -> Double {
+    private func calculateChance(for option: UpgradeOption, inPool pool: [UpgradeOption], specialOffered: Bool) -> Double {
+        let hasSuperJump = PersistenceManager.shared.hasSuperJump
         let hasCannonball = PersistenceManager.shared.hasCannonJump
+        let superJumpChance = 0.2
         let cannonballChance = 0.2
         
+        if option.id == "SUPERJUMP" {
+            // Super Jump: 20% chance it's offered
+            return superJumpChance * 1.0
+        }
+        
         if option.id == "CANNONBALL" {
-            // Cannonball: 20% chance it's offered, then 100% chance it appears as one of the two options
+            // Cannonball: 20% chance it's offered
             return cannonballChance * 1.0
         }
         
         // For regular options in the pool
         let poolSize = Double(pool.count)
         
-        if hasCannonball && cannonballOffered {
-            // When cannonball is offered (20% of the time):
-            // This option is the "other" choice, so 100% chance if selected from pool
-            return cannonballChance * 1.0
-        } else if hasCannonball && !cannonballOffered {
-            // When cannonball is NOT offered (80% of the time):
-            // This option has 2 chances out of poolSize to be selected
-            let noCannonballChance = 1.0 - cannonballChance
-            let selectionChance = 2.0 / poolSize
-            return noCannonballChance * selectionChance
+        if specialOffered {
+            // When a special option is offered (super jump or cannonball):
+            // This option is the "other" choice
+            return (hasSuperJump ? superJumpChance : 0.0) + (hasCannonball ? cannonballChance : 0.0)
         } else {
-            // No cannonball unlock: simple 2 out of poolSize
-            return 2.0 / poolSize
+            // When no special options are offered:
+            // Calculate the probability considering both special options could have appeared
+            let noSpecialsChance = (1.0 - (hasSuperJump ? superJumpChance : 0.0)) * (1.0 - (hasCannonball ? cannonballChance : 0.0))
+            let selectionChance = 2.0 / poolSize
+            return noSpecialsChance * selectionChance
         }
     }
     

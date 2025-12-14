@@ -42,6 +42,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private let crosshairNode = SKShapeNode(circleOfRadius: 10)
     let weatherNode = SKNode()
     private let leafNode = SKNode()
+    private let plantLeftNode = SKNode()
+    private let plantRightNode = SKNode()
     private let waterLinesNode = SKNode()
     private let waterTilesNode = SKNode()
     private var waterTileSize = CGSize.zero
@@ -178,6 +180,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         CrossAttackAnimation.initializePool() // PERFORMANCE: Initialize cross sprite pool
         preloadTextures() // PERFORMANCE: Preload textures to avoid runtime loading
         startSpawningLeaves()
+        setupPlantDecorations() // Setup decorative plants on screen edges
         //startSpawningFlotsam()
         collisionManager.delegate = self
         startGame()
@@ -197,7 +200,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let textureNames = [
             "water", "waterNight", "waterSand",
             "star", // coin icon
-            "cannon"
+            "cannon",
+            "plantLeft", "plantRight" // plant decorations
         ]
         
         // Preload all textures asynchronously
@@ -226,6 +230,13 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Add leaf effect node, attached to camera for screen-space effect
         leafNode.zPosition = 50 // Above the game world, but below most UI.
         cam.addChild(leafNode)
+        
+        // Add plant decoration nodes, attached to camera for screen-space effect
+        plantLeftNode.zPosition = 45 // Behind leaves, to create depth
+        cam.addChild(plantLeftNode)
+        
+        plantRightNode.zPosition = 45 // Behind leaves, to create depth
+        cam.addChild(plantRightNode)
         
         // Add flotsam node
         flotsamNode.zPosition = Layer.water + 2 // Above leaves, below pads
@@ -382,6 +393,99 @@ class GameScene: SKScene, CollisionManagerDelegate {
             SKAction.group([moveAction, spinAction, tumbleForever]),
             removeAction
         ]))
+    }
+    
+    // MARK: - Plant Decoration
+    
+    /// Start spawning decorative plants on the left and right sides of the screen
+    private func setupPlantDecorations() {
+        spawnPlantLeft()
+        spawnPlantRight()
+    }
+    
+    /// Spawn a decorative plant on the left side of the screen
+    private func spawnPlantLeft() {
+        // Clear existing plants
+        plantLeftNode.removeAllChildren()
+        
+        let plantImages = ["plantLeft"] // You can add more variations if available
+        guard let plantImage = plantImages.randomElement() else { return }
+        
+        let plant = SKSpriteNode(imageNamed: plantImage)
+        
+        // Position on the left side of the screen
+        let screenWidth = size.width
+        let screenHeight = size.height
+        
+        // Scale the plant to be appropriately sized
+        let randomScale = CGFloat.random(in: 0.3...0.5)
+        plant.setScale(randomScale)
+        plant.alpha = 0.8 // Slightly transparent to not obstruct gameplay
+        
+        // Position at bottom-left corner
+        plant.position = CGPoint(
+            x: -screenWidth / 2 + plant.size.width / 2 - 100,
+            y: -screenHeight / 2 + plant.size.height / 2
+        )
+        plant.anchorPoint = CGPoint(x: 0.5, y: 0)
+        plant.zPosition = 0
+        
+        plantLeftNode.addChild(plant)
+        
+        // Add subtle swaying animation for visual interest
+        addSwayingAnimation(to: plant)
+    }
+    
+    /// Spawn a decorative plant on the right side of the screen
+    private func spawnPlantRight() {
+        // Clear existing plants
+        plantRightNode.removeAllChildren()
+        
+        let plantImages = ["plantRight"] // You can add more variations if available
+        guard let plantImage = plantImages.randomElement() else { return }
+        
+        let plant = SKSpriteNode(imageNamed: plantImage)
+        
+        // Position on the right side of the screen
+        let screenWidth = size.width
+        let screenHeight = size.height
+        
+        // Scale the plant to be appropriately sized
+        let randomScale = CGFloat.random(in: 0.3...0.5)
+        plant.setScale(randomScale)
+        plant.alpha = 0.8 // Slightly transparent to not obstruct gameplay
+        
+        // Position at bottom-right corner
+        plant.position = CGPoint(
+            x: screenWidth / 2 - plant.size.width / 2 + 100,
+            y: -screenHeight / 2 + plant.size.height / 2
+        )
+        plant.anchorPoint = CGPoint(x: 0.5, y: 0)
+        plant.zPosition = 0
+        
+        plantRightNode.addChild(plant)
+        
+        // Add subtle swaying animation for visual interest
+        addSwayingAnimation(to: plant)
+    }
+    
+    /// Add a subtle swaying animation to a plant sprite
+    /// - Parameter plant: The plant sprite to animate
+    private func addSwayingAnimation(to plant: SKSpriteNode) {
+        // Gentle rotation to simulate wind
+        let swayAmount: CGFloat = 0.05 // Small angle in radians (~3 degrees)
+        let swayDuration: TimeInterval = 2.0 + TimeInterval.random(in: -0.5...0.5)
+        
+        let swayRight = SKAction.rotate(toAngle: swayAmount, duration: swayDuration / 2)
+        swayRight.timingMode = .easeInEaseOut
+        
+        let swayLeft = SKAction.rotate(toAngle: -swayAmount, duration: swayDuration / 2)
+        swayLeft.timingMode = .easeInEaseOut
+        
+        let swaySequence = SKAction.sequence([swayRight, swayLeft])
+        let swayForever = SKAction.repeatForever(swaySequence)
+        
+        plant.run(swayForever, withKey: "swayAnimation")
     }
     
     private func startSpawningFlotsam() {
@@ -3382,17 +3486,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         ChallengeManager.shared.recordPadLanded(totalThisRun: padsLandedThisRun)
         ChallengeManager.shared.recordConsecutiveJumps(count: consecutiveJumps)
         
-        // 20% chance to grant super jump on landing
-        if frog.buffs.superJumpTimer <= 0 && Double.random(in: 0...1) < 0.20 {
-            let baseDuration = Configuration.GameRules.superJumpDuration
-            frog.buffs.superJumpTimer = PersistenceManager.shared.hasDoubleSuperJumpTime ? baseDuration * 2 : baseDuration
-            SoundManager.shared.playMusic(.superJump)
-            HapticsManager.shared.playNotification(.success)
-            
-            // Show visual feedback
-            VFXManager.shared.spawnSparkles(at: frog.position, in: self)
-        }
-        
+       
         // Spawn ghost when frog disturbs a grave
         if pad.type == .grave && !pad.hasSpawnedGhost {
             pad.hasSpawnedGhost = true
