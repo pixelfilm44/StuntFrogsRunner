@@ -62,6 +62,8 @@ class LoadingViewController: UIViewController {
         "lilypadWaterRain",
         "lilypadWaterSnow",
         "lilypadWaterSand",
+        "plantLeft",
+        "plantRight",
         
         // Object Assets
         "log",

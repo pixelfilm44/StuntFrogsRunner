@@ -1,6 +1,19 @@
 import SpriteKit
 import GameplayKit
 
+/// A structure representing a parallax plant decoration
+struct ParallaxPlant {
+    enum PlantSide {
+        case left
+        case right
+    }
+    
+    let node: SKSpriteNode
+    let worldY: CGFloat
+    let side: PlantSide
+    let parallaxFactor: CGFloat
+}
+
 class GameScene: SKScene, CollisionManagerDelegate {
     
     // MARK: - Dependencies
@@ -44,6 +57,14 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private let leafNode = SKNode()
     private let plantLeftNode = SKNode()
     private let plantRightNode = SKNode()
+    
+    // MARK: - Parallax Plant System
+    private var parallaxPlants: [ParallaxPlant] = []
+    private var plantPool: [SKSpriteNode] = []
+    private let maxParallaxPlants: Int = 8
+    private var lastPlantSpawnY: CGFloat = 0
+    private let plantSpawnInterval: CGFloat = 300
+    
     private let waterLinesNode = SKNode()
     private let waterTilesNode = SKNode()
     private var waterTileSize = CGSize.zero
@@ -168,6 +189,12 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Apply device-specific performance optimizations first
         PerformanceSettings.apply(to: self)
         
+        // PERFORMANCE: Optimize SKView settings for better performance on low-end devices
+        if PerformanceSettings.isLowEndDevice {
+            view.ignoresSiblingOrder = true // Enable node reordering optimization
+            view.shouldCullNonVisibleNodes = true // Cull offscreen nodes automatically
+        }
+        
         setupScene()
         setupHUD()
         setupCountdownLabel()
@@ -231,12 +258,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         leafNode.zPosition = 50 // Above the game world, but below most UI.
         cam.addChild(leafNode)
         
-        // Add plant decoration nodes, attached to camera for screen-space effect
-        plantLeftNode.zPosition = 45 // Behind leaves, to create depth
-        cam.addChild(plantLeftNode)
-        
-        plantRightNode.zPosition = 45 // Behind leaves, to create depth
-        cam.addChild(plantRightNode)
+        // Plant decoration nodes will be added by setupPlantDecorations() to worldNode
+        // (removed from here to avoid "already has a parent" error)
         
         // Add flotsam node
         flotsamNode.zPosition = Layer.water + 2 // Above leaves, below pads
@@ -305,6 +328,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
     }
     
     private func startSpawningLeaves() {
+        // Skip leaf decorations on low-end devices for better performance
+        if !PerformanceSettings.enableLeafDecorations {
+            return
+        }
+        
         if currentWeather != .sunny {
             return
         }
@@ -326,6 +354,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
     }
 
     private func spawnLeaf() {
+        // Limit number of active leaves based on device performance
+        let maxLeaves = PerformanceSettings.maxLeaves
+        guard leafNode.children.count < maxLeaves else { return }
+        
         let leafImages = ["leaf1", "leaf2", "leaf3"]
         guard let leafImage = leafImages.randomElement() else { return }
 
@@ -359,114 +391,258 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // --- Animation for blowing in the wind ---
         let driftDuration = TimeInterval.random(in: 4.0...8.0)
 
-        // 1. Main movement path (Bezier curve for a natural arc)
-        let endPos = CGPoint(x: endX, y: endY)
-        let path = CGMutablePath()
-        path.move(to: startPos)
-        let controlPoint1 = CGPoint(x: startX + (endX - startX) * 0.3, y: startY + CGFloat.random(in: -150...150))
-        let controlPoint2 = CGPoint(x: startX + (endX - startX) * 0.7, y: endY + CGFloat.random(in: -150...150))
-        path.addCurve(to: endPos, control1: controlPoint1, control2: controlPoint2)
-        
-        let moveAction = SKAction.follow(path, asOffset: false, orientToPath: false, duration: driftDuration)
-        let removeAction = SKAction.removeFromParent()
+        // Use simplified animation on low-end devices
+        if PerformanceSettings.useSimplifiedAnimations {
+            // Simplified path: just linear movement with basic rotation
+            let endPos = CGPoint(x: endX, y: endY)
+            let moveAction = SKAction.move(to: endPos, duration: driftDuration)
+            moveAction.timingMode = .easeInEaseOut
+            let removeAction = SKAction.removeFromParent()
+            
+            // Simple rotation
+            let rotationAmount = CGFloat.random(in: -2 * .pi...2 * .pi)
+            let spinAction = SKAction.rotate(byAngle: rotationAmount, duration: driftDuration)
+            
+            // Fade in at the start
+            let fadeIn = SKAction.fadeAlpha(to: CGFloat.random(in: 0.5...0.8), duration: 1.0)
+            
+            leaf.run(fadeIn)
+            leaf.run(SKAction.sequence([
+                SKAction.group([moveAction, spinAction]),
+                removeAction
+            ]))
+        } else {
+            // Full quality animation with bezier curve and tumbling
+            // 1. Main movement path (Bezier curve for a natural arc)
+            let endPos = CGPoint(x: endX, y: endY)
+            let path = CGMutablePath()
+            path.move(to: startPos)
+            let controlPoint1 = CGPoint(x: startX + (endX - startX) * 0.3, y: startY + CGFloat.random(in: -150...150))
+            let controlPoint2 = CGPoint(x: startX + (endX - startX) * 0.7, y: endY + CGFloat.random(in: -150...150))
+            path.addCurve(to: endPos, control1: controlPoint1, control2: controlPoint2)
+            
+            let moveAction = SKAction.follow(path, asOffset: false, orientToPath: false, duration: driftDuration)
+            let removeAction = SKAction.removeFromParent()
 
-        // 2. Continuous spinning
-        let rotationAmount = CGFloat.random(in: -6 * .pi...6 * .pi) // Spin multiple times
-        let spinAction = SKAction.rotate(byAngle: rotationAmount, duration: driftDuration)
-        spinAction.timingMode = .easeInEaseOut
+            // 2. Continuous spinning
+            let rotationAmount = CGFloat.random(in: -6 * .pi...6 * .pi) // Spin multiple times
+            let spinAction = SKAction.rotate(byAngle: rotationAmount, duration: driftDuration)
+            spinAction.timingMode = .easeInEaseOut
 
-        // 3. Tumbling effect (scaling on X-axis to simulate 3D rotation)
-        let tumbleDuration = TimeInterval.random(in: 0.4...0.8)
-        let tumble = SKAction.scaleX(to: 0.1, duration: tumbleDuration / 2)
-        tumble.timingMode = .easeInEaseOut
-        let tumbleBack = SKAction.scaleX(to: randomScale, duration: tumbleDuration / 2)
-        tumbleBack.timingMode = .easeInEaseOut
-        let tumbleSequence = SKAction.sequence([tumble, tumbleBack])
-        let tumbleForever = SKAction.repeatForever(tumbleSequence)
-        
-        // Fade in at the start
-        let fadeIn = SKAction.fadeAlpha(to: CGFloat.random(in: 0.5...0.8), duration: 1.0)
+            // 3. Tumbling effect (scaling on X-axis to simulate 3D rotation)
+            let tumbleDuration = TimeInterval.random(in: 0.4...0.8)
+            let tumble = SKAction.scaleX(to: 0.1, duration: tumbleDuration / 2)
+            tumble.timingMode = .easeInEaseOut
+            let tumbleBack = SKAction.scaleX(to: randomScale, duration: tumbleDuration / 2)
+            tumbleBack.timingMode = .easeInEaseOut
+            let tumbleSequence = SKAction.sequence([tumble, tumbleBack])
+            let tumbleForever = SKAction.repeatForever(tumbleSequence)
+            
+            // Fade in at the start
+            let fadeIn = SKAction.fadeAlpha(to: CGFloat.random(in: 0.5...0.8), duration: 1.0)
 
-        // Group and run all actions together
-        leaf.run(fadeIn)
-        leaf.run(SKAction.sequence([
-            SKAction.group([moveAction, spinAction, tumbleForever]),
-            removeAction
-        ]))
+            // Group and run all actions together
+            leaf.run(fadeIn)
+            leaf.run(SKAction.sequence([
+                SKAction.group([moveAction, spinAction, tumbleForever]),
+                removeAction
+            ]))
+        }
     }
     
     // MARK: - Plant Decoration
     
-    /// Start spawning decorative plants on the left and right sides of the screen
+    // MARK: - Plant Decoration with Parallax
+    
+    /// Setup the parallax plant decoration system
     private func setupPlantDecorations() {
-        spawnPlantLeft()
-        spawnPlantRight()
+        // Skip plant decorations on low-end devices for better performance
+        if !PerformanceSettings.enablePlantDecorations {
+            print("🌿 Plant decorations disabled by performance settings")
+            return
+        }
+        
+        // Parent both plant nodes to camera for screen-space effect (always at edges)
+        // Z-position behind most UI elements
+        plantLeftNode.zPosition = 45  // Behind leaves, in front of gameplay
+        cam.addChild(plantLeftNode)
+        
+        plantRightNode.zPosition = 45  // Behind leaves, in front of gameplay
+        cam.addChild(plantRightNode)
+        
+        // Initialize the plant pool
+        initializePlantPool()
+        
+        // Set initial spawn position
+        lastPlantSpawnY = frog.position.y
+        
+        // Spawn initial plants around the frog's starting position
+        for i in 0..<4 {
+            let offset = CGFloat(i) * 200
+            spawnParallaxPlant(side: .left, atY: frog.position.y + offset)
+            spawnParallaxPlant(side: .right, atY: frog.position.y + offset)
+        }
+        
+        print("🌿 Parallax plants setup complete. Initial plants spawned: \(parallaxPlants.count)")
     }
     
-    /// Spawn a decorative plant on the left side of the screen
-    private func spawnPlantLeft() {
-        // Clear existing plants
-        plantLeftNode.removeAllChildren()
+    /// Initialize a pool of reusable plant sprites for performance
+    private func initializePlantPool() {
+        let poolSize = maxParallaxPlants * 2  // Extra capacity for recycling
         
-        let plantImages = ["plantLeft"] // You can add more variations if available
-        guard let plantImage = plantImages.randomElement() else { return }
+        for _ in 0..<poolSize {
+            let plant = SKSpriteNode(imageNamed: Bool.random() ? "plantLeft" : "plantRight")
+            plant.isHidden = true
+            plantPool.append(plant)
+        }
         
-        let plant = SKSpriteNode(imageNamed: plantImage)
+        print("🌿 Plant pool initialized with \(poolSize) sprites")
+    }
+    
+    /// Get a plant sprite from the pool, or create a new one if needed
+    private func getPlantFromPool(imageName: String) -> SKSpriteNode {
+        // Try to find a hidden plant in the pool
+        if let availablePlant = plantPool.first(where: { $0.isHidden }) {
+            // Ensure the node is removed from any parent before reusing
+            availablePlant.removeFromParent()
+            availablePlant.texture = SKTexture(imageNamed: imageName)
+            availablePlant.isHidden = false
+            return availablePlant
+        }
         
-        // Position on the left side of the screen
+        // If no plants available, create a new one (shouldn't happen often)
+        let plant = SKSpriteNode(imageNamed: imageName)
+        plantPool.append(plant)
+        return plant
+    }
+    
+    /// Return a plant sprite to the pool
+    private func returnPlantToPool(_ plant: SKSpriteNode) {
+        plant.removeAllActions()
+        plant.removeFromParent()
+        plant.isHidden = true
+        plant.alpha = 1.0
+        plant.setScale(1.0)
+    }
+    
+    /// Spawn a new parallax plant at a specific Y position
+    private func spawnParallaxPlant(side: ParallaxPlant.PlantSide, atY worldY: CGFloat? = nil) {
+        // Choose plant image based on side
+        let plantImage = side == .left ? "plantLeft" : "plantRight"
+        let plant = getPlantFromPool(imageName: plantImage)
+        
+        // Random scale and appearance - increased size for better visibility
+        let randomScale = CGFloat.random(in: 0.6...1.0)
+        plant.setScale(randomScale)
+        plant.alpha = CGFloat.random(in: 0.85...0.98)
+        plant.anchorPoint = CGPoint(x: 0.5, y: 0)
+        
+        // Parallax factor - plants further back move slower (creates depth)
+        let parallaxFactor = CGFloat.random(in: 0.5...0.8)
+        
+        // World Y position for tracking
+        let spawnWorldY = worldY ?? (cam.position.y + size.height / 2 + 200)
+        
+        // Calculate initial screen-relative position
         let screenWidth = size.width
         let screenHeight = size.height
         
-        // Scale the plant to be appropriately sized
-        let randomScale = CGFloat.random(in: 0.3...0.5)
-        plant.setScale(randomScale)
-        plant.alpha = 0.8 // Slightly transparent to not obstruct gameplay
+        // Horizontal position - at screen edges but more visible (camera-relative)
+        // Reduced offset to bring plants more into the visible area
+        let xOffset = CGFloat.random(in: -5...5)
+        let screenX: CGFloat
+        if side == .left {
+            screenX = -screenWidth / 2  + xOffset - 20// Moved further right
+        } else {
+            screenX = screenWidth / 2  + xOffset + 20  // Moved further left
+        }
         
-        // Position at bottom-left corner
-        plant.position = CGPoint(
-            x: -screenWidth / 2 + plant.size.width / 2 - 100,
-            y: -screenHeight / 2 + plant.size.height / 2
-        )
-        plant.anchorPoint = CGPoint(x: 0.5, y: 0)
-        plant.zPosition = 0
+        // Vertical position - screen-relative with parallax
+        let relativeY = spawnWorldY - cam.position.y
+        let screenY = relativeY * parallaxFactor
         
-        plantLeftNode.addChild(plant)
+        // Position in camera/screen space
+        plant.position = CGPoint(x: screenX, y: screenY)
+        plant.zPosition = 0  // Relative to parent node's z-position
         
-        // Add subtle swaying animation for visual interest
+        // Add to appropriate parent node (which is attached to camera)
+        let parentNode = side == .left ? plantLeftNode : plantRightNode
+        parentNode.addChild(plant)
+        
+        // Add swaying animation
         addSwayingAnimation(to: plant)
+        
+        // Store in parallax plants array with world Y for tracking
+        let parallaxPlant = ParallaxPlant(
+            node: plant,
+            worldY: spawnWorldY,
+            side: side,
+            parallaxFactor: parallaxFactor
+        )
+        parallaxPlants.append(parallaxPlant)
+        
+        print("🌿 Spawned \(side == .left ? "left" : "right") plant at worldY:\(spawnWorldY), screenY:\(screenY), parallax:\(parallaxFactor)")
     }
     
-    /// Spawn a decorative plant on the right side of the screen
-    private func spawnPlantRight() {
-        // Clear existing plants
-        plantRightNode.removeAllChildren()
+    /// Update parallax plant positions based on camera movement
+    private func updateParallaxPlants() {
+        guard PerformanceSettings.enablePlantDecorations else { return }
         
-        let plantImages = ["plantRight"] // You can add more variations if available
-        guard let plantImage = plantImages.randomElement() else { return }
-        
-        let plant = SKSpriteNode(imageNamed: plantImage)
-        
-        // Position on the right side of the screen
         let screenWidth = size.width
         let screenHeight = size.height
+        let camY = cam.position.y
         
-        // Scale the plant to be appropriately sized
-        let randomScale = CGFloat.random(in: 0.3...0.5)
-        plant.setScale(randomScale)
-        plant.alpha = 0.8 // Slightly transparent to not obstruct gameplay
+        // Update positions with parallax effect
+        for i in (0..<parallaxPlants.count).reversed() {
+            let parallaxPlant = parallaxPlants[i]
+            let plant = parallaxPlant.node
+            
+            // Calculate screen-relative Y position with parallax
+            // Plants are in camera space, so we calculate relative to camera position
+            let relativeY = parallaxPlant.worldY - camY
+            let screenY = relativeY * parallaxPlant.parallaxFactor
+            
+            // Horizontal position - at screen edges but more visible
+            let screenX: CGFloat
+            if parallaxPlant.side == .left {
+                screenX = -screenWidth / 2 + 20  // Moved further right
+            } else {
+                screenX = screenWidth / 2  - 20  // Moved further left
+            }
+            
+            // Update position in camera/screen space
+            plant.position = CGPoint(x: screenX, y: screenY)
+            
+            // Remove plants that have scrolled far off the bottom of the screen
+            if screenY < -screenHeight / 2 - 500 {
+                print("🌿 Removing plant at worldY:\(parallaxPlant.worldY), screenY:\(screenY) (camera at \(camY))")
+                returnPlantToPool(plant)
+                parallaxPlants.remove(at: i)
+            }
+        }
         
-        // Position at bottom-right corner
-        plant.position = CGPoint(
-            x: screenWidth / 2 - plant.size.width / 2 + 100,
-            y: -screenHeight / 2 + plant.size.height / 2
-        )
-        plant.anchorPoint = CGPoint(x: 0.5, y: 0)
-        plant.zPosition = 0
-        
-        plantRightNode.addChild(plant)
-        
-        // Add subtle swaying animation for visual interest
-        addSwayingAnimation(to: plant)
+        // Spawn new plants as camera moves up
+        if camY > lastPlantSpawnY + plantSpawnInterval {
+            lastPlantSpawnY = camY
+            
+            // Spawn 1-2 plants on each side
+            let leftCount = Int.random(in: 1...2)
+            let rightCount = Int.random(in: 1...2)
+            
+            for _ in 0..<leftCount {
+                if parallaxPlants.filter({ $0.side == .left }).count < maxParallaxPlants / 2 {
+                    spawnParallaxPlant(side: .left)
+                }
+            }
+            
+            for _ in 0..<rightCount {
+                if parallaxPlants.filter({ $0.side == .right }).count < maxParallaxPlants / 2 {
+                    spawnParallaxPlant(side: .right)
+                }
+            }
+            
+            print("🌿 Spawned new plants. Total active: \(parallaxPlants.count)")
+        }
     }
     
     /// Add a subtle swaying animation to a plant sprite
@@ -538,7 +714,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
         self.waterTileSize = tileSize
         
         // Calculate how many tiles we need to cover the screen + buffer for scrolling
-        let bufferMultiplier: CGFloat = 3.0
+        // PERFORMANCE: Use device-specific buffer multiplier
+        let bufferMultiplier = PerformanceSettings.waterQuality.tileMultiplier
         let tilesWide = Int(ceil(size.width / tileSize.width * bufferMultiplier))
         let tilesHigh = Int(ceil(size.height / tileSize.height * bufferMultiplier))
         self.waterTilesWide = tilesWide
@@ -579,6 +756,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
     /// Animates the water tile container for a gentle ebb and flow effect.
     /// This is performant as it only animates one node.
     private func animateWaterTiles() {
+        // PERFORMANCE: Skip animation on low quality settings
+        if !PerformanceSettings.waterQuality.animationEnabled {
+            return
+        }
+        
         // To ensure we don't add multiple animations if this were ever called again
         waterTilesNode.removeAction(forKey: "waterAnimation")
         
@@ -727,6 +909,12 @@ class GameScene: SKScene, CollisionManagerDelegate {
     
     private func updateWaterVisuals() {
         guard waterTileSize != .zero else { return }
+        
+        // PERFORMANCE: Throttle water tile updates based on device capability
+        let updateInterval = PerformanceSettings.waterUpdateInterval
+        if frameCount % updateInterval != 0 {
+            return
+        }
 
         let cameraPosition = cam.position
         
@@ -813,9 +1001,13 @@ class GameScene: SKScene, CollisionManagerDelegate {
     }
     
     private func spawnRipples(parentedTo node: SKNode, color: UIColor, rippleCount: Int, isDramatic: Bool) {
+        // PERFORMANCE: Limit ripple count based on device capability
+        let maxRipples = PerformanceSettings.maxRipplesPerImpact
+        let actualRippleCount = min(rippleCount, maxRipples)
+        
         let delayBetweenRipples = isDramatic ? 0.01 : 0.02
         
-        for i in 0..<rippleCount {
+        for i in 0..<actualRippleCount {
             if i == 0 {
                 // Spawn first ripple immediately for instant feedback
                 if isDramatic {
@@ -1634,6 +1826,22 @@ class GameScene: SKScene, CollisionManagerDelegate {
     }
     
     private func updateHUDVisuals() {
+        // PERFORMANCE: Throttle HUD updates based on device capability
+        let hudUpdateInterval = PerformanceSettings.hudUpdateInterval
+        if hudUpdateInterval > 1 && frameCount % hudUpdateInterval != 0 {
+            // Only update critical buffs that have timers, skip score/coin updates
+            let buffsChanged = frog.buffs != lastKnownBuffs
+            let rocketChanged = frog.rocketTimer != lastKnownRocketTimer || frog.rocketState != lastKnownRocketState
+            
+            if buffsChanged || rocketChanged {
+                updateBuffsHUD()
+                lastKnownBuffs = frog.buffs
+                lastKnownRocketTimer = frog.rocketTimer
+                lastKnownRocketState = frog.rocketState
+            }
+            return
+        }
+        
         let currentScore = Int(frog.position.y / 10)
         if currentScore > score {
             score = currentScore
@@ -2109,6 +2317,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         updateMoonlightPosition()
         updateSpaceGlowPosition()
         updateCamera()
+        updateParallaxPlants()  // Update parallax plant positions
         updateHUDVisuals()
         
         // --- Generation & Cleanup ---

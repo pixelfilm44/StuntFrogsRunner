@@ -33,17 +33,18 @@ struct PerformanceSettings {
         #else
         
         // Check for older iPhone models
-        // iPhone 14 Pro = iPhone15,2 / iPhone14,3
-        // iPhone 13 = iPhone14,5
-        // iPhone 12 = iPhone13,2
-        // Anything below should be considered "low end"
+        // iPhone 15 = iPhone15,x or iPhone16,x
+        // iPhone 14 = iPhone14,x or iPhone15,x (14 Pro)
+        // iPhone 13 = iPhone14,x
+        // iPhone 12 = iPhone13,x
+        // Treat iPhone 14 and older as low-end
         guard let modelIdentifier = identifier else { return false }
         
         // Extract model number (e.g., "iPhone13,2" -> 13)
         if modelIdentifier.hasPrefix("iPhone") {
             let components = modelIdentifier.components(separatedBy: CharacterSet.decimalDigits.inverted)
             if let majorVersion = components.compactMap({ Int($0) }).first {
-                return majorVersion < 14 // iPhone 13 and older
+                return majorVersion <= 15 // iPhone 14 and older (includes iPhone14,x and iPhone15,x models)
             }
         }
         
@@ -92,22 +93,22 @@ struct PerformanceSettings {
     
     /// Number of trajectory dots to show during aiming
     static var trajectoryDotCount: Int {
-        if isVeryLowEndDevice { return 12 }
-        if isLowEndDevice { return 15 }
+        if isVeryLowEndDevice { return 10 }
+        if isLowEndDevice { return 12 }
         return 20
     }
     
     /// Size of ripple effect pool
     static var ripplePoolSize: Int {
-        if isVeryLowEndDevice { return 10 }
-        if isLowEndDevice { return 15 }
+        if isVeryLowEndDevice { return 8 }
+        if isLowEndDevice { return 12 }
         return 20
     }
     
     /// Particle birth rate multiplier for weather effects
     static var particleMultiplier: CGFloat {
-        if isVeryLowEndDevice { return 0.3 }
-        if isLowEndDevice { return 0.6 }
+        if isVeryLowEndDevice { return 0.25 }
+        if isLowEndDevice { return 0.5 }
         return 1.0
     }
     
@@ -121,15 +122,15 @@ struct PerformanceSettings {
     /// How often to update HUD elements (in frames)
     /// Higher values = less frequent updates = better performance
     static var hudUpdateInterval: Int {
-        if isVeryLowEndDevice { return 3 }
-        if isLowEndDevice { return 2 }
+        if isVeryLowEndDevice { return 4 }
+        if isLowEndDevice { return 3 }
         return 1 // Every frame
     }
     
     /// How often to cleanup offscreen entities (in frames)
     static var cleanupInterval: Int {
-        if isVeryLowEndDevice { return 45 }
-        if isLowEndDevice { return 30 }
+        if isVeryLowEndDevice { return 60 }
+        if isLowEndDevice { return 45 }
         return 30
     }
     
@@ -140,9 +141,38 @@ struct PerformanceSettings {
     
     /// Maximum number of active leaves floating on screen
     static var maxLeaves: Int {
-        if isVeryLowEndDevice { return 5 }
-        if isLowEndDevice { return 10 }
+        if isVeryLowEndDevice { return 3 }
+        if isLowEndDevice { return 6 }
         return 15
+    }
+    
+    /// How often to update water tile positions (in frames)
+    static var waterUpdateInterval: Int {
+        if isVeryLowEndDevice { return 4 }
+        if isLowEndDevice { return 3 }
+        return 2
+    }
+    
+    /// Whether to enable leaf decorations
+    static var enableLeafDecorations: Bool {
+        return !isLowEndDevice
+    }
+    
+    /// Whether to enable plant decorations on screen edges
+    static var enablePlantDecorations: Bool {
+        return !isLowEndDevice
+    }
+    
+    /// Maximum ripples to spawn per impact
+    static var maxRipplesPerImpact: Int {
+        if isVeryLowEndDevice { return 1 }
+        if isLowEndDevice { return 2 }
+        return 3
+    }
+    
+    /// Whether to use simplified animations for entities
+    static var useSimplifiedAnimations: Bool {
+        return isLowEndDevice
     }
     
     /// Whether to use texture atlases for improved batching
