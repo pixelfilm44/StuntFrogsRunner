@@ -101,13 +101,20 @@ class CollisionManager {
         let crocHW: CGFloat = 150
         let crocHH: CGFloat = 60
         
+        // PERFORMANCE: Maximum interaction distance for early exit
+        let maxInteractionDistance: CGFloat = 200
+        
         for crocodile in crocodiles {
             // Only destroy enemies when carrying the frog
             guard crocodile.state == .carrying && crocodile.isCarryingFrog else { continue }
             
             for enemy in enemies {
-                let dx = abs(crocodile.position.x - enemy.position.x)
+                // PERFORMANCE: Early exit for enemies far away
                 let dy = abs(crocodile.position.y - enemy.position.y)
+                if dy > maxInteractionDistance { continue }
+                
+                let dx = abs(crocodile.position.x - enemy.position.x)
+                if dx > maxInteractionDistance { continue }
                 
                 // Enemy collision radius
                 let enemyRadius: CGFloat = 20
@@ -123,13 +130,20 @@ class CollisionManager {
         let crocHW: CGFloat = 150
         let crocHH: CGFloat = 60
         
+        // PERFORMANCE: Maximum interaction distance for early exit
+        let maxInteractionDistance: CGFloat = 250
+        
         for crocodile in crocodiles {
             // Only destroy snakes when carrying the frog
             guard crocodile.state == .carrying && crocodile.isCarryingFrog else { continue }
             
             for snake in snakes where !snake.isDestroyed {
-                let dx = abs(crocodile.position.x - snake.position.x)
+                // PERFORMANCE: Early exit for snakes far away
                 let dy = abs(crocodile.position.y - snake.position.y)
+                if dy > maxInteractionDistance { continue }
+                
+                let dx = abs(crocodile.position.x - snake.position.x)
+                if dx > maxInteractionDistance { continue }
                 
                 // Snake collision radius
                 let snakeRadius: CGFloat = snake.scaledRadius
@@ -146,6 +160,9 @@ class CollisionManager {
         let crocHW: CGFloat = 150
         let crocHH: CGFloat = 60
         
+        // PERFORMANCE: Maximum interaction distance for early exit
+        let maxInteractionDistance: CGFloat = 250
+        
         for crocodile in crocodiles {
             // Only check collision for visible crocodiles (not submerged)
             guard crocodile.state != .submerged else { continue }
@@ -154,14 +171,19 @@ class CollisionManager {
             let isCarrying = crocodile.state == .carrying && crocodile.isCarryingFrog
             
             for pad in pads {
+                // PERFORMANCE: Early exit for pads far away
+                let dy = abs(crocodile.position.y - pad.position.y)
+                if dy > maxInteractionDistance { continue }
+                
+                let dx = abs(crocodile.position.x - pad.position.x)
+                if dx > maxInteractionDistance { continue }
+                
                 // Determine dimensions of the pad
                 let padHW: CGFloat = (pad.type == .log) ? 60 : 50
                 let padHH: CGFloat = (pad.type == .log) ? 20 : 50
                 
-                let dx = crocodile.position.x - pad.position.x
-                let dy = crocodile.position.y - pad.position.y
-                let absDx = abs(dx)
-                let absDy = abs(dy)
+                let absDx = dx
+                let absDy = dy
                 
                 let overlapX = absDx < (crocHW + padHW)
                 let overlapY = absDy < (crocHH + padHH)
@@ -203,6 +225,10 @@ class CollisionManager {
         // Filter for moving logs to optimize
         let logs = pads.filter { $0.type == .log }
         
+        // PERFORMANCE: Logs only move horizontally and bounce, so we only need to check
+        // pads that are actually nearby (within ~150 pixels)
+        let maxCollisionDistance: CGFloat = 150
+        
         for log in logs {
             // Log Half-Extents (120x40 size -> 60x20 half)
             let logHW: CGFloat = 60
@@ -211,13 +237,19 @@ class CollisionManager {
             for other in pads {
                 if log === other { continue } // Skip self
                 
+                // PERFORMANCE: Early exit for pads that are too far away
+                // Check vertical distance first (cheaper than both X and Y)
+                let dy = abs(log.position.y - other.position.y)
+                if dy > maxCollisionDistance { continue }
+                
+                // Then check horizontal distance
+                let dx = abs(log.position.x - other.position.x)
+                if dx > maxCollisionDistance { continue }
+                
                 // Determine dimensions of the other pad
                 // Log: 60x20, Pad: 45x45 (Approx rect for collision)
                 let otherHW: CGFloat = (other.type == .log) ? 60 : 45
                 let otherHH: CGFloat = (other.type == .log) ? 20 : 45
-                
-                let dx = abs(log.position.x - other.position.x)
-                let dy = abs(log.position.y - other.position.y)
                 
                 let overlapX = dx < (logHW + otherHW)
                 let overlapY = dy < (logHH + otherHH)
@@ -300,7 +332,7 @@ class CollisionManager {
             } else {
                 // Circle Pad Logic
                 let currentPadRadius = pad.scaledRadius
-                let safetyBuffer = frogRadius * 0.01
+                let safetyBuffer = frogRadius * 0.50
                 let hitDistance = currentPadRadius + safetyBuffer
                 
                 // 1. Broad Phase: Simple Box Check (Fastest)

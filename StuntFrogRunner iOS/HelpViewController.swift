@@ -36,14 +36,14 @@ class HelpViewController: UIViewController {
             emoji: ""
         ),
         HelpSlide(
-            title: "Collect Coins",
+            title: "Save the tadpoles",
             description: "Grab coins along the way to spend in the shop on upgrades and power-ups.",
             imageName: "fishing",
             emoji: ""
         ),
         HelpSlide(
-            title: "Avoid Obstacles",
-            description: "Watch out for logs, bees, dragonflies and other hazards. Each hit costs you health!",
+            title: "Avoid obstacles",
+            description: "Watch out for logs, bees, dragonflies and other hazards. Each hit costs you a heart!",
             imageName: "avoidObstacles",
             emoji: ""
         ),
@@ -55,7 +55,7 @@ class HelpViewController: UIViewController {
             emoji: ""
         ),
         HelpSlide(
-            title: "Special Thanks",
+            title: "Special thanks",
             description: "Thank you to Ellie Mielke, Jeff StLaurent, and Anthony Caccese for their valuable feedback on this game!",
             imageName: "heart",
             emoji: ""
@@ -260,7 +260,7 @@ class HelpViewController: UIViewController {
         // Title label
         let titleLabel = UILabel()
         titleLabel.text = slide.title
-        titleLabel.font = UIFont.systemFont(ofSize: 24, weight: .heavy)
+        titleLabel.font = UIFont.systemFont(ofSize: 20, weight: .heavy)
         titleLabel.textColor = UIColor(red: 46/255, green: 204/255, blue: 113/255, alpha: 1)
         titleLabel.textAlignment = .center
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -268,7 +268,7 @@ class HelpViewController: UIViewController {
         // Description label
         let descriptionLabel = UILabel()
         descriptionLabel.text = slide.description
-        descriptionLabel.font = UIFont.systemFont(ofSize: 16, weight: .light)
+        descriptionLabel.font = UIFont.systemFont(ofSize: 14, weight: .light)
         descriptionLabel.textColor = .white
         descriptionLabel.textAlignment = .center
         descriptionLabel.numberOfLines = 0
@@ -280,7 +280,7 @@ class HelpViewController: UIViewController {
         
         NSLayoutConstraint.activate([
             visualView.centerXAnchor.constraint(equalTo: slideContainer.centerXAnchor),
-            visualView.topAnchor.constraint(equalTo: slideContainer.topAnchor, constant: 10),
+            visualView.topAnchor.constraint(equalTo: slideContainer.topAnchor, constant: 0),
             visualView.heightAnchor.constraint(equalToConstant: 200),
             visualView.widthAnchor.constraint(lessThanOrEqualToConstant: 200),
             

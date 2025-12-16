@@ -51,7 +51,7 @@ class GameEntity: SKSpriteNode {
 // MARK: - The Frog
 class Frog: GameEntity {
     
-    struct Buffs: Equatable {
+    struct Buffs: Equatable, Hashable {
         var honey: Int = 0
         var rocketTimer: TimeInterval = 0
         var bootsCount: Int = 0
@@ -277,34 +277,34 @@ class Frog: GameEntity {
             return
         }
         
-        position.x += velocity.dx
-        position.y += velocity.dy
-        zHeight += zVelocity
+        position.x += velocity.dx * CGFloat(dt) * 60.0
+        position.y += velocity.dy * CGFloat(dt) * 60.0
+        zHeight += zVelocity * CGFloat(dt) * 60.0
         
         if zHeight > 0 {
             // Adjust gravity based on weather - reduced gravity in space for floaty jumps
             let gravity = weather == .space ? Configuration.Physics.gravityZ * 0.3 : Configuration.Physics.gravityZ
-            zVelocity -= gravity
-            velocity.dx *= Configuration.Physics.frictionAir
-            velocity.dy *= Configuration.Physics.frictionAir
+            zVelocity -= gravity * CGFloat(dt) * 60.0
+            velocity.dx *= pow(Configuration.Physics.frictionAir, CGFloat(dt) * 60.0)
+            velocity.dy *= pow(Configuration.Physics.frictionAir, CGFloat(dt) * 60.0)
         } else {
             zHeight = 0
             if isFloating {
-                velocity.dx *= 0.9
-                velocity.dy *= 0.9
+                velocity.dx *= pow(0.9, CGFloat(dt) * 60.0)
+                velocity.dy *= pow(0.9, CGFloat(dt) * 60.0)
             } else {
                 var currentFriction = Configuration.Physics.frictionGround
                 if let pad = onPad {
                     if pad.type == .moving || pad.type == .waterLily || pad.type == .log {
-                        position.x += pad.moveSpeed * pad.moveDirection
+                        position.x += pad.moveSpeed * pad.moveDirection * CGFloat(dt) * 60.0
                     }
                     let isIce = (pad.type == .ice)
                     if (isRainEffectActive || isIce) && !isWearingBoots {
                         currentFriction = 0.93
                     }
                 }
-                velocity.dx *= currentFriction
-                velocity.dy *= currentFriction
+                velocity.dx *= pow(currentFriction, CGFloat(dt) * 60.0)
+                velocity.dy *= pow(currentFriction, CGFloat(dt) * 60.0)
             }
         }
         
@@ -513,34 +513,46 @@ class Frog: GameEntity {
         
         // Point in the direction the frog will jump (opposite of drag)
         let angle = atan2(-offset.y, -offset.x) - CGFloat.pi / 2
+        
+        // Instantly update rotation for responsive, smooth slingshot feel
+        bodyNode.removeAction(forKey: "pullRotation")
         bodyNode.zRotation = angle
+        
         lastFacingAngle = angle  // Store for when drag ends
     }
     
     func resetPullOffset() {
         isBeingDragged = false
-        bodyNode.position = CGPoint(x: 0, y: zHeight)
+        
+        // Smooth spring-back animation when releasing
+        bodyNode.removeAction(forKey: "pullRotation")
+        bodyNode.removeAction(forKey: "resetPullPosition")
+        
+        let springBack = SKAction.move(to: CGPoint(x: 0, y: zHeight), duration: 0.15)
+        springBack.timingMode = .easeOut
+        bodyNode.run(springBack, withKey: "resetPullPosition")
+        
         shadowNode.position = .zero
-        bodyNode.zRotation = lastFacingAngle  // Preserve last facing direction
+        // Preserve last facing direction (rotation stays as is)
     }
     
     private func updateRocketPhysics(dt: TimeInterval) {
-        position.x += velocity.dx
+        position.x += velocity.dx * CGFloat(dt) * 60.0
         
         // Apply friction only if no steering input is being applied
         // (steering should be set by the game scene based on touch input)
         if velocity.dx.magnitude < 0.1 {
-            velocity.dx *= 0.9
+            velocity.dx *= pow(0.9, CGFloat(dt) * 60.0)
         } else {
             // Lighter friction when actively steering
-            velocity.dx *= 0.95
+            velocity.dx *= pow(0.95, CGFloat(dt) * 60.0)
         }
         
         if rocketState == .flying {
             rocketTimer = max(0, rocketTimer - dt)
             velocity.dy = 4.0
-            position.y += velocity.dy
-            zHeight += (60 - zHeight) * 0.1
+            position.y += velocity.dy * CGFloat(dt) * 60.0
+            zHeight += (60 - zHeight) * 0.1 * CGFloat(dt) * 60.0
             
             if rocketTimer <= 0 {
                 rocketState = .landing
@@ -552,9 +564,9 @@ class Frog: GameEntity {
                 descend()
                 return
             }
-            velocity.dy *= 0.25
+            velocity.dy *= pow(0.25, CGFloat(dt) * 60.0)
             if velocity.dy < 0.5 { velocity.dy = 1.5 } // was 0.5
-            position.y += velocity.dy
+            position.y += velocity.dy * CGFloat(dt) * 60.0
             zHeight = 60 + sin(CGFloat(Date().timeIntervalSince1970) * 5) * 5
         }
         constrainToRiver()
@@ -798,6 +810,7 @@ class Pad: GameEntity {
     private var shrinkTime: Double = 0
     private var shrinkSpeed: Double = 2.0
     private var currentWeather: WeatherType = .sunny
+    private var hueVariation: CGFloat = 0 // Random hue shift for visual diversity
     
     // Preloaded textures for performance
     private static let dayTexture = SKTexture(imageNamed: "lilypadDay")
@@ -851,6 +864,8 @@ class Pad: GameEntity {
         self.position = position
         self.zPosition = Layer.pad
         self.moveDirection = Bool.random() ? 1.0 : -1.0
+        // Generate a subtle random hue variation for visual diversity
+        self.hueVariation = CGFloat.random(in: -0.08...0.08)
         if type == .shrinking {
             self.shrinkSpeed = Double.random(in: 1.0...3.0)
             self.shrinkTime = Double.random(in: 0...10.0)
@@ -940,7 +955,28 @@ class Pad: GameEntity {
             addChild(sprite)
             self.padSprite = sprite
         }
+        
+        // Apply subtle hue variation to all pad types for visual diversity
+        applyHueVariation()
     }
+    
+    /// Applies a subtle hue variation to the pad sprite for visual diversity
+    /// Uses color blending which is GPU-accelerated and performant
+    private func applyHueVariation() {
+        guard let sprite = padSprite else { return }
+        
+        // Skip hue variation for special pads that need specific appearances
+        guard type != .launchPad && type != .warp && type != .grave else { return }
+        
+        // Convert hue shift to a color (hue variation is in range -0.08 to 0.08)
+        // We'll use UIColor to create a subtle tint
+        let hue = 0.33 + hueVariation // Base green hue (0.33) with variation
+        let tintColor = UIColor(hue: hue, saturation: 0.3, brightness: 1.0, alpha: 1.0)
+        
+        sprite.color = tintColor
+        sprite.colorBlendFactor = 0.15 // Subtle blend to maintain texture detail
+    }
+    
     /// Converts this pad to a normal pad if its type is incompatible with the given weather
     func convertToNormalIfIncompatible(weather: WeatherType) {
         let shouldConvert: Bool
@@ -1044,8 +1080,13 @@ class Pad: GameEntity {
                 SKAction.fadeOut(withDuration: crossfadeDuration),
                 SKAction.removeFromParent()
             ]))
+            
+            // Apply hue variation to the new sprite
+            applyHueVariation()
         } else {
             sprite.texture = texture
+            // Apply hue variation after texture change
+            applyHueVariation()
         }
     }
     
@@ -1715,11 +1756,20 @@ class Snake: GameEntity {
         // Track if snake is currently on a lilypad
         var currentlyOnLilypad = false
         
+        // PERFORMANCE OPTIMIZATION: Only check pads that are within reasonable distance
+        // Snakes move horizontally, so we mainly care about pads at similar Y positions
+        // Maximum interaction distances: 80 pixels for logs, ~60 pixels for lilypads
+        let maxInteractionDistance: CGFloat = 100
+        
         // Check for log obstacles - move around them
         // Also check if snake is on top of any lilypad (for scaling effect)
         for pad in pads {
-            let dx = abs(position.x - pad.position.x)
+            // Early exit: Skip pads that are too far away vertically
             let dy = abs(position.y - pad.position.y)
+            if dy > maxInteractionDistance { continue }
+            
+            // Now check horizontal distance
+            let dx = abs(position.x - pad.position.x)
             
             if pad.type == .log {
                 // Log is nearby horizontally and vertically - avoid it
@@ -2246,3 +2296,4 @@ class Boat: GameEntity {
         veerDirection = (self.position.x > frogPosition.x) ? 1.0 : -1.0
     }
 }
+

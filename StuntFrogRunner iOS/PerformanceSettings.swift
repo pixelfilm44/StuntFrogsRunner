@@ -33,18 +33,26 @@ struct PerformanceSettings {
         #else
         
         // Check for older iPhone models
+        // iPhone 16 = iPhone17,x
         // iPhone 15 = iPhone15,x or iPhone16,x
         // iPhone 14 = iPhone14,x or iPhone15,x (14 Pro)
         // iPhone 13 = iPhone14,x
         // iPhone 12 = iPhone13,x
-        // Treat iPhone 14 and older as low-end
+        // Treat iPhone 13 and older as low-end (iPhone 14 and newer are high-end)
         guard let modelIdentifier = identifier else { return false }
+        
+        print("📱 Detected device identifier: \(modelIdentifier)")
         
         // Extract model number (e.g., "iPhone13,2" -> 13)
         if modelIdentifier.hasPrefix("iPhone") {
             let components = modelIdentifier.components(separatedBy: CharacterSet.decimalDigits.inverted)
             if let majorVersion = components.compactMap({ Int($0) }).first {
-                return majorVersion <= 15 // iPhone 14 and older (includes iPhone14,x and iPhone15,x models)
+                // iPhone 14 starts at iPhone14,x/iPhone15,x
+                // iPhone 15 starts at iPhone15,x/iPhone16,x  
+                // iPhone 16 starts at iPhone17,x
+                let isLowEnd = majorVersion <= 13 // iPhone 13 and older are low-end
+                print("📱 iPhone major version: \(majorVersion), classified as low-end: \(isLowEnd)")
+                return isLowEnd
             }
         }
         
@@ -91,25 +99,54 @@ struct PerformanceSettings {
     
     // MARK: - Quality Settings
     
+    /// Returns true for iPhone 15 Pro and newer (ProMotion 120Hz capable)
+    static var isHighEndDevice: Bool {
+        #if targetEnvironment(simulator)
+        return ProcessInfo.processInfo.processorCount >= 8
+        #else
+        let systemInfo = utsname()
+        var systemInfoCopy = systemInfo
+        uname(&systemInfoCopy)
+        
+        let identifier = withUnsafePointer(to: &systemInfoCopy.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                String(validatingUTF8: $0)
+            }
+        }
+        
+        guard let modelIdentifier = identifier else { return false }
+        
+        // iPhone 15 Pro and newer (iPhone16,x for 15 Pro, iPhone17,x for 16)
+        if modelIdentifier.hasPrefix("iPhone") {
+            let components = modelIdentifier.components(separatedBy: CharacterSet.decimalDigits.inverted)
+            if let majorVersion = components.compactMap({ Int($0) }).first {
+                return majorVersion >= 16 // iPhone 15 Pro and newer
+            }
+        }
+        
+        return false
+        #endif
+    }
+    
     /// Number of trajectory dots to show during aiming
     static var trajectoryDotCount: Int {
-        if isVeryLowEndDevice { return 10 }
-        if isLowEndDevice { return 12 }
-        return 20
+        if isVeryLowEndDevice { return 8 }
+        if isLowEndDevice { return 10 }
+        return 12  // Reduced from 15 for better performance
     }
     
     /// Size of ripple effect pool
     static var ripplePoolSize: Int {
-        if isVeryLowEndDevice { return 8 }
-        if isLowEndDevice { return 12 }
-        return 20
+        if isVeryLowEndDevice { return 6 }
+        if isLowEndDevice { return 10 }
+        return 12  // Reduced from 15 for better performance
     }
     
     /// Particle birth rate multiplier for weather effects
     static var particleMultiplier: CGFloat {
         if isVeryLowEndDevice { return 0.25 }
         if isLowEndDevice { return 0.5 }
-        return 1.0
+        return 0.8  // Reduced from 1.0 - particles are expensive!
     }
     
     /// Water animation quality (affects tile count and animation smoothness)
@@ -124,7 +161,8 @@ struct PerformanceSettings {
     static var hudUpdateInterval: Int {
         if isVeryLowEndDevice { return 4 }
         if isLowEndDevice { return 3 }
-        return 1 // Every frame
+        // Even high-end devices don't need HUD updates at 120fps
+        return 3  // Update at ~40fps instead of 120fps
     }
     
     /// How often to cleanup offscreen entities (in frames)
@@ -160,7 +198,9 @@ struct PerformanceSettings {
     
     /// Whether to enable plant decorations on screen edges
     static var enablePlantDecorations: Bool {
-        return !isLowEndDevice
+        // PERFORMANCE: Plants are decorative only - disabled for better frame rates
+        // Even on high-end devices, they add unnecessary overhead at 120fps
+        return false
     }
     
     /// Maximum ripples to spawn per impact
@@ -216,9 +256,29 @@ struct PerformanceSettings {
     
     // MARK: - Debug Info
     
+    /// Get the actual device identifier string for debugging
+    static var deviceIdentifier: String {
+        #if targetEnvironment(simulator)
+        return "Simulator"
+        #else
+        let systemInfo = utsname()
+        var systemInfoCopy = systemInfo
+        uname(&systemInfoCopy)
+        
+        let identifier = withUnsafePointer(to: &systemInfoCopy.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                String(validatingUTF8: $0)
+            }
+        }
+        
+        return identifier ?? "Unknown"
+        #endif
+    }
+    
     /// Print device information and selected quality settings
     static func printDeviceInfo() {
         print("📱 Device Performance Profile:")
+        print("   Device Identifier: \(deviceIdentifier)")
         print("   Low End Device: \(isLowEndDevice)")
         print("   Very Low End Device: \(isVeryLowEndDevice)")
         print("   Processor Count: \(ProcessInfo.processInfo.processorCount)")

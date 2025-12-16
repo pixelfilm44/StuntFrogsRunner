@@ -22,6 +22,7 @@ class PersistenceManager {
         static let axeItems = "sf_consumable_axe_items"
         static let doubleSuperJumpTime = "sf_upgrade_double_superjump_time"
         static let doubleRocketTime = "sf_upgrade_double_rocket_time"
+        static let hasSeenTutorial = "sf_has_seen_tutorial"
     }
     
     private init() {}
@@ -219,6 +220,16 @@ class PersistenceManager {
     
     func markHelpAsSeen() {
         defaults.set(true, forKey: Keys.hasSeenHelp)
+    }
+    
+    // MARK: - Tutorial Overlay
+    
+    var hasSeenTutorial: Bool {
+        return defaults.bool(forKey: Keys.hasSeenTutorial)
+    }
+    
+    func markTutorialAsSeen() {
+        defaults.set(true, forKey: Keys.hasSeenTutorial)
     }
     
     // MARK: - High Score
