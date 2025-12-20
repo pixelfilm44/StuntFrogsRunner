@@ -15,8 +15,26 @@ struct PerformanceSettings {
     
     // MARK: - Device Detection
     
+    /// Cached device classification results to avoid repeated system calls
+    private static var cachedLowEndDevice: Bool?
+    private static var cachedVeryLowEndDevice: Bool?
+    private static var cachedHighEndDevice: Bool?
+    
     /// Returns true for devices older than iPhone 14 or equivalent
     static var isLowEndDevice: Bool {
+        // Return cached value if available
+        if let cached = cachedLowEndDevice {
+            return cached
+        }
+        
+        // Calculate and cache the result
+        let result = calculateIsLowEndDevice()
+        cachedLowEndDevice = result
+        return result
+    }
+    
+    /// Internal function to calculate device classification
+    private static func calculateIsLowEndDevice() -> Bool {
         let systemInfo = utsname()
         var systemInfoCopy = systemInfo
         uname(&systemInfoCopy)
@@ -70,6 +88,19 @@ struct PerformanceSettings {
     
     /// Returns true for very old devices that need aggressive optimization
     static var isVeryLowEndDevice: Bool {
+        // Return cached value if available
+        if let cached = cachedVeryLowEndDevice {
+            return cached
+        }
+        
+        // Calculate and cache the result
+        let result = calculateIsVeryLowEndDevice()
+        cachedVeryLowEndDevice = result
+        return result
+    }
+    
+    /// Internal function to calculate very low-end device classification
+    private static func calculateIsVeryLowEndDevice() -> Bool {
         #if targetEnvironment(simulator)
         return false
         #else
@@ -101,6 +132,19 @@ struct PerformanceSettings {
     
     /// Returns true for iPhone 15 Pro and newer (ProMotion 120Hz capable)
     static var isHighEndDevice: Bool {
+        // Return cached value if available
+        if let cached = cachedHighEndDevice {
+            return cached
+        }
+        
+        // Calculate and cache the result
+        let result = calculateIsHighEndDevice()
+        cachedHighEndDevice = result
+        return result
+    }
+    
+    /// Internal function to calculate high-end device classification
+    private static func calculateIsHighEndDevice() -> Bool {
         #if targetEnvironment(simulator)
         return ProcessInfo.processInfo.processorCount >= 8
         #else
@@ -198,9 +242,10 @@ struct PerformanceSettings {
     
     /// Whether to enable plant decorations on screen edges
     static var enablePlantDecorations: Bool {
-        // PERFORMANCE: Plants are decorative only - disabled for better frame rates
-        // Even on high-end devices, they add unnecessary overhead at 120fps
-        return false
+        // PERFORMANCE: Plants are decorative only - disabled for better frame rates on iPhone
+        // Enable on iPad where screen edges need more coverage
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        return isIPad && !isVeryLowEndDevice
     }
     
     /// Maximum ripples to spawn per impact

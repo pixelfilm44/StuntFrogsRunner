@@ -5,7 +5,7 @@ import SpriteKit
 struct Configuration {
     
     struct Physics {
-        static let gravityZ: CGFloat = 0.8
+        static let gravityZ: CGFloat = 0.5
         static let frictionGround: CGFloat = 0.8
         static let frictionAir: CGFloat = 0.90
         static let baseJumpZ: CGFloat = 4.0
@@ -18,16 +18,33 @@ struct Configuration {
     
     struct Dimensions {
         static let riverWidth: CGFloat = 600.0
-        static let minPadRadius: CGFloat = 45.0
+        static let minPadRadius: CGFloat = 55.0
         static let maxPadRadius: CGFloat = 105.0
-        static let padSpacing: CGFloat = 10.0  // Minimum gap between lily pads
+        static let padSpacing: CGFloat = 15.0  // Minimum gap between lily pads
+        static let movingPadMinDistance: CGFloat = 25.0  // Minimum distance between moving lilypads and other pads
         static let frogRadius: CGFloat = 20.0
+        
+        // MARK: - Water and Shore Layout
+        
+        /// Extra width on each side for water to extend under shores
+        static var waterShoreOverlap: CGFloat {
+            return UIDevice.current.userInterfaceIdiom == .pad ? 750.0 : 200.0
+        }
+        
+        /// Total water background width (river + overlap on both sides)
+        static let waterBackgroundWidth: CGFloat = riverWidth + (waterShoreOverlap * 2)
+        
+        /// Multiplier to reduce the physics body size relative to visual size
+        /// Lower values = smaller hit zone (0.6 = 60% of visual size)
+        static let padPhysicsRadiusMultiplier: CGFloat = 0.6
         
         /// Generates a random pad radius between min and max
         static func randomPadRadius() -> CGFloat {
             return CGFloat.random(in: minPadRadius...maxPadRadius)
         }
     }
+    
+    
     
     struct Colors {
         static let sunny = SKColor(red: 52/255, green: 152/255, blue: 219/255, alpha: 1)
@@ -483,7 +500,7 @@ struct Configuration {
         static let startingScore: Int = 0  // Set to 0 to disable
         
         /// Enable to see weather transitions more quickly
-        static let debugMode: Bool = true
+        static let debugMode: Bool = false
     }
 }
 

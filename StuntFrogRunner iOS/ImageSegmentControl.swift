@@ -1,11 +1,3 @@
-//
-//  ImageSegmentControl.swift
-//  StuntFrogRunner iOS
-//
-//  Created by Jeff Mielke on 12/13/25.
-//
-
-
 import UIKit
 
 class ImageSegmentControl: UIStackView {
@@ -29,18 +21,34 @@ class ImageSegmentControl: UIStackView {
     
     private func setupView() {
         self.axis = .horizontal
-        self.distribution = .fillEqually
+       self.distribution = .fillEqually
         self.spacing = 20 // Custom spacing between your PNGs
         
         // Configure Button 1
-        button1.setImage(UIImage(named: "icon1Off"), for: .normal)
-        button1.setImage(UIImage(named: "icon1On"), for: .selected)
+        var config1 = UIButton.Configuration.plain()
+        config1.image = UIImage(named: "icon1Off")?.resized(toScale: 0.3)
+        button1.configuration = config1
+        button1.configurationUpdateHandler = { button in
+            var config = button.configuration
+            config?.image = button.isSelected ? 
+                UIImage(named: "icon1On")?.resized(toScale: 0.3) :
+                UIImage(named: "icon1Off")?.resized(toScale: 0.3)
+            button.configuration = config
+        }
         button1.tag = 0
         button1.addTarget(self, action: #selector(buttonTapped(_:)), for: .touchUpInside)
         
         // Configure Button 2
-        button2.setImage(UIImage(named: "icon2Off"), for: .normal)
-        button2.setImage(UIImage(named: "icon2On"), for: .selected)
+        var config2 = UIButton.Configuration.plain()
+        config2.image = UIImage(named: "icon2Off")?.resized(toScale: 0.3)
+        button2.configuration = config2
+        button2.configurationUpdateHandler = { button in
+            var config = button.configuration
+            config?.image = button.isSelected ? 
+                UIImage(named: "icon2On")?.resized(toScale: 0.3) :
+                UIImage(named: "icon2Off")?.resized(toScale: 0.3)
+            button.configuration = config
+        }
         button2.tag = 1
         button2.addTarget(self, action: #selector(buttonTapped(_:)), for: .touchUpInside)
         
@@ -62,3 +70,13 @@ class ImageSegmentControl: UIStackView {
         onSegmentChanged?(sender.tag)
     }
 }
+extension UIImage {
+    func resized(toScale scale: CGFloat) -> UIImage? {
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            self.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+    }
+}
+

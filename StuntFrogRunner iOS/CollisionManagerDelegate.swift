@@ -332,7 +332,7 @@ class CollisionManager {
             } else {
                 // Circle Pad Logic
                 let currentPadRadius = pad.scaledRadius
-                let safetyBuffer = frogRadius * 0.50
+                let safetyBuffer = frogRadius * 0.90
                 let hitDistance = currentPadRadius + safetyBuffer
                 
                 // 1. Broad Phase: Simple Box Check (Fastest)
@@ -603,6 +603,9 @@ class CollisionManager {
         }
         
         if frog.isInvincible { return }
+        
+        // Cannon jump makes frog invincible to enemies (already handled above)
+        if frog.isCannonJumping { return }
         
         for enemy in enemies where !enemy.isBeingDestroyed {
             let dx = frog.position.x - enemy.position.x

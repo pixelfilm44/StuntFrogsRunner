@@ -1,7 +1,5 @@
 import UIKit
 
-import UIKit
-
 class ChallengesViewController: UIViewController {
     
     weak var coordinator: GameCoordinator?
@@ -51,7 +49,7 @@ class ChallengesViewController: UIViewController {
         button.setTitleColor(.white, for: .normal)
         button.setTitle("BACK", for: .normal)
         button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .bold)
-      button.setBackgroundImage(UIImage(named: "secondaryButton"), for: .normal)
+        button.setBackgroundImage(UIImage(named: "secondaryButton"), for: .normal)
 
         button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(handleBack), for: .touchUpInside)
@@ -95,8 +93,9 @@ class ChallengesViewController: UIViewController {
             segmentedControl.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 20),
             segmentedControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             segmentedControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            segmentedControl.heightAnchor.constraint(equalToConstant: 40),
+            segmentedControl.heightAnchor.constraint(equalToConstant: 20),
             
+            // Updated to 32 pixel left and right padding
             tableView.topAnchor.constraint(equalTo: segmentedControl.bottomAnchor, constant: 20),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
@@ -198,7 +197,7 @@ class ChallengeCell: UITableViewCell {
     private let containerView: UIImageView = {
         let imageView = UIImageView()
         imageView.image = UIImage(named: "itemBackdrop")
-        imageView.contentMode = .scaleToFill
+       // imageView.contentMode = .scaleToFill
         imageView.translatesAutoresizingMaskIntoConstraints = false
         return imageView
     }()
@@ -289,6 +288,10 @@ class ChallengeCell: UITableViewCell {
         containerView.layer.shadowOpacity = 0.3
         containerView.layer.masksToBounds = false
         
+        // Use larger padding on iPad
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        let horizontalPadding: CGFloat = isIPad ? 32 : 16
+        
         NSLayoutConstraint.activate([
             containerView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
             containerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
@@ -296,27 +299,27 @@ class ChallengeCell: UITableViewCell {
             containerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             
             titleLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 12),
-            titleLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            titleLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: horizontalPadding),
             titleLabel.trailingAnchor.constraint(equalTo: claimBadge.leadingAnchor, constant: -8),
             
             descriptionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
-            descriptionLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            descriptionLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            descriptionLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: horizontalPadding),
+            descriptionLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -horizontalPadding),
             
             progressBar.topAnchor.constraint(equalTo: descriptionLabel.bottomAnchor, constant: 10),
-            progressBar.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            progressBar.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: horizontalPadding),
             progressBar.trailingAnchor.constraint(equalTo: progressLabel.leadingAnchor, constant: -8),
             progressBar.heightAnchor.constraint(equalToConstant: 8),
             
             progressLabel.centerYAnchor.constraint(equalTo: progressBar.centerYAnchor),
-            progressLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            progressLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -horizontalPadding),
             progressLabel.widthAnchor.constraint(equalToConstant: 80),
             
             rewardLabel.topAnchor.constraint(equalTo: progressBar.bottomAnchor, constant: 8),
-            rewardLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            rewardLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: horizontalPadding),
             
             claimBadge.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 12),
-            claimBadge.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -12),
+            claimBadge.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -horizontalPadding),
             claimBadge.widthAnchor.constraint(equalToConstant: 100),
             claimBadge.heightAnchor.constraint(equalToConstant: 20)
         ])
@@ -338,11 +341,7 @@ class ChallengeCell: UITableViewCell {
             rewardLabel.text = "✅ Claimed"
         } else if challenge.isCompleted {
             containerView.alpha = 1.0
-            
-            // Pulse animation for claimable rewards
-            UIView.animate(withDuration: 0.8, delay: 0, options: [.repeat, .autoreverse], animations: {
-                self.claimBadge.transform = CGAffineTransform(scaleX: 1.05, y: 1.05)
-            })
+            // Removed pulse animation from claimable rewards as requested
         } else {
             containerView.alpha = 1.0
         }

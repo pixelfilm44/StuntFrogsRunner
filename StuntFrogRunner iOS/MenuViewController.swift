@@ -407,6 +407,8 @@ class MenuViewController: UIViewController {
         // Show help modal on first play
         if !PersistenceManager.shared.hasSeenHelp {
             showHelpModal(startGameOnDismiss: true)
+            
+            
         } else {
             coordinator?.startGame()
         }
@@ -457,6 +459,7 @@ class MenuViewController: UIViewController {
     
     private func showHelpModal(startGameOnDismiss: Bool) {
         let helpVC = HelpViewController()
+        ToolTips.resetToolTipHistory()
         helpVC.modalPresentationStyle = .overFullScreen
         helpVC.modalTransitionStyle = .crossDissolve
         helpVC.onDismiss = { [weak self] in

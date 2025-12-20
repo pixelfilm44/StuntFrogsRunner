@@ -61,9 +61,18 @@ class GameScene: SKScene, CollisionManagerDelegate {
     // MARK: - Parallax Plant System
     private var parallaxPlants: [ParallaxPlant] = []
     private var plantPool: [SKSpriteNode] = []
-    private let maxParallaxPlants: Int = 8
+    private var maxParallaxPlants: Int {
+        // iPad needs more plants for larger screen coverage
+        // Need enough plants to maintain minimum 3 per side while new ones spawn
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        return isIPad ? 16 : 8  // 8 per side on iPad, 4 per side on iPhone
+    }
     private var lastPlantSpawnY: CGFloat = 0
-    private let plantSpawnInterval: CGFloat = 300
+    private var plantSpawnInterval: CGFloat {
+        // Spawn plants more frequently on iPad to maintain coverage
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        return isIPad ? 200 : 300  // Closer spacing on iPad
+    }
     
     private let waterLinesNode = SKNode()
     private var waterBackgroundNode: SKSpriteNode?
@@ -71,6 +80,12 @@ class GameScene: SKScene, CollisionManagerDelegate {
     // MARK: - Water Lines System (Movement Effect)
     private var waterLines: [SKSpriteNode] = []
     private let maxWaterLines: Int = 12  // Limit for performance
+    
+    // MARK: - Enhanced Water Effects
+    private let waterShimmerNode = SKNode()
+    private var shimmerParticles: [SKSpriteNode] = []
+    private let maxShimmerParticles: Int = 20
+    private var waterWaveTimer: TimeInterval = 0
     private var waterLineSpawnTimer: TimeInterval = 0
     private let waterLineSpawnInterval: TimeInterval = 0.8  // Spawn every 0.8 seconds
     
@@ -87,13 +102,13 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private let maxWaterStars: Int = 30  // Limit for performance
     private var waterStarsEnabled: Bool = false
     
-    // MARK: - Shore System (Zigzag Rugged Shores)
+    // MARK: - Shore System (PNG-based Shores)
     private let leftShoreNode = SKNode()
     private let rightShoreNode = SKNode()
-    private var leftShoreSegments: [SKShapeNode] = []
-    private var rightShoreSegments: [SKShapeNode] = []
-    private let shoreSegmentHeight: CGFloat = 400  // Height of each shore segment
-    private let shoreWidth: CGFloat = 300  // Width of the shore from river edge - MUCH WIDER to fill black areas
+    private var leftShoreSegments: [SKSpriteNode] = []
+    private var rightShoreSegments: [SKSpriteNode] = []
+    private let shoreSegmentHeight: CGFloat = 1200  // Height of each shore segment
+    private let shoreWidth: CGFloat = 1200 // Width of the shore from river edge - MUCH WIDER to fill black areas
     private var lastShoreSpawnY: CGFloat = 0
     
     // --- Performance Improvement: Ripple Pool ---
@@ -172,6 +187,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private var lastHapticDragStep: Int = 0
     private var hasTriggeredMaxPullHaptic: Bool = false
     
+    // Public property to check if player is currently dragging (used by ToolTips to avoid pausing mid-drag)
+    var isPlayerDragging: Bool {
+        return isDragging
+    }
+    
     // Slingshot smoothing
     private var smoothedDotPosition: CGPoint = .zero
     private let dotSmoothingFactor: CGFloat = 0.3  // Lower = smoother but slightly laggy, Higher = more responsive
@@ -246,9 +266,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // Enable debug stats in development to monitor performance
         #if DEBUG
-        view.showsFPS = true
-        view.showsNodeCount = true
-        view.showsDrawCount = true
+        view.showsFPS = false
+        view.showsNodeCount = false
+        view.showsDrawCount = false
         
         // Log performance baseline
         logPerformanceBaseline()
@@ -267,7 +287,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         CrossAttackAnimation.initializePool() // PERFORMANCE: Initialize cross sprite pool
         preloadTextures() // PERFORMANCE: Preload textures to avoid runtime loading
         startSpawningLeaves()
-        setupPlantDecorations() // Setup decorative plants on screen edges
+        //setupPlantDecorations() // Setup decorative plants on screen edges
         //startSpawningFlotsam()
         collisionManager.delegate = self
         startGame()
@@ -343,9 +363,16 @@ class GameScene: SKScene, CollisionManagerDelegate {
         worldNode.addChild(waterLinesNode)
         setupWaterLines()
         
-        // Add shore nodes (rugged zigzag shores on both sides)
-        leftShoreNode.zPosition = -105  // Behind water background
-        rightShoreNode.zPosition = -105
+        // Add water shimmer node (enhanced water effects)
+        waterShimmerNode.zPosition = Layer.water + 0.3  // Just above water background
+        worldNode.addChild(waterShimmerNode)
+        setupWaterShimmers()
+        
+        // Add shore nodes (image-based shores on both sides for iPad)
+        // Shores are positioned ABOVE water so they overlay it
+        // The PNG files should have transparency to let water show through
+        leftShoreNode.zPosition = Layer.water + 0.1  // Just above water background
+        rightShoreNode.zPosition = Layer.water + 0.1
         worldNode.addChild(leftShoreNode)
         worldNode.addChild(rightShoreNode)
         setupShores()
@@ -577,8 +604,12 @@ class GameScene: SKScene, CollisionManagerDelegate {
         lastPlantSpawnY = frog.position.y
         
         // Spawn initial plants around the frog's starting position
-        for i in 0..<2 {
-            let offset = CGFloat(i) * 200
+        // iPad needs more initial plants for better screen coverage (up to 12 total)
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        let initialPlantCount = isIPad ? 6 : 2  // 6 per side on iPad = 12 total
+        
+        for i in 0..<initialPlantCount {
+            let offset = CGFloat(i) * (isIPad ? 150 : 200)
             spawnParallaxPlant(side: .left, atY: frog.position.y + offset)
             spawnParallaxPlant(side: .right, atY: frog.position.y + offset)
         }
@@ -641,7 +672,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let parallaxFactor = CGFloat.random(in: 0.5...0.8)
         
         // World Y position for tracking
-        let spawnWorldY = worldY ?? (cam.position.y + size.height / 2 + 200)
+        // iPad needs plants spawned further ahead due to larger screen
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        let spawnAheadDistance: CGFloat = isIPad ? 400 : 200
+        let spawnWorldY = worldY ?? (cam.position.y + size.height / 2 + spawnAheadDistance)
         
         // Calculate initial screen-relative position
         let screenWidth = size.width
@@ -717,8 +751,21 @@ class GameScene: SKScene, CollisionManagerDelegate {
             plant.position = CGPoint(x: screenX, y: screenY)
             
             // Remove plants that have scrolled far off the bottom of the screen
-            if screenY < -screenHeight / 2 - 500 {
-                print("🌿 Removing plant at worldY:\(parallaxPlant.worldY), screenY:\(screenY) (camera at \(camY))")
+            // On iPad, keep more plants and use a much larger buffer due to larger screen
+            let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+            let minPlantsPerSide = isIPad ? 3 : 1  // Keep minimum 3 plants per side on iPad
+            let plantsOnThisSide = parallaxPlants.filter { $0.side == parallaxPlant.side }.count
+            
+            // iPad needs a MUCH larger cull threshold due to:
+            // 1. Larger screen (up to 2732 points tall on 12.9" iPad Pro)
+            // 2. Parallax effect (plants move 0.5-0.8x camera speed, so they lag behind)
+            // This means plants need to stay around much longer to avoid gaps
+            let cullBuffer: CGFloat = isIPad ? 1200 : 500  // Much more generous on iPad
+            let cullThreshold = -screenHeight / 2 - cullBuffer
+            let shouldCull = screenY < cullThreshold && plantsOnThisSide > minPlantsPerSide
+            
+            if shouldCull {
+                print("🌿 Removing plant at worldY:\(parallaxPlant.worldY), screenY:\(screenY) (camera at \(camY)), remaining on \(parallaxPlant.side): \(plantsOnThisSide - 1)")
                 returnPlantToPool(plant)
                 parallaxPlants.remove(at: i)
             }
@@ -728,9 +775,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
         if camY > lastPlantSpawnY + plantSpawnInterval {
             lastPlantSpawnY = camY
             
-            // Spawn 1-2 plants on each side
-            let leftCount = Int.random(in: 1...2)
-            let rightCount = Int.random(in: 1...2)
+            // iPad needs more plants spawned for better coverage
+            let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+            let spawnRange = isIPad ? 2...3 : 1...2
+            let leftCount = Int.random(in: spawnRange)
+            let rightCount = Int.random(in: spawnRange)
             
             for _ in 0..<leftCount {
                 if parallaxPlants.filter({ $0.side == .left }).count < maxParallaxPlants / 2 {
@@ -806,9 +855,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private func createWaterBackground() {
         // PERFORMANCE FIX: Create a smaller texture for better GPU performance
         // The texture will be scaled to fill the screen
-        // Extend water to cover under the shores (which extend ~100-200 points on each side)
+        // Extend water to cover under the shores using centralized configuration
         let backgroundSize = CGSize(
-            width: Configuration.Dimensions.riverWidth + 500,  // Extra width to extend under shores
+            width: Configuration.Dimensions.waterBackgroundWidth,  // riverWidth + (250*2) = 1100
             height: size.height * 1.5 // Reduced from *2 for better performance
         )
         
@@ -831,7 +880,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         self.waterBackgroundNode = background
         
         // Add subtle animated drift to the water
-        //animateWaterBackground()
+        animateWaterBackground()
         
         print("✅ Gradient water background created for \(currentWeather)")
     }
@@ -975,9 +1024,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
             
         case .desert:
             // Warm, sandy beige (representing sand)
-            let top = UIColor(red: 245/255, green: 220/255, blue: 140/255, alpha: 1.0)
-            let middle = UIColor(red: 230/255, green: 200/255, blue: 120/255, alpha: 1.0)
-            let bottom = UIColor(red: 210/255, green: 180/255, blue: 100/255, alpha: 1.0)
+            let top = UIColor(red: 195/255, green: 160/255, blue: 90/255, alpha: 1.0)
+            let middle = UIColor(red: 180/255, green: 145/255, blue: 75/255, alpha: 1.0)
+            let bottom = UIColor(red: 160/255, green: 125/255, blue: 60/255, alpha: 1.0)
             return (top, middle, bottom)
             
         case .space:
@@ -1029,9 +1078,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Remove any existing animations
         background.removeAction(forKey: "waterAnimation")
         
-        // Subtle vertical drift to simulate water flow
-        let driftDistance: CGFloat = 15.0
-        let driftDuration: TimeInterval = 8.0
+        // Enhanced: More pronounced drift on high-end devices for dynamic feel
+        let driftDistance: CGFloat = PerformanceSettings.isHighEndDevice ? 25.0 : 15.0
+        let driftDuration: TimeInterval = PerformanceSettings.isHighEndDevice ? 6.0 : 8.0
         
         let moveUp = SKAction.moveBy(x: 0, y: driftDistance, duration: driftDuration / 2)
         moveUp.timingMode = .easeInEaseOut
@@ -1043,6 +1092,17 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let forever = SKAction.repeatForever(sequence)
         
         background.run(forever, withKey: "waterAnimation")
+        
+        // Add subtle scale pulsing for wave effect on high-end devices
+        if PerformanceSettings.isHighEndDevice {
+            let scaleUp = SKAction.scaleX(to: 1.01, duration: 4.0)
+            scaleUp.timingMode = .easeInEaseOut
+            let scaleDown = SKAction.scaleX(to: 1.0, duration: 4.0)
+            scaleDown.timingMode = .easeInEaseOut
+            let scaleSequence = SKAction.sequence([scaleUp, scaleDown])
+            let scaleForever = SKAction.repeatForever(scaleSequence)
+            background.run(scaleForever, withKey: "waterWave")
+        }
     }
     
     /// Updates the water background position to follow the camera
@@ -1284,16 +1344,19 @@ class GameScene: SKScene, CollisionManagerDelegate {
             return
         }
         
+        // Enhanced: More lines on high-end devices for richer water effect
+        let lineCount = PerformanceSettings.isHighEndDevice ? 18 : maxWaterLines
+        
         // Create initial set of water lines
         let waterWidth = Configuration.Dimensions.riverWidth
         let viewHeight = size.height
         let camY = cam.position.y
         
-        for i in 0..<maxWaterLines {
+        for i in 0..<lineCount {
             let line = createWaterLine()
             
             // Distribute lines across the visible area and slightly above
-            let yPos = camY - viewHeight/2 + CGFloat(i) * (viewHeight * 1.5 / CGFloat(maxWaterLines))
+            let yPos = camY - viewHeight/2 + CGFloat(i) * (viewHeight * 1.5 / CGFloat(lineCount))
             line.position = CGPoint(
                 x: CGFloat.random(in: 0...waterWidth),
                 y: yPos
@@ -1303,10 +1366,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
             waterLines.append(line)
             
             // Start with varied animation states for natural look
-            animateWaterLine(line)
+            animateWaterLine(line, index: i)
         }
         
-        print("〰️ Water lines system initialized with \(maxWaterLines) lines")
+        print("〰️ Water lines system initialized with \(lineCount) lines")
     }
     
     /// Creates a single water line sprite with optimized rendering
@@ -1347,10 +1410,14 @@ class GameScene: SKScene, CollisionManagerDelegate {
     }
     
     /// Animates a water line with flowing movement
-    private func animateWaterLine(_ line: SKSpriteNode) {
+    private func animateWaterLine(_ line: SKSpriteNode, index: Int = 0) {
+        // Enhanced: Vary animation parameters based on line index for layered parallax effect
+        let speedMultiplier: CGFloat = 1.0 + (CGFloat(index % 3) * 0.3) // Create 3 speed layers
+        
         // Random horizontal drift to simulate water current
-        let driftDistance: CGFloat = CGFloat.random(in: 10...30)
-        let driftDuration: TimeInterval = TimeInterval.random(in: 2.0...4.0)
+        let baseDriftDistance: CGFloat = PerformanceSettings.isHighEndDevice ? 40 : 25
+        let driftDistance: CGFloat = CGFloat.random(in: (baseDriftDistance * 0.7)...(baseDriftDistance * 1.3)) * speedMultiplier
+        let driftDuration: TimeInterval = TimeInterval.random(in: 2.0...4.0) / Double(speedMultiplier)
         
         let moveRight = SKAction.moveBy(x: driftDistance, y: 0, duration: driftDuration)
         moveRight.timingMode = .easeInEaseOut
@@ -1361,15 +1428,29 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let drift = SKAction.sequence([moveRight, moveLeft])
         let driftForever = SKAction.repeatForever(drift)
         
-        // Subtle pulsing alpha for organic feel
-        let fadeOut = SKAction.fadeAlpha(to: 0.2, duration: TimeInterval.random(in: 1.5...2.5))
+        // Enhanced pulsing alpha for more organic feel
+        let minAlpha: CGFloat = 0.15
+        let maxAlpha: CGFloat = PerformanceSettings.isHighEndDevice ? 0.7 : 0.6
+        
+        let fadeOut = SKAction.fadeAlpha(to: minAlpha, duration: TimeInterval.random(in: 1.2...2.0))
         fadeOut.timingMode = .easeInEaseOut
         
-        let fadeIn = SKAction.fadeAlpha(to: 0.6, duration: TimeInterval.random(in: 1.5...2.5))
+        let fadeIn = SKAction.fadeAlpha(to: maxAlpha, duration: TimeInterval.random(in: 1.2...2.0))
         fadeIn.timingMode = .easeInEaseOut
         
         let pulse = SKAction.sequence([fadeOut, fadeIn])
         let pulseForever = SKAction.repeatForever(pulse)
+        
+        // Add subtle vertical wobble on high-end devices
+        if PerformanceSettings.isHighEndDevice {
+            let wobbleUp = SKAction.moveBy(x: 0, y: 2, duration: TimeInterval.random(in: 1.0...1.5))
+            wobbleUp.timingMode = .easeInEaseOut
+            let wobbleDown = SKAction.moveBy(x: 0, y: -2, duration: TimeInterval.random(in: 1.0...1.5))
+            wobbleDown.timingMode = .easeInEaseOut
+            let wobble = SKAction.sequence([wobbleUp, wobbleDown])
+            let wobbleForever = SKAction.repeatForever(wobble)
+            line.run(wobbleForever, withKey: "wobble")
+        }
         
         line.run(driftForever, withKey: "drift")
         line.run(pulseForever, withKey: "pulse")
@@ -1421,6 +1502,156 @@ class GameScene: SKScene, CollisionManagerDelegate {
         setupWaterLines()
     }
     
+    // MARK: - Water Shimmer Effects (Enhanced Dynamics)
+    
+    /// Creates shimmering light effects on the water surface
+    private func setupWaterShimmers() {
+        // Only on high-end devices for best performance
+        guard PerformanceSettings.isHighEndDevice else {
+            print("✨ Water shimmers disabled by performance settings")
+            return
+        }
+        
+        let waterWidth = Configuration.Dimensions.riverWidth
+        let viewHeight = size.height
+        let camY = cam.position.y
+        
+        for i in 0..<maxShimmerParticles {
+            let shimmer = createShimmerParticle()
+            
+            // Distribute across visible area
+            let yPos = camY - viewHeight/2 + CGFloat.random(in: 0...(viewHeight * 1.5))
+            shimmer.position = CGPoint(
+                x: CGFloat.random(in: 0...waterWidth),
+                y: yPos
+            )
+            
+            waterShimmerNode.addChild(shimmer)
+            shimmerParticles.append(shimmer)
+            
+            // Animate with staggered delay
+            let delay = Double(i) * 0.1
+            animateShimmer(shimmer, delay: delay)
+        }
+        
+        print("✨ Water shimmer system initialized with \(maxShimmerParticles) particles")
+    }
+    
+    /// Creates a single shimmer particle sprite
+    private func createShimmerParticle() -> SKSpriteNode {
+        let size = CGSize(width: CGFloat.random(in: 8...15), height: CGFloat.random(in: 8...15))
+        
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { context in
+            let ctx = context.cgContext
+            
+            // Create radial gradient for shimmer effect
+            let colors = [
+                UIColor.white.withAlphaComponent(0.0).cgColor,
+                UIColor.white.withAlphaComponent(0.8).cgColor,
+                UIColor.white.withAlphaComponent(0.0).cgColor
+            ] as CFArray
+            
+            guard let gradient = CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                colors: colors,
+                locations: [0.0, 0.5, 1.0]
+            ) else { return }
+            
+            ctx.drawRadialGradient(
+                gradient,
+                startCenter: CGPoint(x: size.width/2, y: size.height/2),
+                startRadius: 0,
+                endCenter: CGPoint(x: size.width/2, y: size.height/2),
+                endRadius: size.width/2,
+                options: []
+            )
+        }
+        
+        let texture = SKTexture(image: image)
+        texture.filteringMode = .linear
+        
+        let shimmer = SKSpriteNode(texture: texture, size: size)
+        shimmer.alpha = 0
+        shimmer.blendMode = .add
+        
+        return shimmer
+    }
+    
+    /// Animates a shimmer particle with twinkling effect
+    private func animateShimmer(_ shimmer: SKSpriteNode, delay: TimeInterval) {
+        // Wait before starting
+        let initialDelay = SKAction.wait(forDuration: delay)
+        
+        // Quick fade in
+        let fadeIn = SKAction.fadeAlpha(to: CGFloat.random(in: 0.4...0.7), duration: 0.3)
+        fadeIn.timingMode = .easeOut
+        
+        // Hold briefly
+        let hold = SKAction.wait(forDuration: 0.1)
+        
+        // Quick fade out
+        let fadeOut = SKAction.fadeAlpha(to: 0, duration: 0.3)
+        fadeOut.timingMode = .easeIn
+        
+        // Wait before next shimmer
+        let waitBetween = SKAction.wait(forDuration: TimeInterval.random(in: 2.0...5.0))
+        
+        // Shimmer sequence
+        let shimmerSequence = SKAction.sequence([fadeIn, hold, fadeOut, waitBetween])
+        let shimmerForever = SKAction.repeatForever(shimmerSequence)
+        
+        // Gentle drift
+        let driftX = CGFloat.random(in: -15...15)
+        let driftY = CGFloat.random(in: -10...10)
+        let drift = SKAction.moveBy(x: driftX, y: driftY, duration: TimeInterval.random(in: 3.0...6.0))
+        drift.timingMode = .easeInEaseOut
+        let driftBack = drift.reversed()
+        let driftSequence = SKAction.sequence([drift, driftBack])
+        let driftForever = SKAction.repeatForever(driftSequence)
+        
+        shimmer.run(SKAction.sequence([initialDelay, shimmerForever]), withKey: "shimmer")
+        shimmer.run(driftForever, withKey: "drift")
+    }
+    
+    /// Updates shimmer particle positions to follow camera
+    private func updateWaterShimmers() {
+        guard PerformanceSettings.isHighEndDevice else { return }
+        guard !shimmerParticles.isEmpty else { return }
+        
+        let camY = cam.position.y
+        let viewHeight = size.height
+        let waterWidth = Configuration.Dimensions.riverWidth
+        
+        for shimmer in shimmerParticles {
+            let distanceBehindCamera = camY - shimmer.position.y
+            
+            // Recycle shimmers that fall too far behind
+            if distanceBehindCamera > viewHeight * 1.2 {
+                shimmer.position.y = camY + viewHeight * 0.8
+                shimmer.position.x = CGFloat.random(in: 0...waterWidth)
+            }
+        }
+    }
+    
+    /// Removes all shimmer particles from the scene
+    private func removeWaterShimmers() {
+        for shimmer in shimmerParticles {
+            shimmer.removeAllActions()
+            shimmer.removeFromParent()
+        }
+        shimmerParticles.removeAll()
+        print("✨ Water shimmers removed")
+    }
+    
+    /// Restores water shimmers after returning from desert/space
+    private func restoreWaterShimmers() {
+        guard PerformanceSettings.isHighEndDevice else { return }
+        guard shimmerParticles.isEmpty else { return }
+        
+        setupWaterShimmers()
+    }
+    
     // MARK: - Shore System (Zigzag Rugged Shores)
     
     /// Creates the initial shore segments for both left and right sides
@@ -1455,49 +1686,39 @@ class GameScene: SKScene, CollisionManagerDelegate {
         case right
     }
     
-    /// Creates a single zigzag shore segment for the specified side
-    private func createShoreSegment(side: ShoreSegmentSide, yPosition: CGFloat) -> SKShapeNode {
-        let path = CGMutablePath()
+    /// Creates a single shore segment for the specified side using PNG images
+    private func createShoreSegment(side: ShoreSegmentSide, yPosition: CGFloat) -> SKSpriteNode {
         let riverWidth = Configuration.Dimensions.riverWidth
         
-        // Determine the X position based on side
-        let baseX: CGFloat
+        // Determine which image to use based on side
+        let imageName: String
+        let xPosition: CGFloat
+        
         if side == .left {
-            baseX = 0  // Left edge of river
+            imageName = "shoreLeft"
+            // Position the left shore at the left edge of the river
+            xPosition = 0
         } else {
-            baseX = riverWidth  // Right edge of river
+            imageName = "shoreRight"
+            // Position the right shore at the right edge of the river
+            xPosition = riverWidth
         }
         
-        // Create rugged zigzag pattern - use local coordinates (0 to shoreSegmentHeight)
-        let zigzagPoints = createZigzagPattern(baseX: baseX, yStart: 0, height: shoreSegmentHeight, side: side)
+        // Create the sprite node with the appropriate shore image
+        let segment = SKSpriteNode(imageNamed: imageName)
         
-        // Build the path from zigzag points
-        if let firstPoint = zigzagPoints.first {
-            path.move(to: firstPoint)
-            for point in zigzagPoints.dropFirst() {
-                path.addLine(to: point)
-            }
-            
-            // Close the shape by going off-screen
-            if side == .left {
-                path.addLine(to: CGPoint(x: -shoreWidth - 100, y: shoreSegmentHeight))
-                path.addLine(to: CGPoint(x: -shoreWidth - 100, y: 0))
-            } else {
-                path.addLine(to: CGPoint(x: riverWidth + shoreWidth + 100, y: shoreSegmentHeight))
-                path.addLine(to: CGPoint(x: riverWidth + shoreWidth + 100, y: 0))
-            }
-            path.closeSubpath()
+        // Set the segment's position
+        segment.position = CGPoint(x: xPosition, y: yPosition)
+        
+        // Ensure the shore texture tiles vertically for the segment height
+        segment.size = CGSize(width: shoreWidth, height: shoreSegmentHeight)
+        
+        // Set anchor point based on side for proper alignment
+        if side == .left {
+            segment.anchorPoint = CGPoint(x: 1.0, y: 0.0)  // Right-bottom anchor (aligns to river edge)
+        } else {
+            segment.anchorPoint = CGPoint(x: 0.0, y: 0.0)  // Left-bottom anchor (aligns to river edge)
         }
-        
-        let segment = SKShapeNode(path: path)
-        
-        // IMPORTANT: Set the segment's position to the world Y coordinate
-        segment.position = CGPoint(x: 0, y: yPosition)
-        
-        // Brown earthy color for the shore - BRIGHTER for visibility
-        segment.fillColor = SKColor(red: 139/255, green: 90/255, blue: 43/255, alpha: 1.0)  // Saddle brown
-        segment.strokeColor = SKColor(red: 101/255, green: 67/255, blue: 33/255, alpha: 1.0)  // Dark brown border
-        segment.lineWidth = 3
         
         return segment
     }
@@ -1538,42 +1759,51 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let camY = cam.position.y
         let viewHeight = size.height
         
-        // Recycle left shore segments
-        for segment in leftShoreSegments {
-            let distanceBehindCamera = camY - segment.position.y
+        // PROACTIVE GENERATION: Spawn new shore segments ahead of the camera if needed
+        // This prevents visible pop-in during fast forward movement (rocket, super jump, etc.)
+        // Spawn segments when camera gets within 2 screen heights of the last spawned segment
+        let spawnThreshold = viewHeight * 2.0  // Spawn further ahead to prevent pop-in
+        if camY + spawnThreshold > lastShoreSpawnY {
+            // Create new left shore segment
+            let newLeftSegment = createShoreSegment(side: .left, yPosition: lastShoreSpawnY)
+            leftShoreNode.addChild(newLeftSegment)
+            leftShoreSegments.append(newLeftSegment)
             
-            if distanceBehindCamera > viewHeight * 1.5 {
-                // Move segment ahead
-                segment.removeFromParent()
-                
-                let newYPos = lastShoreSpawnY
-                let newSegment = createShoreSegment(side: .left, yPosition: newYPos)
-                leftShoreNode.addChild(newSegment)
-                
-                if let index = leftShoreSegments.firstIndex(of: segment) {
-                    leftShoreSegments[index] = newSegment
-                }
-                
-                lastShoreSpawnY += shoreSegmentHeight
-            }
+            // Create new right shore segment
+            let newRightSegment = createShoreSegment(side: .right, yPosition: lastShoreSpawnY)
+            rightShoreNode.addChild(newRightSegment)
+            rightShoreSegments.append(newRightSegment)
+            
+            // Update spawn tracker
+            lastShoreSpawnY += shoreSegmentHeight
         }
         
-        // Recycle right shore segments
-        for segment in rightShoreSegments {
-            let distanceBehindCamera = camY - segment.position.y
+        // REACTIVE CLEANUP: Remove shore segments that have fallen far behind the camera
+        // Calculate distance from camera to the TOP of the segment
+        // Since anchor point is at bottom (y: 0.0), the segment extends upward by shoreSegmentHeight
+        
+        // Clean up left shore segments
+        leftShoreSegments.removeAll { segment in
+            let segmentTopY = segment.position.y + shoreSegmentHeight
+            let distanceBehindCamera = camY - segmentTopY
             
-            if distanceBehindCamera > viewHeight * 1.5 {
-                // Move segment ahead
+            if distanceBehindCamera > viewHeight * 2.0 {  // Increased buffer for safety
                 segment.removeFromParent()
-                
-                let newYPos = lastShoreSpawnY - shoreSegmentHeight  // Sync with left shore
-                let newSegment = createShoreSegment(side: .right, yPosition: newYPos)
-                rightShoreNode.addChild(newSegment)
-                
-                if let index = rightShoreSegments.firstIndex(of: segment) {
-                    rightShoreSegments[index] = newSegment
-                }
+                return true
             }
+            return false
+        }
+        
+        // Clean up right shore segments
+        rightShoreSegments.removeAll { segment in
+            let segmentTopY = segment.position.y + shoreSegmentHeight
+            let distanceBehindCamera = camY - segmentTopY
+            
+            if distanceBehindCamera > viewHeight * 2.0 {  // Increased buffer for safety
+                segment.removeFromParent()
+                return true
+            }
+            return false
         }
     }
     
@@ -1605,7 +1835,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private func createMoonlightNode() -> SKSpriteNode {
         // The node needs to be large enough to cover the screen even with parallax.
         // 2x screen size is a safe bet.
-        let nodeSize = CGSize(width: size.width * 2, height: size.height * 2)
+        let nodeSize = CGSize(width: size.width * 4, height: size.height * 4)
         
         // Create the gradient texture programmatically.
         let renderer = UIGraphicsImageRenderer(size: nodeSize)
@@ -1615,7 +1845,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
             
             // FIXED: Much brighter moonlight - increased from 0.28 to 0.6 alpha
             // Soft blue-white glow that actually illuminates the scene
-            let colors = [UIColor.blue.withAlphaComponent(0.6).cgColor, UIColor.clear.cgColor]
+            let colors = [UIColor.blue.withAlphaComponent(0.9).cgColor, UIColor.clear.cgColor]
             let locations: [CGFloat] = [0.0, 1.0]
             
             if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
@@ -2253,9 +2483,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         jumpPromptBg.addChild(jumpPromptLabel)
         
         // MARK: - Debug FPS Display
-        #if DEBUG
-        setupDebugHUD()
-        #endif
+       // #if DEBUG
+      //  setupDebugHUD()
+     //   #endif
     }
     
     #if DEBUG
@@ -2441,13 +2671,13 @@ class GameScene: SKScene, CollisionManagerDelegate {
         fingerSprite.name = "finger"
         
         // Scale down the finger to 40% of its original size
-        fingerSprite.setScale(0.4)
+        fingerSprite.setScale(0.6)
         
         // Set anchor point to top center (0.5, 1.0) so the top of the finger is the reference point
         fingerSprite.anchorPoint = CGPoint(x: 0.5, y: 1.0)
         
         // Position the finger so its top is directly over the frog (at position 0, 0 relative to camera)
-        fingerSprite.position = CGPoint(x: 0, y: 0)
+        fingerSprite.position = CGPoint(x: 0, y: -180)
         fingerSprite.zPosition = 1
         tutorialOverlay.addChild(fingerSprite)
         tutorialFingerSprite = fingerSprite
@@ -2461,12 +2691,27 @@ class GameScene: SKScene, CollisionManagerDelegate {
         instructionLabel.zPosition = 1
         tutorialOverlay.addChild(instructionLabel)
         
-        // Add a subtle pulsing animation to the finger
-        // Base scale is 0.4, pulse between 0.4 and 0.44 (10% increase from base)
-        let scaleUp = SKAction.scale(to: 0.44, duration: 0.8)
-        let scaleDown = SKAction.scale(to: 0.4, duration: 0.8)
-        let pulse = SKAction.sequence([scaleUp, scaleDown])
-        fingerSprite.run(SKAction.repeatForever(pulse))
+        // Animate the finger: slide down to simulate dragging, then fade out and repeat
+        // Frog is at camera position (0, 0), but we need the finger tip to touch it
+        // With anchor at top (1.0), we need to move the finger down slightly
+        let startPosition = CGPoint(x: 0, y: -180)  // Top tip of finger touching the frog
+        let endPosition = CGPoint(x: 0, y: -240) // Slide down 150 points from start
+        
+        let wait1 = SKAction.wait(forDuration: 0.5)
+        let slideDown = SKAction.move(to: endPosition, duration: 1.0)
+        slideDown.timingMode = .easeInEaseOut
+        
+        let fadeOut = SKAction.fadeOut(withDuration: 0.3)
+        
+        let reset = SKAction.run { [weak fingerSprite] in
+            fingerSprite?.position = startPosition
+            fingerSprite?.alpha = 1.0
+        }
+        
+        let wait2 = SKAction.wait(forDuration: 0.5)
+        
+        let sequence = SKAction.sequence([wait1, slideDown, fadeOut, reset, wait2])
+        fingerSprite.run(SKAction.repeatForever(sequence))
         
         // Position the tutorial overlay at camera position (screen space)
         tutorialOverlay.zPosition = Layer.overlay
@@ -3087,8 +3332,12 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         for pad in pads {
             let padY = pad.position.y
-            // Early exit if we've moved far past the active upper bound (entities spawn ahead)
+            // PERFORMANCE: Early exit optimization
+            // Since pads are sorted by Y position, we can stop checking once we've gone too far ahead
             if padY > activeUpperBound + viewHeight { break }
+            
+            // PERFORMANCE: Skip pads that are behind the camera by too much
+            if padY < activeLowerBound - viewHeight { continue }
             
             if padY > activeLowerBound && padY < activeUpperBound {
                 // Only update pads that have logic (e.g., moving, shrinking)
@@ -3101,7 +3350,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         for enemy in enemies {
             let enemyY = enemy.position.y
+            // PERFORMANCE: Early exit for sorted arrays
             if enemyY > activeUpperBound + viewHeight { break }
+            // PERFORMANCE: Skip enemies far behind camera
+            if enemyY < activeLowerBound - viewHeight { continue }
             
             if enemyY > activeLowerBound && enemyY < activeUpperBound {
                 enemy.update(dt: dt, target: frog.position)
@@ -3111,7 +3363,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         for crocodile in crocodiles {
             let crocY = crocodile.position.y
+            // PERFORMANCE: Early exit for sorted arrays
             if crocY > activeUpperBound + viewHeight { break }
+            // PERFORMANCE: Skip entities far behind camera
+            if crocY < activeLowerBound - viewHeight { continue }
             
             if crocY > activeLowerBound && crocY < activeUpperBound {
                 crocodile.update(dt: dt, frogPosition: frog.position, frogZHeight: frog.zHeight)
@@ -3121,7 +3376,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         for fly in flies {
             let flyY = fly.position.y
+            // PERFORMANCE: Early exit for sorted arrays
             if flyY > activeUpperBound + viewHeight { break }
+            // PERFORMANCE: Skip entities far behind camera
+            if flyY < activeLowerBound - viewHeight { continue }
             
             if flyY > activeLowerBound && flyY < activeUpperBound {
                 fly.update(dt: dt)
@@ -3131,7 +3389,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         for coin in coins {
             let coinY = coin.position.y
+            // PERFORMANCE: Early exit for sorted arrays
             if coinY > activeUpperBound + viewHeight { break }
+            // PERFORMANCE: Skip entities far behind camera
+            if coinY < activeLowerBound - viewHeight { continue }
             
             if coinY > activeLowerBound && coinY < activeUpperBound {
                 activeCoins.append(coin)
@@ -3140,7 +3401,10 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         for chest in treasureChests {
             let chestY = chest.position.y
+            // PERFORMANCE: Early exit for sorted arrays
             if chestY > activeUpperBound + viewHeight { break }
+            // PERFORMANCE: Skip entities far behind camera
+            if chestY < activeLowerBound - viewHeight { continue }
             
             if chestY > activeLowerBound && chestY < activeUpperBound {
                 activeTreasureChests.append(chest)
@@ -3205,6 +3469,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
         updateWaterVisuals()
         updateWaterStars() // Update star positions for night mode
         updateWaterLines(dt: dt) // Update water line positions for movement effect
+        updateWaterShimmers() // Update shimmer particles for enhanced water dynamics
         updateShores() // Update shore segments to follow camera
         updateRaceState(dt: dt)
         updateDrowningGracePeriod(dt: dt)
@@ -3237,8 +3502,12 @@ class GameScene: SKScene, CollisionManagerDelegate {
         updateMoonlightPosition()
         updateSpaceGlowPosition()
         updateCamera()
-        updateParallaxPlants()  // Update parallax plant positions
+       // updateParallaxPlants()  // Update parallax plant positions
         updateHUDVisuals()
+        
+        // MARK: - Entity Tooltips
+        // Check for first-time entity encounters and show contextual tooltips
+        checkEntityTooltips()
         
         // MARK: - Debug Performance Monitoring
         #if DEBUG
@@ -3246,7 +3515,11 @@ class GameScene: SKScene, CollisionManagerDelegate {
         #endif
         
         // --- Generation & Cleanup ---
-        if let lastPad = pads.last, lastPad.position.y < cam.position.y + size.height {
+        // OVERJUMP FIX: Spawn pads much further ahead to prevent jumping beyond spawn range
+        // Previous: size.height (1x screen ahead)
+        // New: size.height * 2.0 (2x screen ahead) - ensures fast jumps always have pads ready
+        // This has minimal performance impact since we already cull entities efficiently
+        if let lastPad = pads.last, lastPad.position.y < cam.position.y + (size.height * 2.0) {
             generateNextLevelSlice(lastPad: lastPad)
         }
         
@@ -3280,6 +3553,40 @@ class GameScene: SKScene, CollisionManagerDelegate {
                                snakes.count + crocodiles.count + flies.count
             entityCountLabel.text = String(format: "P:%d E:%d C:%d [%d]", 
                                           pads.count, enemies.count, coins.count, totalEntities)
+            
+            // OVERJUMP DEBUG: Log pad spawning distance
+            if let lastPad = pads.last {
+                let spawnDistance = lastPad.position.y - cam.position.y
+                let frogDistance = frog.position.y - cam.position.y
+                // Warn if frog is getting too close to spawn boundary
+                if spawnDistance < size.height * 1.5 {
+                    print("⚠️ Pad spawn getting close! lastPad: \(spawnDistance), frog: \(frogDistance)")
+                }
+            }
+        }
+        
+        // OVERJUMP DEBUG: Log frame drops with frog velocity
+        if dt > 0.025 {  // More than 25ms = below 40 FPS
+            let velocity = sqrt(frog.velocity.dx * frog.velocity.dx + frog.velocity.dy * frog.velocity.dy)
+            print("⚠️ FRAME DROP: dt=\(dt*1000)ms, velocity=\(velocity), frogY=\(frog.position.y)")
+        }
+    }
+    
+    // MARK: - Debug Tooltip Utilities
+    
+    /// Debug function to reset all tooltips (useful during development)
+    func debugResetAllTooltips() {
+        ToolTips.resetToolTipHistory()
+        print("🔄 All tooltips reset - they will show again on next encounter")
+    }
+    
+    /// Debug function to check which entities have been seen
+    func debugPrintTooltipStatus() {
+        let entityTypes = ["FLY", "BEE", "GHOST", "DRAGONFLY", "LOG", "tadpole", "treasure"]
+        print("📊 Entity Tooltip Status:")
+        for type in entityTypes {
+            let seen = ToolTips.hasSeenEntity(type)
+            print("  \(type): \(seen ? "✅ Seen" : "❌ Not seen")")
         }
     }
     #endif
@@ -3310,7 +3617,8 @@ class GameScene: SKScene, CollisionManagerDelegate {
     private func checkBoatCollisions() {
         guard let boat = boat else { return }
 
-        for pad in pads {
+        // PERFORMANCE FIX: Only check collision with active pads, not all pads
+        for pad in activePads {
             // The boat only interacts with circular lily pads, not logs or graves.
             guard pad.type != .log && pad.type != .grave else { continue }
             
@@ -3550,7 +3858,6 @@ class GameScene: SKScene, CollisionManagerDelegate {
 
     private func setWeather(_ type: WeatherType, duration: TimeInterval) {
         let oldWeather = self.currentWeather
-        
         // Force instant transitions for space weather
         var actualDuration = duration
         if type == .space || oldWeather == .space {
@@ -3644,10 +3951,25 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Always stop, regardless of duration (for instant transitions too)
         SoundManager.shared.stopWeatherSFX(fadeDuration: actualDuration > 0 ? actualDuration : 0.0)
         SoundManager.shared.playWeatherSFX(sfx, fadeDuration: actualDuration)
+        
         // --- In-World Object Transitions ---
-        for pad in pads {
-            pad.updateColor(weather: type, duration: actualDuration)
+        // CRITICAL FIX: Batch pad updates to prevent creating hundreds of sprites/actions at once
+        print("🎨 Updating pad colors... (total: \(pads.count))")
+        let batchSize = 10  // Process 10 pads at a time
+        let batchDelay: TimeInterval = 0.016  // ~1 frame delay between batches (60fps)
+        
+        for (batchIndex, batch) in stride(from: 0, to: pads.count, by: batchSize).enumerated() {
+            let endIndex = min(batch + batchSize, pads.count)
+            let padBatch = Array(pads[batch..<endIndex])
+            
+            let delay = batchDelay * Double(batchIndex)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                for pad in padBatch {
+                    pad.updateColor(weather: type, duration: actualDuration)
+                }
+            }
         }
+        print("✅ Pad color updates queued")
 
         // Update water background with new gradient
         transitionWaterBackground(to: type, duration: actualDuration)
@@ -3660,15 +3982,26 @@ class GameScene: SKScene, CollisionManagerDelegate {
         }
         
         // Handle water lines - hide in desert/space, show in water biomes
+        print("〰️ Handling water lines...")
         if type == .desert || type == .space {
+            print("〰️ Removing water lines for desert/space...")
             removeWaterLines()
+            removeWaterShimmers()  // Also remove shimmers
             removeShores()  // Also hide shores in desert/space
+            print("✅ Water lines/shores/shimmers removed")
         } else if (oldWeather == .desert || oldWeather == .space) && (type != .desert && type != .space) {
+            print("〰️ Restoring water lines from desert/space...")
             restoreWaterLines()
+            restoreWaterShimmers()  // Restore shimmers
             restoreShores()  // Restore shores when returning to water biomes
+            print("✅ Water lines/shores/shimmers restored")
+        } else {
+            print("〰️ No water line changes needed")
         }
+        print("✅ Water lines handling complete")
 
         // Handle moonlight visibility with a fade for smooth transitions.
+        print("🌙 Handling moonlight visibility...")
         if let moon = moonlightNode {
             if type == .night {
                 moon.isHidden = false
@@ -4134,6 +4467,77 @@ class GameScene: SKScene, CollisionManagerDelegate {
         let lerpSpeed: CGFloat = (frog.rocketState != .none) ? 0.2 : 0.1
         cam.position.x += (targetX - cam.position.x) * lerpSpeed
         cam.position.y += (targetY - cam.position.y) * 0.1
+    }
+    
+    // MARK: - Entity Tooltips
+    
+    /// Efficiently checks if any new entity types are visible and triggers tooltips
+    /// This method is designed for performance with early exits and visibility culling
+    private func checkEntityTooltips() {
+        // Don't check during pauses, transitions, or if no view
+        guard !isPaused, let view = view else { return }
+        
+        // Calculate the visible rect for culling entities outside the camera view
+        let visibleRect = calculateVisibleRect()
+        
+        // Check enemies (bees, dragonflies, ghosts) - they have a 'type' property
+        if !enemies.isEmpty {
+            ToolTips.checkForEntityEncounters(
+                entities: enemies,
+                scene: self,
+                visibleRect: visibleRect,
+                entityTypeGetter: { enemy in enemy.type },
+                entityPositionGetter: { enemy in enemy.position }
+            )
+        }
+        
+        // Check for logs (they're in the pads array with type == .log)
+        if !pads.isEmpty {
+            let logs = pads.filter { $0.type == .log }
+            if !logs.isEmpty {
+                ToolTips.checkForEntityEncounters(
+                    entities: logs,
+                    scene: self,
+                    visibleRect: visibleRect,
+                    entityTypeGetter: { _ in "LOG" }, // All logs use the same tooltip
+                    entityPositionGetter: { pad in pad.position }
+                )
+            }
+        }
+        
+        // Check for flies
+        if !flies.isEmpty {
+            ToolTips.checkForEntityEncounters(
+                entities: flies,
+                scene: self,
+                visibleRect: visibleRect,
+                entityTypeGetter: { _ in "FLY" }, // All flies use the same tooltip
+                entityPositionGetter: { fly in fly.position }
+            )
+        }
+    }
+    
+    /// Calculates the visible rectangle based on camera position and view size
+    /// Adds padding to trigger tooltips slightly before entities are fully visible
+    private func calculateVisibleRect() -> CGRect {
+        if let view = view {
+            let cameraPos = cam.position
+            let viewSize = view.bounds.size
+            
+            // Add padding to trigger tooltips slightly before entities are fully on-screen
+            // This gives players a moment to react to the tooltip before the threat arrives
+            let padding: CGFloat = 100
+            
+            return CGRect(
+                x: cameraPos.x - viewSize.width / 2 - padding,
+                y: cameraPos.y - viewSize.height / 2 - padding,
+                width: viewSize.width + padding * 2,
+                height: viewSize.height + padding * 2
+            )
+        } else {
+            // Fallback - use entire scene (shouldn't happen in practice)
+            return CGRect(origin: .zero, size: size)
+        }
     }
     
     private func updateMoonlightPosition() {
@@ -4661,6 +5065,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         guard !isGameEnding, !frog.isFloating else { return }
         
         print("🌊 didFallIntoWater called - Weather: \(currentWeather)")
+        
+        // Show tooltip on first water encounter
+        ToolTips.onFrogFellIntoWater(in: self)
 
         // Instant game over in desert, regardless of vests
         if currentWeather == .desert {
@@ -5325,6 +5732,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
         coin.removeFromParent()
         if let idx = coins.firstIndex(of: coin) { coins.remove(at: idx) }
         
+        // Trigger tadpole tooltip on first coin collection
+        ToolTips.onItemCollected("tadpole", in: self)
+        
         // Real-time challenge update
         ChallengeManager.shared.recordCoinsCollected(totalThisRun: coinsCollectedThisRun, totalOverall: PersistenceManager.shared.totalCoins + coinsCollectedThisRun)
         
@@ -5414,9 +5824,24 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Show floating reward notification
         showTreasureChestReward(reward, at: treasureChest.position)
         
+        // Check for special tooltips (e.g., if this chest contains a tadpole in future)
+        // Uncomment when you add tadpoles:
+        // if reward == .tadpole {
+        //     ToolTips.onItemCollected("tadpole", in: self)
+        // }
+        
+        // Trigger treasure tooltip on first collection
+        ToolTips.onItemCollected("treasure", in: self)
+        
         // Update HUD to reflect new buffs
         updateBuffsHUD()
         drawHearts()
+    }
+    
+    /// Call this when a tadpole is collected (for when you add tadpole entities)
+    /// This is a helper method you can call from any collection handler
+    private func onTadpoleCollected() {
+        ToolTips.onItemCollected("tadpole", in: self)
     }
     
     private func applyTreasureChestReward(_ reward: TreasureChest.Reward) {
@@ -5911,6 +6336,9 @@ class GameScene: SKScene, CollisionManagerDelegate {
             lastHapticDragStep = 0
             hasTriggeredMaxPullHaptic = false
             
+            // Reset smoothed position to prevent overshoot from previous drag
+            smoothedDotPosition = .zero
+            
             // Smooth fade-in for slingshot visuals
             showSlingshotVisualsWithAnimation()
             
@@ -5949,27 +6377,39 @@ class GameScene: SKScene, CollisionManagerDelegate {
             return
         }
         
-        // Smooth fade-out animation for slingshot visuals
-        hideSlingshotVisualsWithAnimation()
-        
-        guard isDragging, let offset = dragStartOffset, let current = dragCurrent else {
+        guard isDragging, let offset = dragStartOffset, let touch = touches.first else {
             if frog.rocketState == .none {
                 isDragging = false
             }
+            // Smooth fade-out animation for slingshot visuals
+            hideSlingshotVisualsWithAnimation()
             return
         }
+        
+        // CRITICAL FIX: Use the EXACT touch location at release time
+        // Don't rely on dragCurrent which may be outdated from touchesMoved
+        let releaseLocation = touch.location(in: self)
+        
+        // Update dragCurrent for the final trajectory visualization
+        dragCurrent = releaseLocation
+        
+        // Force one final trajectory update to show exactly where frog will land
+        updateTrajectoryVisuals(forceUpdate: true)
         
         isDragging = false
         // Reset haptics state
         lastHapticDragStep = 0
         hasTriggeredMaxPullHaptic = false
 
+        // Smooth fade-out animation for slingshot visuals AFTER calculating trajectory
+        hideSlingshotVisualsWithAnimation()
+
         if isGameEnding || frog.rocketState != .none { return }
         
         // Calculate start relative to frog's current position
         let start = CGPoint(x: frog.position.x + offset.x, y: frog.position.y + offset.y)
-        var dx = start.x - current.x
-        var dy = start.y - current.y
+        var dx = start.x - releaseLocation.x
+        var dy = start.y - releaseLocation.y
         let dist = sqrt(dx*dx + dy*dy)
         if dist < 10 {
             // If jump was cancelled, and cannon was armed, de-arm it.
@@ -5993,9 +6433,22 @@ class GameScene: SKScene, CollisionManagerDelegate {
         
         // FIX: Apply SuperJump logic
         var launchVector = CGVector(dx: dx * power, dy: dy * power)
-        if frog.buffs.superJumpTimer > 0 {
+        let isSuperjumping = frog.buffs.superJumpTimer > 0
+        if isSuperjumping {
             launchVector.dx *= 2.0
             launchVector.dy *= 2.0
+        }
+        
+        // OVERJUMP FIX: Clamp velocity to prevent physics instability during frame drops
+        // When frame rate dips, larger dt values can cause the frog to jump farther than intended
+        // Max velocity tuned to match the maximum expected jump distance
+        // Superjump gets 2x the cap to allow full 2x distance
+        let maxVelocity: CGFloat = isSuperjumping ? 70.0 : 35.0
+        let velocityMagnitude = sqrt(launchVector.dx * launchVector.dx + launchVector.dy * launchVector.dy)
+        if velocityMagnitude > maxVelocity {
+            let clampRatio = maxVelocity / velocityMagnitude
+            launchVector.dx *= clampRatio
+            launchVector.dy *= clampRatio
         }
         
         if frog.isCannonJumpArmed {
@@ -6106,12 +6559,12 @@ class GameScene: SKScene, CollisionManagerDelegate {
     // --- Performance Improvement: Use sprite pool for trajectory ---
     // This function now updates the positions of a pre-allocated array of sprites
     // instead of regenerating a complex SKShapeNode path every frame.
-    private func updateTrajectoryVisuals() {
+    private func updateTrajectoryVisuals(forceUpdate: Bool = false) {
         guard let offset = dragStartOffset, let current = dragCurrent else { return }
         
-        // PERFORMANCE FIX: Throttle trajectory calculations to 30 FPS max
+        // PERFORMANCE FIX: Throttle trajectory calculations to 30 FPS max (unless forced)
         let currentTime = CACurrentMediaTime()
-        let shouldUpdateTrajectory = (currentTime - lastTrajectoryUpdate) >= trajectoryUpdateInterval
+        let shouldUpdateTrajectory = forceUpdate || (currentTime - lastTrajectoryUpdate) >= trajectoryUpdateInterval
         
         // Calculate dragStart relative to frog's current position (follows moving platforms)
         let start = CGPoint(x: frog.position.x + offset.x, y: frog.position.y + offset.y)
@@ -6126,6 +6579,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
             slingshotDot.isHidden = true
             crosshairNode.isHidden = true
             frog.resetPullOffset()
+            smoothedDotPosition = .zero  // Reset to prevent overshoot on next drag
             return
         }
         
@@ -6223,31 +6677,64 @@ class GameScene: SKScene, CollisionManagerDelegate {
         // Simulate jump physics to position trajectory dots
         var simPos = frog.position
         var simVel = CGVector(dx: dx * power, dy: dy * power)
+        var simZVel: CGFloat = Configuration.Physics.baseJumpZ * (0.5 + (ratio * 0.5))
         if isSuperJumping {
             simVel.dx *= 2.0
             simVel.dy *= 2.0
+            // NOTE: Z velocity is NOT multiplied here - it's derived from intensity parameter
+            // which already scales correctly with the superjump horizontal distance.
+            // The 2.0x horizontal multiplier provides the extra distance for superjump.
         }
+        
+        // CRITICAL: Apply the same velocity clamp as the actual jump!
+        // This prevents the trajectory from showing a longer jump than actually happens
+        // Superjump gets 2x the cap to allow full 2x distance
+        let maxVelocity: CGFloat = isSuperJumping ? 70.0 : 35.0
+        let velocityMagnitude = sqrt(simVel.dx * simVel.dx + simVel.dy * simVel.dy)
+        if velocityMagnitude > maxVelocity {
+            let clampRatio = maxVelocity / velocityMagnitude
+            simVel.dx *= clampRatio
+            simVel.dy *= clampRatio
+        }
+        
         var simZ: CGFloat = 0
-        var simZVel: CGFloat = Configuration.Physics.baseJumpZ * (0.5 + (ratio * 0.5))
         
         // Use the same gravity as actual physics - reduced in space!
         let gravity = currentWeather == .space ? Configuration.Physics.gravityZ * 0.3 : Configuration.Physics.gravityZ
         
         var landingPoint = simPos
         var dotsUsed = 0
-
         // Simulate physics and place dots along the arc
         let trajectoryDotCount = trajectoryDots.count // Use actual dot count from array
         // PERFORMANCE FIX: Reduce simulation steps significantly - we only need enough for dot placement
         // Previous: 60-120 steps. New: 30-45 steps (50% reduction)
         let simulationSteps = isSuperJumping ? 45 : 30
+        
+        // CRITICAL FIX: Match the EXACT physics from performFixedPhysicsStep()
+        // Each simulation step represents ONE fixed physics frame (1/60 second)
+        // The actual physics does NOT multiply by dt - it just adds velocity directly!
+        
         for i in 0..<simulationSteps {
+            // EXACT MATCH to performFixedPhysicsStep:
+            // position.x += velocity.dx (no scaling!)
             simPos.x += simVel.dx
             simPos.y += simVel.dy
             simZ += simZVel
-            simZVel -= gravity
-            simVel.dx *= Configuration.Physics.frictionAir
-            simVel.dy *= Configuration.Physics.frictionAir
+            
+            // Only apply physics if airborne
+            if simZ > 0 {
+                // zVelocity -= gravity (no scaling!)
+                simZVel -= gravity
+                
+                // velocity.dx *= Configuration.Physics.frictionAir (direct multiply, no pow()!)
+                simVel.dx *= Configuration.Physics.frictionAir
+                simVel.dy *= Configuration.Physics.frictionAir
+            } else {
+                // Landed - this is where the frog lands!
+                simZ = 0
+                landingPoint = simPos
+                break
+            }
             
             // Show a dot every few simulation steps
             if trajectoryDotCount > 0 && i % (simulationSteps / trajectoryDotCount) == 0 {
@@ -6260,10 +6747,7 @@ class GameScene: SKScene, CollisionManagerDelegate {
                 }
             }
             
-            if simZ <= 0 {
-                landingPoint = simPos
-                break
-            }
+            // Update landing point as we go (in case we reach max steps)
             landingPoint = simPos
         }
         
@@ -6388,3 +6872,173 @@ class GameScene: SKScene, CollisionManagerDelegate {
         )
     }
 }
+
+//
+//  GameScene+Tooltips.swift
+//
+//  Example extension showing how to add entity tooltip support to your GameScene
+//
+
+
+// MARK: - Tooltip Support Extension
+extension GameScene {
+    
+    /// Call this from your main update() method to check for entity tooltips
+    /// This method is designed for performance - it exits early and only shows one tooltip per frame
+    ///
+    /// Note: You need to add helper methods in your main GameScene.swift file to access private properties:
+    /// ```
+    /// func getEnemiesForTooltips() -> [Enemy] { return enemies }
+    /// func getPadsForTooltips() -> [Pad] { return pads }
+    /// func getFliesForTooltips() -> [Coin] { return flies } // or whatever type flies are
+    /// ```
+    
+    // MARK: - Helper Methods (Implement these in your main GameScene.swift)
+    // These methods allow the extension to access private properties
+    // Add these to your main GameScene class:
+    /*
+    func getEnemiesForTooltips() -> [Enemy] { return enemies }
+    func getPadsForTooltips() -> [Pad] { return pads }
+    func getFliesForTooltips() -> [Coin] { return flies } // Adjust type as needed
+    */
+    
+    /// Calculates the visible rectangle based on camera position and view size
+    /// Adds padding to trigger tooltips slightly before entities are fully visible
+}
+
+// MARK: - Collection-Based Tooltips
+extension GameScene {
+    
+    /// Call this when a tadpole is collected to trigger the tadpole tooltip
+    /// This can be called from your CollisionManagerDelegate implementation
+    
+    /// Call this when a treasure chest is collected to trigger the treasure tooltip
+    /// Add this to your didCollect(treasureChest:) delegate method
+    func checkTreasureTooltip(_ chest: TreasureChest) {
+        // Trigger the treasure tooltip
+        // Note: Based on the TreasureChest enum, it doesn't specifically contain tadpoles
+        // If you need tadpole-specific logic, you'll need to adjust this
+        ToolTips.onItemCollected("treasure", in: self)
+    }
+    
+    /// Call this when a specific reward from a treasure chest is a tadpole
+    /// Use this if your treasure rewards can include tadpoles
+    func onTreasureRewardIsTadpole() {
+        ToolTips.onItemCollected("tadpole", in: self)
+    }
+}
+
+// MARK: - Usage Example
+/*
+ 
+ In your GameScene class:
+ 
+ override func update(_ currentTime: TimeInterval) {
+     let dt = currentTime - lastUpdateTime
+     lastUpdateTime = currentTime
+     
+     // ... your existing update logic ...
+     
+     // Check for entity tooltips (add at the end of your update method)
+     checkEntityTooltips()
+ }
+ 
+ 
+ In your CollisionManagerDelegate implementation:
+ 
+ func didCollect(treasureChest: TreasureChest) {
+     treasureChest.isCollected = true
+     
+     // ... your existing collection logic (sounds, animations, rewards, etc.) ...
+     
+     // Check if this triggers any tooltips
+     checkTreasureTooltip(treasureChest)
+ }
+ 
+ // Or if you have a separate Tadpole entity:
+ func didCollect(tadpole: Tadpole) {
+     tadpole.isCollected = true
+     
+     // ... your existing collection logic ...
+     
+     // Trigger tadpole tooltip
+     onTadpoleCollected()
+ }
+ 
+ */
+
+// MARK: - Performance Notes
+/*
+ 
+ Performance Characteristics:
+ 
+ 1. Early Exit Optimization:
+    - If scene is paused → immediate return
+    - If entity type already seen → skip to next entity
+    - If entity not in visible rect → skip to next entity
+    
+ 2. One Tooltip Per Frame:
+    - After showing one tooltip, the function exits
+    - Prevents tooltip spam and ensures smooth experience
+    
+ 3. Set-Based Tracking:
+    - Uses Set<String> for O(1) lookup
+    - After first encounter, overhead is minimal (just a set lookup)
+    
+ 4. Memory Efficient:
+    - Only stores entity type strings (10-20 bytes total)
+    - No retain cycles or entity references
+    
+ 5. Frame Budget:
+    - First encounter: ~0.5-1ms (depends on entity count)
+    - After encounter: <0.1ms (just set lookup and early return)
+    - Worst case (many entities, none seen): ~2-3ms for 100+ entities
+ 
+ Optimization Tips:
+ 
+ - If you have 100+ entities, consider throttling checks:
+   ```swift
+   private var tooltipCheckTimer: TimeInterval = 0
+   
+   func checkEntityTooltips() {
+       tooltipCheckTimer += deltaTime
+       guard tooltipCheckTimer >= 0.5 else { return } // Check every 0.5s
+       tooltipCheckTimer = 0
+       // ... rest of check logic ...
+   }
+   ```
+ 
+ - Filter arrays before checking:
+   ```swift
+   // Instead of:
+   ToolTips.checkForEntityEncounters(entities: allPads, ...)
+   
+   // Do:
+   let logs = pads.filter { $0.type == .log }
+   ToolTips.checkForEntityEncounters(entities: logs, ...)
+   ```
+ 
+ */
+
+// MARK: - Debugging
+extension GameScene {
+    
+    /// Debug function to reset all tooltips (useful during development)
+    /// You can call this from a debug menu or button
+    func resetAllTooltips() {
+        ToolTips.resetToolTipHistory()
+        print("🔄 All tooltips reset - they will show again on next encounter")
+    }
+    
+    /// Debug function to check which entities have been seen
+    func printSeenEntities() {
+        let entityTypes = ["FLY", "BEE", "GHOST", "DRAGONFLY", "LOG", "tadpole"]
+        print("📊 Entity Tooltip Status:")
+        for type in entityTypes {
+            let seen = ToolTips.hasSeenEntity(type)
+            print("  \(type): \(seen ? "✅ Seen" : "❌ Not seen")")
+        }
+    }
+}
+
+

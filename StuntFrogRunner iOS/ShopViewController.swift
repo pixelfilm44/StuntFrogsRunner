@@ -331,18 +331,18 @@ class ShopViewController: UIViewController {
         
         NSLayoutConstraint.activate([
             title.topAnchor.constraint(equalTo: cardView.topAnchor, constant: 15),
-            title.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 15),
+            title.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 32),
             title.trailingAnchor.constraint(lessThanOrEqualTo: buyButton.leadingAnchor, constant: -10),
             
             desc.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 5),
-            desc.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 15),
+            desc.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 32),
             desc.trailingAnchor.constraint(lessThanOrEqualTo: buyButton.leadingAnchor, constant: -10),
             
             costLabel.topAnchor.constraint(equalTo: desc.bottomAnchor, constant: 10),
-            costLabel.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 15),
+            costLabel.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 32),
             
             buyButton.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
-            buyButton.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -15),
+            buyButton.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -32),
             buyButton.widthAnchor.constraint(equalToConstant: 100),
             buyButton.heightAnchor.constraint(equalToConstant: 40)
         ])

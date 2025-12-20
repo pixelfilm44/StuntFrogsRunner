@@ -135,7 +135,7 @@ class LoadingViewController: UIViewController {
     
     private lazy var statusLabel: UILabel = {
         let label = UILabel()
-        label.text = "Loading Assets..."
+        label.text = "Looking for our hero..."
         label.font = UIFont.systemFont(ofSize: 18, weight: .medium)
         label.textColor = .black
         // Shadow for readability

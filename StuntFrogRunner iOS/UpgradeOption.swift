@@ -43,7 +43,7 @@ class UpgradeViewController: UIViewController {
     
     // Available Upgrades Pool
     private let baseOptions: [UpgradeOption] = [
-        UpgradeOption(id: "HONEY", name: "Honey Jar", desc: "Block 1 bee/bat Attack", icon: "", iconImage: "honeyPot", zone: .any),
+        UpgradeOption(id: "HONEY", name: "Honey Jar", desc: "Block 1 bee Attack", icon: "", iconImage: "honeyPot", zone: .any),
         UpgradeOption(id: "BOOTS", name: "Rain Boots", desc: "No sliding for a rain season", icon: "", iconImage: "rainboots", zone: .mid),
         UpgradeOption(id: "HEART", name: "Heart Container", desc: "+1 Max HP & heal", icon: "", iconImage: "heart", zone: .any),
         UpgradeOption(id: "HEARTBOOST", name: "Heart Boost", desc: "Refill all hearts", icon: "", iconImage: "heartBoost", zone: .any),

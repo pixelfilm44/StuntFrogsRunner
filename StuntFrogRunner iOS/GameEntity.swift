@@ -61,9 +61,12 @@ class Frog: GameEntity {
         var cross: Int = 0
         var superJumpTimer: TimeInterval = 0
         var cannonJumps: Int = 0
+       
 
     }
     
+    private var physicsAccumulator: TimeInterval = 0
+    private let fixedDelta: TimeInterval = 1.0 / 60.0
     // Cannon Jump State
     var isCannonJumpArmed: Bool = false
     var isCannonJumping: Bool = false
@@ -96,6 +99,9 @@ class Frog: GameEntity {
     // Animation state
     private(set) var animationState: FrogAnimationState = .sitting
     private var lastFacingAngle: CGFloat = 0     // Preserve facing direction
+    
+    // PERFORMANCE: Track accumulated time for bobbing animation instead of querying Date()
+    private var accumulatedTime: TimeInterval = 0
     
     // Visual nodes
     let bodyNode = SKNode()  // Container for the sprite
@@ -246,72 +252,54 @@ class Frog: GameEntity {
         return path
     }
     
-    func update(dt: TimeInterval, weather: WeatherType) {
-        if buffs.rocketTimer > 0 { buffs.rocketTimer = max(0, buffs.rocketTimer - dt) }
-        if buffs.superJumpTimer > 0 { buffs.superJumpTimer = max(0, buffs.superJumpTimer - dt) }
-        
-        if invincibilityTimer > 0 {
-            invincibilityTimer = max(0, invincibilityTimer - dt)
-            isInvincible = true
-        } else if isSuperJumping {
-            isInvincible = true
-        } else {
-            isInvincible = false
-        }
-        
-        // Update recoil timer
-        if recoilTimer > 0 {
-            recoilTimer = max(0, recoilTimer - dt)
-        }
-        
-        // Update eating timer
-        if eatingTimer > 0 {
-            eatingTimer = max(0, eatingTimer - dt)
-        }
-        
-        vestNode.isHidden = (buffs.vest == 0)
-        
-        if rocketState != .none {
-            updateRocketPhysics(dt: dt)
-            updateVisuals()
-            return
-        }
-        
-        position.x += velocity.dx * CGFloat(dt) * 60.0
-        position.y += velocity.dy * CGFloat(dt) * 60.0
-        zHeight += zVelocity * CGFloat(dt) * 60.0
-        
-        if zHeight > 0 {
-            // Adjust gravity based on weather - reduced gravity in space for floaty jumps
-            let gravity = weather == .space ? Configuration.Physics.gravityZ * 0.3 : Configuration.Physics.gravityZ
-            zVelocity -= gravity * CGFloat(dt) * 60.0
-            velocity.dx *= pow(Configuration.Physics.frictionAir, CGFloat(dt) * 60.0)
-            velocity.dy *= pow(Configuration.Physics.frictionAir, CGFloat(dt) * 60.0)
-        } else {
-            zHeight = 0
-            if isFloating {
-                velocity.dx *= pow(0.9, CGFloat(dt) * 60.0)
-                velocity.dy *= pow(0.9, CGFloat(dt) * 60.0)
+   func update(dt: TimeInterval, weather: WeatherType) {
+            // PERFORMANCE: Accumulate time once for all animation calculations
+            accumulatedTime += dt
+            
+            // Timer logic handles raw time (unaffected by physics integration)
+            if buffs.rocketTimer > 0 { buffs.rocketTimer = max(0, buffs.rocketTimer - dt) }
+            if buffs.superJumpTimer > 0 { buffs.superJumpTimer = max(0, buffs.superJumpTimer - dt) }
+            
+            if invincibilityTimer > 0 {
+                invincibilityTimer = max(0, invincibilityTimer - dt)
+                isInvincible = true
+            } else if isSuperJumping {
+                isInvincible = true
             } else {
-                var currentFriction = Configuration.Physics.frictionGround
-                if let pad = onPad {
-                    if pad.type == .moving || pad.type == .waterLily || pad.type == .log {
-                        position.x += pad.moveSpeed * pad.moveDirection * CGFloat(dt) * 60.0
-                    }
-                    let isIce = (pad.type == .ice)
-                    if (isRainEffectActive || isIce) && !isWearingBoots {
-                        currentFriction = 0.93
-                    }
-                }
-                velocity.dx *= pow(currentFriction, CGFloat(dt) * 60.0)
-                velocity.dy *= pow(currentFriction, CGFloat(dt) * 60.0)
+                isInvincible = false
             }
+            
+            if recoilTimer > 0 { recoilTimer = max(0, recoilTimer - dt) }
+            if eatingTimer > 0 { eatingTimer = max(0, eatingTimer - dt) }
+            
+            vestNode.isHidden = (buffs.vest == 0)
+            
+            if rocketState != .none {
+                updateRocketPhysics(dt: dt)
+                updateVisuals()
+                return
+            }
+            
+            // --- FIXED TIMESTEP LOGIC STARTS HERE ---
+            
+            // 1. Accumulate the time passed
+            physicsAccumulator += dt
+            
+            // 2. Cap the accumulator to prevent "spiral of death" if the game freezes for a long time
+            // (If the game lags for 1 second, don't try to run 60 physics steps in one frame)
+            if physicsAccumulator > 0.1 {
+                physicsAccumulator = 0.1
+            }
+            
+            // 3. Consume the accumulated time in fixed 1/60th second chunks
+            while physicsAccumulator >= fixedDelta {
+                performFixedPhysicsStep(weather: weather)
+                physicsAccumulator -= fixedDelta
+            }
+            
+            constrainToRiver()
+            updateVisuals()
         }
-        
-        constrainToRiver()
-        updateVisuals()
-    }
-    
     func descend() {
         rocketState = .none
         rocketTimer = 0
@@ -321,6 +309,50 @@ class Frog: GameEntity {
         zVelocity = -32.0
     }
     
+    private func performFixedPhysicsStep(weather: WeatherType) {
+            // Since this runs exactly 60 times per second of game time,
+            // dt is always 1/60, so (dt * 60.0) is always 1.0.
+            // We remove the multiplication to simplify.
+            
+            position.x += velocity.dx
+            position.y += velocity.dy
+            zHeight += zVelocity
+            
+            if zHeight > 0 {
+                // Airborne Logic
+                let gravity = weather == .space ? Configuration.Physics.gravityZ * 0.3 : Configuration.Physics.gravityZ
+                
+                // Apply Gravity (per fixed frame)
+                zVelocity -= gravity
+                
+                // Apply Air Friction (per fixed frame)
+                // Use the base friction constant directly since we are in a fixed step
+                velocity.dx *= Configuration.Physics.frictionAir
+                velocity.dy *= Configuration.Physics.frictionAir
+                
+            } else {
+                // Grounded Logic
+                zHeight = 0
+                if isFloating {
+                    velocity.dx *= 0.9
+                    velocity.dy *= 0.9
+                } else {
+                    var currentFriction = Configuration.Physics.frictionGround
+                    if let pad = onPad {
+                        // Moving pad logic - handled per fixed frame
+                        if pad.type == .moving || pad.type == .waterLily || pad.type == .log {
+                            position.x += pad.moveSpeed * pad.moveDirection
+                        }
+                        let isIce = (pad.type == .ice)
+                        if (isRainEffectActive || isIce) && !isWearingBoots {
+                            currentFriction = 0.93
+                        }
+                    }
+                    velocity.dx *= currentFriction
+                    velocity.dy *= currentFriction
+                }
+            }
+        }
     /// Steers the rocket left or right while in rocket mode
     /// - Parameter direction: -1 for left, 1 for right, 0 to stop steering
     func steerRocket(_ direction: CGFloat) {
@@ -460,30 +492,27 @@ class Frog: GameEntity {
         // Create the dramatic spinning fall animation
         let duration: TimeInterval = 1.5
         
-        // Rapid spinning (multiple full rotations)
+        // Rapid spinning (multiple full rotations) - applied to the frog sprite
         let spinCount: CGFloat = 4  // 4 full spins
         let spin = SKAction.rotate(byAngle: spinCount * CGFloat.pi * 2, duration: duration)
         spin.timingMode = .easeIn
         
-        // Fall down off the screen
-        let fallDistance: CGFloat = 600
-        let fall = SKAction.moveBy(x: 0, y: -fallDistance, duration: duration)
-        fall.timingMode = .easeIn
-        
-        // Scale down as falling (getting further away)
+        // Scale down as falling (getting further away) - applied to the frog sprite
         let scaleDown = SKAction.scale(to: 0.2, duration: duration)
         scaleDown.timingMode = .easeIn
         
-        // Fade out near the end
+        // Fade out near the end - applied to the frog sprite
         let wait = SKAction.wait(forDuration: duration * 0.6)
         let fadeOut = SKAction.fadeOut(withDuration: duration * 0.4)
         let fadeSequence = SKAction.sequence([wait, fadeOut])
         
-        // Combine all animations for the main frog node
-        let mainAnimation = SKAction.group([fall, scaleDown, fadeSequence])
+        // Combine spin, scale, and fade for the FROG SPRITE (the actual visual)
+        let frogSpriteAnimation = SKAction.group([spin, scaleDown, fadeSequence])
         
-        // Combine spin with the main animation on the body
-        let bodyAnimation = SKAction.group([spin])
+        // Fall down off the screen - applied to main node to move position
+        let fallDistance: CGFloat = 600
+        let fall = SKAction.moveBy(x: 0, y: -fallDistance, duration: duration)
+        fall.timingMode = .easeIn
         
         // Shadow fades quickly as frog falls
         let shadowFade = SKAction.fadeOut(withDuration: duration * 0.3)
@@ -492,8 +521,8 @@ class Frog: GameEntity {
         
         // Run animations
         shadowNode.run(shadowAnimation)
-        bodyNode.run(bodyAnimation)
-        self.run(mainAnimation) {
+        frogSprite.run(frogSpriteAnimation)  // Spin, scale, and fade the ACTUAL FROG SPRITE
+        self.run(fall) {
             completion()
         }
     }
@@ -567,7 +596,8 @@ class Frog: GameEntity {
             velocity.dy *= pow(0.25, CGFloat(dt) * 60.0)
             if velocity.dy < 0.5 { velocity.dy = 1.5 } // was 0.5
             position.y += velocity.dy * CGFloat(dt) * 60.0
-            zHeight = 60 + sin(CGFloat(Date().timeIntervalSince1970) * 5) * 5
+            // PERFORMANCE FIX: Use accumulated time instead of Date()
+            zHeight = 60 + sin(CGFloat(accumulatedTime) * 5) * 5
         }
         constrainToRiver()
     }
@@ -575,8 +605,9 @@ class Frog: GameEntity {
     private func updateVisuals() {
         if !isBeingDragged {
             if isFloating {
-                // Add a gentle bobbing motion when floating in water
-                let bobOffset = sin(CGFloat(Date().timeIntervalSince1970) * 5.0) * 3.0
+                // PERFORMANCE FIX: Use accumulated time instead of Date()
+                // This eliminates expensive Date.timeIntervalSince1970 calls every frame
+                let bobOffset = sin(CGFloat(accumulatedTime) * 5.0) * 3.0
                 bodyNode.position.y = bobOffset
             } else {
                 bodyNode.position.y = zHeight
@@ -686,14 +717,25 @@ class Frog: GameEntity {
     }
     
     func jump(vector: CGVector, intensity: CGFloat, weather: WeatherType) {
+        // IMPORTANT: Reset the physics accumulator to ensure the jump starts
+        // on a clean physics step, matching the trajectory prediction exactly
+        physicsAccumulator = 0
+        
         resetPullOffset()
         
         // NOTE: SuperJump multiplier is now applied in GameScene.touchesEnded
         // and updateTrajectoryVisuals to keep trajectory prediction accurate.
         // Do NOT multiply here again to avoid double-application.
         
+        // BUGFIX: Clear any residual velocity before applying new jump vector
+        // This prevents velocity accumulation from quick successive jumps on slippery surfaces
+        self.velocity = .zero
         self.velocity = vector
-        let zVel = Configuration.Physics.baseJumpZ * (0.5 + (intensity * 0.5))
+        var zVel = Configuration.Physics.baseJumpZ * (0.5 + (intensity * 0.5))
+        // NOTE: Z velocity scaling for superjump should NOT be applied here.
+        // The horizontal vector is already scaled in GameScene.touchesEnded,
+        // and the Z velocity is derived from the same intensity parameter.
+        // The trajectory prediction and actual jump must use the same physics.
         self.zVelocity = zVel
         self.onPad = nil
         self.isFloating = false
@@ -733,6 +775,9 @@ class Frog: GameEntity {
         bodyNode.removeAction(forKey: "jumpScaleAnimation")
         bodyNode.setScale(1.0)
         
+        // RESET ACCUMULATOR
+            physicsAccumulator = 0
+        
         bodyNode.removeAction(forKey: "wailingAnimation")
         zVelocity = 0
         zHeight = 0
@@ -753,8 +798,14 @@ class Frog: GameEntity {
         let isIce = (pad.type == .ice)
         
         if (isRainEffectActive || isIce) && !isWearingBoots {
+            // On slippery surfaces, reduce velocity but cap it to prevent accumulation
             velocity.dx *= 0.5
             velocity.dy *= 0.5
+            
+            // BUGFIX: Cap slippery velocity to prevent accumulation from successive jumps
+            let maxSlipperyVelocity: CGFloat = 2.0
+            velocity.dx = max(-maxSlipperyVelocity, min(maxSlipperyVelocity, velocity.dx))
+            velocity.dy = max(-maxSlipperyVelocity, min(maxSlipperyVelocity, velocity.dy))
         } else {
             velocity = .zero
             if pad.type != .log {
@@ -812,6 +863,12 @@ class Pad: GameEntity {
     private var currentWeather: WeatherType = .sunny
     private var hueVariation: CGFloat = 0 // Random hue shift for visual diversity
     
+    // MARK: - Motion Lines System
+    private var motionLines: [SKSpriteNode] = []
+    private let motionLineCount: Int = 3  // Number of trailing lines
+    private var motionLineSpawnTimer: TimeInterval = 0
+    private let motionLineSpawnInterval: TimeInterval = 0.15  // Spawn a new line every 0.15 seconds
+    
     // Preloaded textures for performance
     private static let dayTexture = SKTexture(imageNamed: "lilypadDay")
     private static let nightTexture = SKTexture(imageNamed: "lilypadNight")
@@ -850,7 +907,8 @@ class Pad: GameEntity {
     
     var scaledRadius: CGFloat {
         if type == .log { return 60.0 }
-        return baseRadius * xScale
+        // Apply physics multiplier to make hit zone match visual size
+        return baseRadius * xScale * Configuration.Dimensions.padPhysicsRadiusMultiplier
     }
     
     init(type: PadType, position: CGPoint, radius: CGFloat? = nil) {
@@ -865,7 +923,7 @@ class Pad: GameEntity {
         self.zPosition = Layer.pad
         self.moveDirection = Bool.random() ? 1.0 : -1.0
         // Generate a subtle random hue variation for visual diversity
-        self.hueVariation = CGFloat.random(in: -0.08...0.08)
+        self.hueVariation = CGFloat.random(in: -0.15...0.15)
         if type == .shrinking {
             self.shrinkSpeed = Double.random(in: 1.0...3.0)
             self.shrinkTime = Double.random(in: 0...10.0)
@@ -876,6 +934,77 @@ class Pad: GameEntity {
         }
         setupVisuals()
         if type != .log { self.zRotation = CGFloat.random(in: 0...CGFloat.pi*2) }
+    }
+    
+    /// Checks if this pad is at least `minDistance` away from all pads in the provided array.
+    /// - Parameters:
+    ///   - pads: Array of existing pads to check against
+    ///   - minDistance: Minimum required distance (default: uses Configuration value)
+    /// - Returns: True if the pad is far enough from all other pads, false otherwise
+    func isFarEnoughFrom(pads: [Pad], minDistance: CGFloat = Configuration.Dimensions.movingPadMinDistance) -> Bool {
+        for pad in pads {
+            let dx = self.position.x - pad.position.x
+            let dy = self.position.y - pad.position.y
+            let distance = sqrt(dx * dx + dy * dy)
+            if distance < minDistance {
+                return false
+            }
+        }
+        return true
+    }
+    
+    /// Static helper to generate a valid position for a moving lilypad that is at least `minDistance` away from existing pads.
+    /// - Parameters:
+    ///   - existingPads: Array of existing pads to avoid
+    ///   - yPosition: The Y position for the new pad (typically the row position)
+    ///   - minDistance: Minimum required distance from other pads (default: uses Configuration value)
+    ///   - maxAttempts: Maximum number of attempts to find a valid position (default: 20)
+    /// - Returns: A valid position, or nil if no valid position could be found after maxAttempts
+    static func generateValidPosition(avoiding existingPads: [Pad], yPosition: CGFloat, minDistance: CGFloat = Configuration.Dimensions.movingPadMinDistance, maxAttempts: Int = 20) -> CGPoint? {
+        for _ in 0..<maxAttempts {
+            // Generate a random X position within the river bounds
+            let padding: CGFloat = 60.0 // Keep pads away from edges
+            let randomX = CGFloat.random(in: padding...(Configuration.Dimensions.riverWidth - padding))
+            let candidatePosition = CGPoint(x: randomX, y: yPosition)
+            
+            // Check if this position is far enough from all existing pads
+            var isValid = true
+            for pad in existingPads {
+                let dx = candidatePosition.x - pad.position.x
+                let dy = candidatePosition.y - pad.position.y
+                let distance = sqrt(dx * dx + dy * dy)
+                if distance < minDistance {
+                    isValid = false
+                    break
+                }
+            }
+            
+            if isValid {
+                return candidatePosition
+            }
+        }
+        
+        // If we couldn't find a valid position after maxAttempts, return nil
+        return nil
+    }
+    
+    /// Checks if a Y position is safe for spawning a log (not too close to moving lilypads or other logs).
+    /// - Parameters:
+    ///   - yPosition: The Y position to check
+    ///   - existingPads: Array of existing pads to check against
+    ///   - minYDistance: Minimum required Y distance from moving lilypads/logs (default: 150)
+    /// - Returns: True if the Y position is safe for spawning a log
+    static func isYPositionSafeForLog(_ yPosition: CGFloat, existingPads: [Pad], minYDistance: CGFloat = 150) -> Bool {
+        for pad in existingPads {
+            // Only check moving lilypads and existing logs
+            guard pad.type == .moving || pad.type == .waterLily || pad.type == .log else { continue }
+            
+            let dy = abs(yPosition - pad.position.y)
+            if dy < minYDistance {
+                return false  // Too close to a moving pad or log
+            }
+        }
+        return true
     }
     required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not be implemented") }
     
@@ -898,11 +1027,14 @@ class Pad: GameEntity {
             addChild(sprite)
             self.padSprite = sprite
         } else if type == .ice {
-            // Use ice lilypad texture
+            // Use ice lilypad texture - scale to match physics body
             let texture = Pad.iceTexture
             let sprite = SKSpriteNode(texture: texture)
-            sprite.size = CGSize(width: 90, height: 90)
+            // Scale sprite to match the actual pad radius (multiplied by physics multiplier for tighter hit zone)
+            let visualDiameter = baseRadius * 2 * Configuration.Dimensions.padPhysicsRadiusMultiplier
+            sprite.size = CGSize(width: visualDiameter, height: visualDiameter)
             addChild(sprite)
+            self.padSprite = sprite
         } else if type == .launchPad {
             // Launch pad is special - larger and uses its own texture
             let texture = Pad.launchPadTexture
@@ -951,7 +1083,9 @@ class Pad: GameEntity {
             }
             
             let sprite = SKSpriteNode(texture: texture)
-            sprite.size = CGSize(width: 90, height: 90)
+            // Scale sprite to match the actual pad radius (multiplied by physics multiplier for tighter hit zone)
+            let visualDiameter = baseRadius * 2 * Configuration.Dimensions.padPhysicsRadiusMultiplier
+            sprite.size = CGSize(width: visualDiameter, height: visualDiameter)
             addChild(sprite)
             self.padSprite = sprite
         }
@@ -968,13 +1102,13 @@ class Pad: GameEntity {
         // Skip hue variation for special pads that need specific appearances
         guard type != .launchPad && type != .warp && type != .grave else { return }
         
-        // Convert hue shift to a color (hue variation is in range -0.08 to 0.08)
+        // Convert hue shift to a color (hue variation is in range -0.15 to 0.15)
         // We'll use UIColor to create a subtle tint
         let hue = 0.33 + hueVariation // Base green hue (0.33) with variation
-        let tintColor = UIColor(hue: hue, saturation: 0.3, brightness: 1.0, alpha: 1.0)
+        let tintColor = UIColor(hue: hue, saturation: 0.5, brightness: 1.0, alpha: 1.0)
         
         sprite.color = tintColor
-        sprite.colorBlendFactor = 0.15 // Subtle blend to maintain texture detail
+        sprite.colorBlendFactor = 0.85 // Noticeable blend while maintaining texture detail
     }
     
     /// Converts this pad to a normal pad if its type is incompatible with the given weather
@@ -1165,6 +1299,9 @@ class Pad: GameEntity {
             if position.x > Configuration.Dimensions.riverWidth - limit || position.x < limit {
                 moveDirection *= -1
             }
+            
+            // Update motion lines for moving pads
+            updateMotionLines(dt: dt)
         }
         if type == .shrinking {
             shrinkTime += dt
@@ -1191,6 +1328,81 @@ class Pad: GameEntity {
             // Constrain to river bounds
             constrainToRiver(radius: self.scaledRadius)
         }
+    }
+    
+    // MARK: - Motion Lines for Moving Pads
+    
+    /// Updates the motion lines trailing behind moving pads
+    private func updateMotionLines(dt: TimeInterval) {
+        // Only show motion lines if the pad is actually moving
+        guard moveSpeed > 0 else { return }
+        
+        motionLineSpawnTimer += dt
+        
+        // Spawn a new motion line at intervals
+        if motionLineSpawnTimer >= motionLineSpawnInterval {
+            motionLineSpawnTimer = 0
+            spawnMotionLine()
+        }
+    }
+    
+    /// Creates and spawns a motion line behind the moving pad
+    private func spawnMotionLine() {
+        // Limit the number of active motion lines for performance
+        if motionLines.count >= motionLineCount {
+            // Remove the oldest line
+            if let oldestLine = motionLines.first {
+                oldestLine.removeFromParent()
+                motionLines.removeFirst()
+            }
+        }
+        
+        // Create a motion line
+        let lineWidth: CGFloat = type == .log ? 80.0 : 40.0
+        let lineHeight: CGFloat = 2.0
+        let line = SKSpriteNode(color: .white, size: CGSize(width: lineWidth, height: lineHeight))
+        
+        // Position the line in world space, behind where the pad currently is
+        // If moving right (moveDirection = 1), spawn line to the LEFT of current position
+        // If moving left (moveDirection = -1), spawn line to the RIGHT of current position
+        let trailDistance: CGFloat = type == .log ? 70.0 : 35.0
+        let lineWorldX = self.position.x + (-moveDirection * trailDistance)
+        let lineWorldY = self.position.y
+        
+        // Set position in parent's coordinate space (worldNode)
+        if let parent = self.parent {
+            line.position = CGPoint(x: lineWorldX, y: lineWorldY)
+            line.zPosition = Layer.pad - 1  // Behind pads but above water
+            line.alpha = 0.6
+            line.blendMode = .alpha
+            
+            parent.addChild(line)
+            motionLines.append(line)
+            
+            // Animate the line: fade out and shrink
+            let fadeOut = SKAction.fadeOut(withDuration: 0.5)
+            let scaleX = SKAction.scaleX(to: 0.3, duration: 0.5)
+            let remove = SKAction.removeFromParent()
+            
+            let animation = SKAction.group([fadeOut, scaleX])
+            let sequence = SKAction.sequence([animation, remove])
+            
+            line.run(sequence) { [weak self] in
+                // Remove from tracking array when animation completes
+                if let self = self, let index = self.motionLines.firstIndex(of: line) {
+                    self.motionLines.remove(at: index)
+                }
+            }
+        }
+    }
+    
+    
+    /// Cleans up motion lines when pad is removed or stops moving
+    func cleanupMotionLines() {
+        for line in motionLines {
+            line.removeFromParent()
+        }
+        motionLines.removeAll()
     }
 }
 
