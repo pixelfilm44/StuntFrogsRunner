@@ -43,6 +43,13 @@ class ShopViewController: UIViewController {
         label.font = UIFont.systemFont(ofSize: 20, weight: .bold)
         label.textColor = .yellow
         label.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Add shadow
+        label.layer.shadowColor = UIColor.black.cgColor
+        label.layer.shadowOffset = CGSize(width: 0, height: 2)
+        label.layer.shadowOpacity = 0.6
+        label.layer.shadowRadius = 3
+        
         return label
     }()
     
@@ -466,25 +473,71 @@ class ShopViewController: UIViewController {
             HapticsManager.shared.playNotification(.success)
             SoundManager.shared.play("coin")
             
+            // Track if this is a 4-pack item for the tooltip
+            var is4PackItem = false
+            
             switch type {
             case .jump: PersistenceManager.shared.upgradeJump()
             case .health: PersistenceManager.shared.upgradeHealth()
             case .logJumper: PersistenceManager.shared.unlockLogJumper()
             case .superJump: PersistenceManager.shared.unlockSuperJump()
             case .rocketJump: PersistenceManager.shared.unlockRocketJump()
-            case .lifevestPack: PersistenceManager.shared.addVestItems(4)
-            case .honeyPack: PersistenceManager.shared.addHoneyItems(4)
+            case .lifevestPack:
+                PersistenceManager.shared.addVestItems(4)
+                is4PackItem = true
+            case .honeyPack:
+                PersistenceManager.shared.addHoneyItems(4)
+                is4PackItem = true
             case .cannonJump: PersistenceManager.shared.unlockCannonJump()
-            case .crossPack: PersistenceManager.shared.addCrossItems(4)
-            case .swatterPack: PersistenceManager.shared.addSwatterItems(4)
-            case .axePack: PersistenceManager.shared.addAxeItems(4)
+            case .crossPack:
+                PersistenceManager.shared.addCrossItems(4)
+                is4PackItem = true
+            case .swatterPack:
+                PersistenceManager.shared.addSwatterItems(4)
+                is4PackItem = true
+            case .axePack:
+                PersistenceManager.shared.addAxeItems(4)
+                is4PackItem = true
             }
             
             refreshData()
+            
+            // Show tooltip if this is the first 4-pack purchase
+            if is4PackItem {
+                show4PackTooltipIfNeeded()
+            }
         } else {
             HapticsManager.shared.playNotification(.error)
         }
     }
+    
+    /// Shows a tooltip explaining the 4-pack usage limit (once per run) on first purchase
+    private func show4PackTooltipIfNeeded() {
+        let tooltipKey = "shop_4pack_explanation"
+        let defaultsKey = "tooltip_shown_\(tooltipKey)"
+        
+        // Only show once ever
+        guard !UserDefaults.standard.bool(forKey: defaultsKey) else { return }
+        
+        // Mark as shown
+        UserDefaults.standard.set(true, forKey: defaultsKey)
+        
+        // Show an alert explaining 4-pack usage
+        let alert = UIAlertController(
+            title: "",
+            message: "I can only carry 1 4 pack per run. Others will be saved for later.",
+            preferredStyle: .alert
+        )
+        
+        let okAction = UIAlertAction(title: "OK", style: .default) { _ in
+            HapticsManager.shared.playImpact(.light)
+        }
+        alert.addAction(okAction)
+        
+        present(alert, animated: true)
+    }
+    
+    /// Displays a modal tooltip explaining 4-pack usage rules
     
     @objc private func handleBack() {
         HapticsManager.shared.playImpact(.light)

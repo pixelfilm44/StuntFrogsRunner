@@ -7,7 +7,7 @@ struct Layer {
     static let shadow: CGFloat = 15
     static let item: CGFloat = 20 // Coins, Enemies
     static let frogCharacter: CGFloat = 30
-    static let trajectory: CGFloat = 50
+    static let trajectory: CGFloat = 800 // High above game elements, below UI
     static let overlay: CGFloat = 900 // Below UI, above everything else
     static let ui: CGFloat = 1000
     static let frog: CGFloat = 30
@@ -81,6 +81,7 @@ class Frog: GameEntity {
     var currentHealth: Int = 3
     var isInvincible: Bool = false
     var invincibilityTimer: TimeInterval = 0
+    var isComboInvincible: Bool = false  // Invincibility from 25+ combo streak
     var recoilTimer: TimeInterval = 0  // Timer for recoil animation duration
     var eatingTimer: TimeInterval = 0  // Timer for eating animation duration
     
@@ -121,11 +122,119 @@ class Frog: GameEntity {
         SKTexture(imageNamed: "frogDrown2"),
         SKTexture(imageNamed: "frogDrown3")
     ]
+    
+    // MARK: - Jump Animation Texture Sets (Combo-Based)
+    // Base jump animations (combo 0-2)
     private static let jumpAnimationTextures: [SKTexture] = {
         (1...6).map { SKTexture(imageNamed: "frogJump\($0)") }
     }()
     private static let jumpLvAnimationTextures: [SKTexture] = {
         (1...6).map { SKTexture(imageNamed: "frogJumpLv\($0)") }
+    }()
+    
+    // Cool jump animations (combo 3-5) - Try alternative sets, fallback to base
+    private static let jumpCoolAnimationTextures: [SKTexture] = {
+        print("🔍 INITIALIZING Cool Jump Textures...")
+        // Try to load frogJumpCool1-6, fallback to base if not found
+        let textures = (1...6).map { index -> SKTexture in
+            let imageName = "frogJumpCool\(index)"
+            let texture = SKTexture(imageNamed: imageName)
+            
+            // Check if texture loaded successfully by checking size
+            if texture.size() == .zero {
+                print("❌ Missing: \(imageName) (texture size is zero)")
+                return jumpAnimationTextures[index - 1]
+            } else {
+                print("✅ Found: \(imageName) - size: \(texture.size())")
+                return texture
+            }
+        }
+        print("🎯 Loaded \(textures.count) cool jump textures (may include fallbacks)")
+        return textures
+    }()
+    private static let jumpCoolLvAnimationTextures: [SKTexture] = {
+        print("🔍 INITIALIZING Cool Jump Lv Textures...")
+        let textures = (1...6).map { index -> SKTexture in
+            let imageName = "frogJumpCoolLv\(index)"
+            let texture = SKTexture(imageNamed: imageName)
+            
+            if texture.size() == .zero {
+                print("❌ Missing: \(imageName)")
+                return jumpLvAnimationTextures[index - 1]
+            } else {
+                print("✅ Found: \(imageName)")
+                return texture
+            }
+        }
+        return textures
+    }()
+    
+    // Wild jump animations (combo 6-9) - More energetic
+    private static let jumpWildAnimationTextures: [SKTexture] = {
+        print("🔍 INITIALIZING Wild Jump Textures...")
+        let textures = (1...6).map { index -> SKTexture in
+            let imageName = "frogJumpWild\(index)"
+            let texture = SKTexture(imageNamed: imageName)
+            
+            if texture.size() == .zero {
+                print("❌ Missing: \(imageName) - falling back to cool")
+                return jumpCoolAnimationTextures[index - 1]
+            } else {
+                print("✅ Found: \(imageName) - size: \(texture.size())")
+                return texture
+            }
+        }
+        return textures
+    }()
+    private static let jumpWildLvAnimationTextures: [SKTexture] = {
+        print("🔍 INITIALIZING Wild Jump Lv Textures...")
+        let textures = (1...6).map { index -> SKTexture in
+            let imageName = "frogJumpWildLv\(index)"
+            let texture = SKTexture(imageNamed: imageName)
+            
+            if texture.size() == .zero {
+                print("❌ Missing: \(imageName)")
+                return jumpCoolLvAnimationTextures[index - 1]
+            } else {
+                print("✅ Found: \(imageName)")
+                return texture
+            }
+        }
+        return textures
+    }()
+    
+    // Extreme jump animations (combo 10+) - Wildest animations
+    private static let jumpExtremeAnimationTextures: [SKTexture] = {
+        print("🔍 INITIALIZING Extreme Jump Textures...")
+        let textures = (1...6).map { index -> SKTexture in
+            let imageName = "frogJumpExtreme\(index)"
+            let texture = SKTexture(imageNamed: imageName)
+            
+            if texture.size() == .zero {
+                print("❌ Missing: \(imageName) - falling back to wild")
+                return jumpWildAnimationTextures[index - 1]
+            } else {
+                print("✅ Found: \(imageName) - size: \(texture.size())")
+                return texture
+            }
+        }
+        return textures
+    }()
+    private static let jumpExtremeLvAnimationTextures: [SKTexture] = {
+        print("🔍 INITIALIZING Extreme Jump Lv Textures...")
+        let textures = (1...6).map { index -> SKTexture in
+            let imageName = "frogJumpExtremeLv\(index)"
+            let texture = SKTexture(imageNamed: imageName)
+            
+            if texture.size() == .zero {
+                print("❌ Missing: \(imageName)")
+                return jumpWildLvAnimationTextures[index - 1]
+            } else {
+                print("✅ Found: \(imageName)")
+                return texture
+            }
+        }
+        return textures
     }()
     
     // Eating animation textures
@@ -489,6 +598,11 @@ class Frog: GameEntity {
         // Disable physics updates during animation
         isInvincible = true
         
+        // Reset any color effects (like red low-health warning)
+        frogSprite.colorBlendFactor = 0.0
+        frogSprite.color = .clear
+        frogSprite.alpha = 1.0
+        
         // Create the dramatic spinning fall animation
         let duration: TimeInterval = 1.5
         
@@ -716,7 +830,79 @@ class Frog: GameEntity {
         }
     }
     
-    func jump(vector: CGVector, intensity: CGFloat, weather: WeatherType) {
+    /// Selects the appropriate jump animation textures based on combo count
+    private func selectJumpAnimationTextures(comboCount: Int) -> [SKTexture] {
+        let hasVest = buffs.vest > 0
+        
+        switch comboCount {
+        case 0...2:
+            return hasVest ? Frog.jumpLvAnimationTextures : Frog.jumpAnimationTextures
+        case 3...5:
+            return hasVest ? Frog.jumpCoolLvAnimationTextures : Frog.jumpCoolAnimationTextures
+        case 6...9:
+            return hasVest ? Frog.jumpWildLvAnimationTextures : Frog.jumpWildAnimationTextures
+        default:
+            return hasVest ? Frog.jumpExtremeLvAnimationTextures : Frog.jumpExtremeAnimationTextures
+        }
+    }
+    
+    /// Adds a lightweight visual particle effect for combo jumps
+    private func addComboJumpEffect(comboCount: Int, duration: TimeInterval) {
+        // Determine effect intensity based on combo tier
+        let particleCount: Int
+        let particleColor: UIColor
+        
+        switch comboCount {
+        case 3...5:
+            particleCount = 15  // Reduced from 20
+            particleColor = UIColor(red: 0.3, green: 0.6, blue: 1.0, alpha: 0.8)
+        case 6...9:
+            particleCount = 25  // Reduced from 40
+            particleColor = UIColor(red: 1.0, green: 0.7, blue: 0.2, alpha: 0.8)
+        default:
+            particleCount = 35  // Reduced from 60
+            particleColor = UIColor(red: 1.0, green: 0.3, blue: 0.8, alpha: 0.8)
+        }
+        
+        // Try to load particle texture, skip effect if not found
+        let particleTexture = SKTexture(imageNamed: "particle")
+        guard particleTexture.size() != .zero else {
+            // No particle texture available - that's fine, rotation is enough visual feedback
+            return
+        }
+        
+        // Create optimized particle emitter
+        let emitter = SKEmitterNode()
+        emitter.particleTexture = particleTexture
+        emitter.particleBirthRate = CGFloat(particleCount) / CGFloat(duration)
+        emitter.numParticlesToEmit = particleCount
+        emitter.particleLifetime = CGFloat(duration * 0.6)  // Shorter lifetime
+        emitter.particleLifetimeRange = CGFloat(duration * 0.1)
+        emitter.emissionAngle = 0
+        emitter.emissionAngleRange = .pi * 2
+        emitter.particleSpeed = 80  // Reduced from 100
+        emitter.particleSpeedRange = 30  // Reduced from 50
+        emitter.particleAlpha = 0.7
+        emitter.particleAlphaSpeed = -1.2 / CGFloat(duration)
+        emitter.particleScale = 0.25  // Smaller particles
+        emitter.particleScaleRange = 0.1
+        emitter.particleScaleSpeed = -0.3
+        emitter.particleColor = particleColor
+        emitter.particleColorBlendFactor = 1.0
+        emitter.particleBlendMode = .add
+        emitter.zPosition = -1
+        emitter.targetNode = self.parent  // Particles stay in place as frog moves
+        
+        frogSprite.addChild(emitter)
+        
+        // Auto-cleanup
+        let wait = SKAction.wait(forDuration: duration)
+        let remove = SKAction.removeFromParent()
+        emitter.run(SKAction.sequence([wait, remove]))
+    }
+    
+    
+    func jump(vector: CGVector, intensity: CGFloat, weather: WeatherType, comboCount: Int = 0) {
         // IMPORTANT: Reset the physics accumulator to ensure the jump starts
         // on a clean physics step, matching the trajectory prediction exactly
         physicsAccumulator = 0
@@ -750,18 +936,51 @@ class Frog: GameEntity {
         if timeToPeak > 0 {
             let totalAirTime = timeToPeak * 2.0
             
-            // 1. Frame-by-frame animation action
-            let textures = buffs.vest > 0 ? Frog.jumpLvAnimationTextures : Frog.jumpAnimationTextures
-            let frameAnimation = SKAction.animate(with: textures, timePerFrame: totalAirTime / Double(textures.count), resize: false, restore: true)
+            // 1. Frame-by-frame animation action - SELECT BASED ON COMBO!
+            let textures = selectJumpAnimationTextures(comboCount: comboCount)
             
-            // 2. Scaling animation action
-            let scaleUp = SKAction.scale(to: 1.5, duration: timeToPeak)
+            // Make cool/wild/extreme animations slower and more dramatic
+            let animationSpeedMultiplier: Double
+            switch comboCount {
+            case 0...2:
+                animationSpeedMultiplier = 1.0  // Normal speed
+            case 3...5:
+                animationSpeedMultiplier = 1.8  // 80% slower for cool animations (was 1.3)
+            case 6...9:
+                animationSpeedMultiplier = 2.2  // 120% slower for wild animations (was 1.5)
+            default:
+                animationSpeedMultiplier = 2.5  // 150% slower for extreme animations (was 1.7)
+            }
+            
+            let dramaticAirTime = totalAirTime * animationSpeedMultiplier
+            let frameAnimation = SKAction.animate(with: textures, timePerFrame: dramaticAirTime / Double(textures.count), resize: false, restore: true)
+            
+            // 2. Scaling animation action - MORE DRAMATIC FOR HIGHER COMBOS
+            let scaleMultiplier: CGFloat
+            switch comboCount {
+            case 0...2:
+                scaleMultiplier = 1.5
+            case 3...5:
+                scaleMultiplier = 2.2  // Bigger! (was 1.7)
+            case 6...9:
+                scaleMultiplier = 2.8  // Much bigger! (was 2.0)
+            default:
+                scaleMultiplier = 3.5  // HUGE! (was 2.3)
+            }
+            
+            let scaleUp = SKAction.scale(to: scaleMultiplier, duration: timeToPeak)
             scaleUp.timingMode = .easeOut
             let scaleDown = SKAction.scale(to: 1.0, duration: timeToPeak)
             scaleDown.timingMode = .easeIn
             let scaleSequence = SKAction.sequence([scaleUp, scaleDown])
             
-            // 3. Run animations on their respective nodes
+            // 3. Add visual particle effect for combo jumps
+            if comboCount >= 3 {
+                // Add a visual particle effect for combo jumps
+                addComboJumpEffect(comboCount: comboCount, duration: totalAirTime)
+            }
+            
+            // 4. Run animations on their respective nodes
             frogSprite.run(frameAnimation, withKey: "jumpFrameAnimation")
             bodyNode.run(scaleSequence, withKey: "jumpScaleAnimation")
         }
@@ -772,6 +991,8 @@ class Frog: GameEntity {
     func land(on pad: Pad, weather: WeatherType) {
         // Stop jump animation and reset scale immediately on landing
         frogSprite.removeAction(forKey: "jumpFrameAnimation")
+        frogSprite.removeAction(forKey: "jumpRotation")
+        frogSprite.zRotation = 0  // Reset rotation
         bodyNode.removeAction(forKey: "jumpScaleAnimation")
         bodyNode.setScale(1.0)
         
@@ -818,14 +1039,14 @@ class Frog: GameEntity {
         SoundManager.shared.play("land")
     }
     
-    func bounce(weather: WeatherType) {
+    func bounce(weather: WeatherType, comboCount: Int = 0) {
         // High bounce to give time for air jump
         let zVel: CGFloat = 22.0
         zVelocity = zVel
         velocity.dx *= -0.5
         velocity.dy *= -0.5
         
-        // --- Dynamic Bounce Animation (same as jump) ---
+        // --- Dynamic Bounce Animation (same as jump with combo-based textures) ---
         // Use the same gravity as actual physics - reduced in space!
         let gravity = weather == .space ? Configuration.Physics.gravityZ * 0.3 : Configuration.Physics.gravityZ
         let timeToPeak = (zVel / gravity) / 60.0 // in seconds
@@ -833,14 +1054,63 @@ class Frog: GameEntity {
         if timeToPeak > 0 {
             let totalAirTime = timeToPeak * 2.0
             
-            let textures = buffs.vest > 0 ? Frog.jumpLvAnimationTextures : Frog.jumpAnimationTextures
-            let frameAnimation = SKAction.animate(with: textures, timePerFrame: totalAirTime / Double(textures.count), resize: false, restore: true)
+            // Select textures based on combo count
+            let textures = selectJumpAnimationTextures(comboCount: comboCount)
+            
+            // Make cool/wild/extreme animations slower and more dramatic
+            let animationSpeedMultiplier: Double
+            switch comboCount {
+            case 0...2:
+                animationSpeedMultiplier = 1.0  // Normal speed
+            case 3...5:
+                animationSpeedMultiplier = 2.8  // 80% slower for cool animations (was 1.3)
+            case 6...9:
+                animationSpeedMultiplier = 3.2  // 120% slower for wild animations (was 1.5)
+            default:
+                animationSpeedMultiplier = 2.5  // 150% slower for extreme animations (was 1.7)
+            }
+            
+            let dramaticAirTime = totalAirTime * animationSpeedMultiplier
+            let frameAnimation = SKAction.animate(with: textures, timePerFrame: dramaticAirTime / Double(textures.count), resize: false, restore: true)
 
-            let scaleUp = SKAction.scale(to: 1.5, duration: timeToPeak)
+            // More dramatic scaling for higher combos
+            let scaleMultiplier: CGFloat
+            switch comboCount {
+            case 0...2:
+                scaleMultiplier = 1.5
+            case 3...5:
+                scaleMultiplier = 2.2  // Bigger! (was 1.7)
+            case 6...9:
+                scaleMultiplier = 2.8  // Much bigger! (was 2.0)
+            default:
+                scaleMultiplier = 3.5  // HUGE! (was 2.3)
+            }
+            
+            let scaleUp = SKAction.scale(to: scaleMultiplier, duration: timeToPeak)
             scaleUp.timingMode = .easeOut
             let scaleDown = SKAction.scale(to: 1.0, duration: timeToPeak)
             scaleDown.timingMode = .easeIn
             let scaleSequence = SKAction.sequence([scaleUp, scaleDown])
+
+            // Add rotation for combo bounces too!
+            if comboCount >= 3 {
+                let rotations: CGFloat
+                switch comboCount {
+                case 3...5:
+                    rotations = 1.0  // One full rotation for cool
+                case 6...9:
+                    rotations = 2.0  // Two rotations for wild
+                default:
+                    rotations = 3.0  // Three rotations for extreme!
+                }
+                
+                let rotate = SKAction.rotate(byAngle: rotations * .pi * 2, duration: totalAirTime)
+                rotate.timingMode = .easeInEaseOut
+                frogSprite.run(rotate, withKey: "jumpRotation")
+                
+                // Add particle effect for combo bounces too
+                addComboJumpEffect(comboCount: comboCount, duration: totalAirTime)
+            }
 
             frogSprite.run(frameAnimation, withKey: "jumpFrameAnimation")
             bodyNode.run(scaleSequence, withKey: "jumpScaleAnimation")
@@ -997,7 +1267,8 @@ class Pad: GameEntity {
     static func isYPositionSafeForLog(_ yPosition: CGFloat, existingPads: [Pad], minYDistance: CGFloat = 150) -> Bool {
         for pad in existingPads {
             // Only check moving lilypads and existing logs
-            guard pad.type == .moving || pad.type == .waterLily || pad.type == .log else { continue }
+            // Note: waterLily pads are stationary and don't need spacing requirements
+            guard pad.type == .moving || pad.type == .log else { continue }
             
             let dy = abs(yPosition - pad.position.y)
             if dy < minYDistance {
@@ -1005,6 +1276,42 @@ class Pad: GameEntity {
             }
         }
         return true
+    }
+    
+    /// Checks if a log at the specified position would collide with any lilypads along its horizontal path.
+    /// This checks the entire width of the river since logs move left-to-right.
+    /// - Parameters:
+    ///   - logPosition: The proposed position for the log
+    ///   - existingPads: Array of existing pads to check against
+    ///   - safetyMargin: Additional safety margin around pads (default: 70 - log width/2 + pad radius + buffer)
+    /// - Returns: True if the log's path is clear of lilypads, false if it would collide
+    static func isLogPathClear(at logPosition: CGPoint, existingPads: [Pad], safetyMargin: CGFloat = 70) -> Bool {
+        // Log dimensions: width = 120, height = 40
+        let logHalfWidth: CGFloat = 60.0
+        let logHalfHeight: CGFloat = 20.0
+        
+        for pad in existingPads {
+            // Skip other logs and special pads - we only care about lilypads the frog could be on
+            if pad.type == .log || pad.type == .launchPad || pad.type == .warp {
+                continue
+            }
+            
+            // Check if this pad is at a similar Y position (vertical overlap)
+            let dy = abs(pad.position.y - logPosition.y)
+            let verticalOverlapDistance = logHalfHeight + pad.scaledRadius + safetyMargin
+            
+            if dy < verticalOverlapDistance {
+                // This pad is at the same height as the log's path
+                // Since logs move horizontally across the entire river width,
+                // we need to check if the pad is anywhere along that horizontal line
+                
+                // A log at position.x will eventually sweep across the entire river
+                // So we just need to check if the pad is within the vertical collision zone
+                return false  // Path is NOT clear - there's a lilypad in the way
+            }
+        }
+        
+        return true  // Path is clear
     }
     required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) has not be implemented") }
     
@@ -1100,7 +1407,7 @@ class Pad: GameEntity {
         guard let sprite = padSprite else { return }
         
         // Skip hue variation for special pads that need specific appearances
-        guard type != .launchPad && type != .warp && type != .grave else { return }
+        guard type != .launchPad && type != .warp && type != .grave && type != .waterLily && type != .moving else { return }
         
         // Convert hue shift to a color (hue variation is in range -0.15 to 0.15)
         // We'll use UIColor to create a subtle tint
@@ -1283,7 +1590,7 @@ class Pad: GameEntity {
         removeAction(forKey: "landingSquish")
         
         // Quick squish down (shrink slightly) then bounce back
-        let squishDown = SKAction.scale(to: 0.85, duration: 0.06)
+        let squishDown = SKAction.scale(to: 0.75, duration: 0.12)
         let squishUp = SKAction.scale(to: 1.0, duration: 0.12)
         squishDown.timingMode = .easeOut
         squishUp.timingMode = .easeOut
@@ -1608,7 +1915,7 @@ class TreasureChest: GameEntity {
         self.reward = Reward.random()
         
         // Create chest sprite - check if treasureChest image exists
-        if UIImage(named: "treasureChest") != nil {
+        if let _ = UIImage(named: "treasureChest") {
             chestSprite = SKSpriteNode(texture: TreasureChest.chestTexture)
             chestSprite.size = CGSize(width: 40, height: 40)
         } else {
@@ -2459,8 +2766,11 @@ class Boat: GameEntity {
     
     /// Sets up the wake particle emitter.
     private func setupWakeEmitter(targetNode: SKNode?) {
-        guard let target = targetNode,
-              let emitter = SKEmitterNode(fileNamed: "BoatWake.sks") else {
+        guard let target = targetNode else {
+            return
+        }
+        
+        guard let emitter = SKEmitterNode(fileNamed: "BoatWake.sks") else {
             return
         }
         

@@ -5,9 +5,10 @@ enum GameState {
     case loading, menu, shop, challenges, initialUpgrade, playing, paused, upgradeSelection, gameOver
 }
 
-enum GameMode {
+enum GameMode: Equatable {
     case endless
     case beatTheBoat
+    case dailyChallenge(DailyChallenge)
 }
 
 enum RaceLossReason {
@@ -26,7 +27,7 @@ protocol GameCoordinatorDelegate: AnyObject {
     func didRequestResume()
     func didSelectUpgrade(_ upgradeId: String)
     func gameDidEnd(score: Int, coins: Int, raceResult: RaceResult?)
-    func triggerUpgradeMenu(hasFullHealth: Bool, distanceTraveled: Int)
+    func triggerUpgradeMenu(hasFullHealth: Bool, distanceTraveled: Int, currentWeather: WeatherType, currentMaxHealth: Int)
     func showShop()
     func didFinishLoading()
     func pauseGame()
@@ -46,6 +47,9 @@ class GameCoordinator: GameCoordinatorDelegate {
     
     // Track the race win streak
     private var raceWinStreak: Int = 0
+    
+    // Track daily challenge start time
+    private var dailyChallengeStartTime: Date?
     
     init(window: UIWindow?) {
         self.window = window
@@ -125,6 +129,8 @@ class GameCoordinator: GameCoordinatorDelegate {
         upgradeVC.coordinator = self
         // At game start, the frog always has full health, so don't offer heart refill
         upgradeVC.hasFullHealth = true
+        upgradeVC.currentWeather = .sunny // Game always starts at sunny
+        upgradeVC.currentMaxHealth = PersistenceManager.shared.healthLevel
         upgradeVC.modalPresentationStyle = .overFullScreen
         upgradeVC.modalTransitionStyle = .crossDissolve
         window?.rootViewController?.present(upgradeVC, animated: false)
@@ -137,6 +143,26 @@ class GameCoordinator: GameCoordinatorDelegate {
         upgradeVC.coordinator = self
         upgradeVC.hasFullHealth = true
         upgradeVC.isForRace = true // Prevent rockets from being an option in races
+        upgradeVC.currentWeather = .sunny // Races start at sunny
+        upgradeVC.currentMaxHealth = PersistenceManager.shared.healthLevel
+        upgradeVC.modalPresentationStyle = .overFullScreen
+        upgradeVC.modalTransitionStyle = .crossDissolve
+        window?.rootViewController?.present(upgradeVC, animated: false)
+    }
+    
+    func startDailyChallenge() {
+        let challenge = DailyChallenges.shared.getTodaysChallenge()
+        pendingGameMode = .dailyChallenge(challenge)
+        dailyChallengeStartTime = Date()
+        
+        currentState = .initialUpgrade
+        let upgradeVC = UpgradeViewController()
+        upgradeVC.coordinator = self
+        upgradeVC.hasFullHealth = true
+        upgradeVC.isDailyChallenge = true
+        upgradeVC.currentDailyChallenge = challenge
+        upgradeVC.currentWeather = challenge.climate // Use the challenge's climate
+        upgradeVC.currentMaxHealth = PersistenceManager.shared.healthLevel
         upgradeVC.modalPresentationStyle = .overFullScreen
         upgradeVC.modalTransitionStyle = .crossDissolve
         window?.rootViewController?.present(upgradeVC, animated: false)
@@ -151,7 +177,7 @@ class GameCoordinator: GameCoordinatorDelegate {
         scene.gameMode = gameMode
         
         // If it's a race, configure it with the current streak data
-        if gameMode == .beatTheBoat {
+        if case .beatTheBoat = gameMode {
             scene.boatSpeedMultiplier = 1.0 + (CGFloat(raceWinStreak) * 0.10)
             scene.raceRewardBonus = raceWinStreak * 100
         }
@@ -169,13 +195,22 @@ class GameCoordinator: GameCoordinatorDelegate {
         }, completion: nil)
     }
     
-    func triggerUpgradeMenu(hasFullHealth: Bool, distanceTraveled: Int) {
+    func triggerUpgradeMenu(hasFullHealth: Bool, distanceTraveled: Int, currentWeather: WeatherType, currentMaxHealth: Int) {
         guard currentState == .playing else { return }
         currentState = .upgradeSelection
         let upgradeVC = UpgradeViewController()
         upgradeVC.coordinator = self
         upgradeVC.hasFullHealth = hasFullHealth
         upgradeVC.distanceTraveled = distanceTraveled
+        upgradeVC.currentWeather = currentWeather
+        upgradeVC.currentMaxHealth = currentMaxHealth
+        
+        // Set daily challenge info if in daily challenge mode
+        if case .dailyChallenge(let challenge) = pendingGameMode {
+            upgradeVC.isDailyChallenge = true
+            upgradeVC.currentDailyChallenge = challenge
+        }
+        
         upgradeVC.modalPresentationStyle = .overFullScreen
         upgradeVC.modalTransitionStyle = .crossDissolve
         window?.rootViewController?.present(upgradeVC, animated: false)
@@ -215,7 +250,33 @@ class GameCoordinator: GameCoordinatorDelegate {
         SoundManager.shared.stopWeatherSFX()
         
         var isNewHigh = false
-        if raceResult == nil {
+        var isDailyChallengeMode = false
+        var challengeCompleted = false
+        
+        // Check if this was a daily challenge
+        if case .dailyChallenge = pendingGameMode {
+            isDailyChallengeMode = true
+            // Daily challenges are 1000m (score of 2000)
+            if score >= 1000 {
+                challengeCompleted = true
+                if let startTime = dailyChallengeStartTime {
+                    let timeElapsed = Date().timeIntervalSince(startTime)
+                    DailyChallenges.shared.recordRun(timeInSeconds: timeElapsed, completed: true)
+                    print("✅ Daily challenge completed in \(String(format: "%.1f", timeElapsed))s")
+                    
+                    // Submit time to Game Center (convert to milliseconds for leaderboard)
+                    let timeInMilliseconds = Int(timeElapsed * 1000)
+                    GameCenterManager.shared.submitScore(timeInMilliseconds, leaderboardID: Configuration.GameCenter.dailyChallengeLeaderboardID)
+                    print("🎮 Submitted daily challenge time to Game Center: \(timeInMilliseconds)ms")
+                }
+                // Award 100 coins for completing the daily challenge
+                PersistenceManager.shared.addCoins(100)
+                print("🪙 Awarded 100 coins for completing daily challenge!")
+            } else {
+                // Record failed attempt
+                DailyChallenges.shared.recordRun(timeInSeconds: 0, completed: false)
+            }
+        } else if raceResult == nil {
             // Endless mode
             isNewHigh = PersistenceManager.shared.saveScore(score)
             if isNewHigh {
@@ -234,13 +295,18 @@ class GameCoordinator: GameCoordinatorDelegate {
             ChallengeManager.shared.setWinningStreak(raceWinStreak)
         }
         
-        PersistenceManager.shared.addCoins(coins)
+        // Only add coins in non-daily-challenge modes
+        if !isDailyChallengeMode {
+            PersistenceManager.shared.addCoins(coins)
+        }
         
         let gameOverVC = GameOverViewController()
         gameOverVC.score = score
         gameOverVC.runCoins = coins
         gameOverVC.isNewHighScore = isNewHigh
         gameOverVC.raceResult = raceResult
+        gameOverVC.isDailyChallenge = isDailyChallengeMode
+        gameOverVC.dailyChallengeCompleted = challengeCompleted
         
         // Pass the new win streak to the game over screen if it was a race
         if raceResult != nil {

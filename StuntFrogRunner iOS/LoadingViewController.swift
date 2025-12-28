@@ -165,7 +165,7 @@ class LoadingViewController: UIViewController {
     private func preloadAllAssets() {
         Task {
             // Update status once at the beginning
-            await updateStatus("Loading Assets...")
+            await updateStatus("Looking for our hero...")
             
             // Preload all asset types concurrently for a significant speed boost.
             await withTaskGroup(of: Void.self) { group in

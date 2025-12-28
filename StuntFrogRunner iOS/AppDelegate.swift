@@ -29,6 +29,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         SoundManager.shared.preloadSounds()
         print("✅ AppDelegate: Sounds preloaded")
         
+        // Load daily challenges (uses cached data if available)
+        DailyChallenges.shared.refreshIfNeeded { success in
+            if success {
+                print("✅ AppDelegate: Daily challenges ready")
+            } else {
+                print("⚠️ AppDelegate: Using cached/fallback challenges")
+            }
+        }
+        
         // IMPORTANT: Don't create window here if using scenes
         // The window will be created in SceneDelegate
         print("⚠️ AppDelegate: Not creating window - waiting for scene delegate")

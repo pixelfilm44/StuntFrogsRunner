@@ -20,7 +20,7 @@ struct Configuration {
         static let riverWidth: CGFloat = 600.0
         static let minPadRadius: CGFloat = 55.0
         static let maxPadRadius: CGFloat = 105.0
-        static let padSpacing: CGFloat = 15.0  // Minimum gap between lily pads
+        static let padSpacing: CGFloat = 25.0  // Minimum gap between lily pads
         static let movingPadMinDistance: CGFloat = 25.0  // Minimum distance between moving lilypads and other pads
         static let frogRadius: CGFloat = 20.0
         
@@ -177,10 +177,10 @@ struct Configuration {
         static let challengeClaimBadge = UIFont.systemFont(ofSize: 12, weight: .heavy)
         
         /// Game over screen title (WIPEOUT!)
-        static let gameOverTitle : (name: String, size: CGFloat) = (primaryHeavy, 40)
+        static let gameOverTitle : (name: String, size: CGFloat) = (primaryHeavy, 32)
         
         /// Game over score display
-        static let gameOverScore: (name: String, size: CGFloat) = (primaryBold, 32)
+        static let gameOverScore: (name: String, size: CGFloat) = (primaryBold, 18)
         
         /// Game over high score banner
         static let gameOverHighScore: (name: String, size: CGFloat) = (primaryBold, 18)
@@ -232,7 +232,7 @@ struct Configuration {
         static let superJumpDuration: TimeInterval = 10.0
         
         // MARK: - Beat the Boat Challenge
-        static let boatRaceFinishY: CGFloat = 10000.0 // 2000m * 10 score units/meter
+        static let boatRaceFinishY: CGFloat = 20000.0 // Base race length (1000 for first race)
         static let boatSpeed: CGFloat = 2.8 // Adjust for balanced difficulty
         static let boatRaceReward: Int = 100
         static let cannonJumpsPerRun = 3
@@ -313,9 +313,9 @@ struct Configuration {
         /// Difficulty level when logs start appearing
         static let logStartLevel: Int = 1
         /// Base probability of spawning a log (once unlocked)
-        static let baseLogProbability: Double = 0.3
+        static let baseLogProbability: Double = 0.6
         /// Additional log probability per level after unlock
-        static let logProbabilityPerLevel: Double = 0.1
+        static let logProbabilityPerLevel: Double = 0.3
         /// Maximum log spawn probability
         static let maxLogProbability: Double = 0.6
         /// Weather conditions where logs can spawn (natural settings, not desert/space)
@@ -350,8 +350,8 @@ struct Configuration {
         /// Difficulty level when ice pads start appearing
         static let icePadStartLevel: Int = 2
         static let icePadProbability: Double = 0.1
-        /// Weather conditions where ice pads can spawn (only in cold weather)
-        static let icePadWeathers: Set<WeatherType> = [.winter, .space]
+        /// Weather conditions where ice pads can spawn (only in winter)
+        static let icePadWeathers: Set<WeatherType> = [.winter]
         
         /// Difficulty level when shrinking pads start appearing
         static let shrinkingPadStartLevel: Int = 1
@@ -487,6 +487,7 @@ struct Configuration {
     
     struct GameCenter {
         static let leaderboardID = "TopScores"
+        static let dailyChallengeLeaderboardID = "DailyChallenge"
     }
     
     // MARK: - Debug Settings
@@ -504,7 +505,7 @@ struct Configuration {
     }
 }
 
-enum WeatherType: String, CaseIterable {
+enum WeatherType: String, CaseIterable, Codable {
     case sunny, night, rain, winter, desert, space
     
     /// Returns whether this weather type can have precipitation (rain/snow)

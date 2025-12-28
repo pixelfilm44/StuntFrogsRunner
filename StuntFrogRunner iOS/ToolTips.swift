@@ -1,5 +1,10 @@
 import SpriteKit
 
+/// Protocol for scenes that can determine when it's safe to show tooltips
+public protocol TooltipSafetyChecking {
+    func isSafeForTooltip() -> Bool
+}
+
 /// Manages the creation and display of tooltips that provide contextual help to the player.
 public class ToolTips {
     
@@ -10,6 +15,10 @@ public class ToolTips {
     
     /// Queue of pending tooltips waiting to be displayed
     private static var tooltipQueue: [(key: String, scene: SKScene)] = []
+    
+    /// Tracks retry attempts to prevent infinite loops
+    private static var retryAttempts: [String: Int] = [:]
+    private static let maxRetryAttempts = 10
     
     // MARK: - Entity Encounter Tracking
     
@@ -98,6 +107,8 @@ public class ToolTips {
             return "dragonflies"
         case "LOG":
             return "logs"
+        case "GRAVE":
+            return "ghosts"  // Show ghost tooltip when grave appears
         default:
             return nil
         }
@@ -132,7 +143,7 @@ public class ToolTips {
         ),
         "ghosts": (
             title: "Ghosts",
-            message: "What was that? Better keep moving if we don't have any crosses!."
+            message: "Are those graves? Better stay away from those..."
         ),
         "dragonflies": (
             title: "Dragonflies",
@@ -165,6 +176,10 @@ public class ToolTips {
         "heartOverload": (
             title: "You love too much.",
             message: "Sorry, but you can only have 6 hearts."
+        ),
+        "4pack": (
+            title: "",
+            message: "I can only carry 1 4 pack per run. Others will be saved for later."
         )
         
         // Add more tooltips here with a unique key.
@@ -178,6 +193,9 @@ public class ToolTips {
     /// The game will be paused while the tooltip is visible and resume when the player taps the "OK" button.
     /// Once a tooltip is shown, it's marked as "seen" and won't be shown again for that user.
     ///
+    /// **Important:** Tooltips will only be shown when the frog is safely on a lilypad, not during
+    /// sling/drag actions or while jumping/flying through the air.
+    ///
     /// - Parameters:
     ///   - key: The key for the tooltip content to display, as defined in the `toolTipContent` dictionary.
     ///   - scene: The `SKScene` in which to display the tooltip.
@@ -188,16 +206,30 @@ public class ToolTips {
             return
         }
         
-        // IMPORTANT: Don't show tooltips while the player is actively dragging the slingshot
-        // This prevents pausing the game mid-drag which can cause trajectory calculation issues
-        if let gameScene = scene as? GameScene, gameScene.isPlayerDragging {
-            // Defer the tooltip until the player finishes their current action
-            // We'll try again after a short delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                showToolTip(forKey: key, in: scene)
-            }
+        // Check retry count to prevent infinite loops
+        let currentRetries = retryAttempts[key] ?? 0
+        guard currentRetries < maxRetryAttempts else {
+            print("⚠️ Tooltip '\(key)' exceeded max retry attempts. Canceling to prevent infinite loop.")
+            retryAttempts.removeValue(forKey: key)
             return
         }
+        
+        // IMPORTANT: Only show tooltips when the frog is safely on a lilypad
+        // This prevents interrupting gameplay during critical moments
+        if scene is GameScene {
+            // Check if the frog is in a safe state for tooltips
+            if !isFrogInSafeStateForTooltip(in: scene) {
+                retryAttempts[key] = currentRetries + 1
+                // Defer the tooltip until the frog is in a safe state
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    showToolTip(forKey: key, in: scene)
+                }
+                return
+            }
+        }
+        
+        // Reset retry counter since we're about to show the tooltip
+        retryAttempts.removeValue(forKey: key)
         
         // If a tooltip is currently showing, add this one to the queue
         if isShowingTooltip {
@@ -248,9 +280,11 @@ public class ToolTips {
         uiContainer.addChild(overlay)
 
         // Create and configure the tooltip node.
-        let toolTipSize = CGSize(width: viewSize.width * 0.75, height: viewSize.height * 0.5)
+       // let toolTipSize = CGSize(width: viewSize.width * 0.75, height: viewSize.height * 0.5)
+        
+        let toolTipSize = CGSize(width: 300, height: 275)
         let toolTip = ToolTipNode(title: content.title, message: content.message, size: toolTipSize)
-        toolTip.position = scene.camera != nil ? .zero : CGPoint(x: scene.size.width / 2, y: scene.size.height / 2)
+        toolTip.position = scene.camera != nil ? .zero : CGPoint(x: scene.size.width / 2, y: scene.size.height / 2 + 50) 
         toolTip.zPosition = 1000 // Ensure it's on top of everything.
 
         // When the tooltip is dismissed, we unpause the scene, remove the overlay,
@@ -288,11 +322,16 @@ public class ToolTips {
         let fadeInAction = SKAction.fadeIn(withDuration: 0.2)
         
         let animationGroup = SKAction.group([slideAndBounce, fadeInAction])
-
-        // Run the animation, and only pause the game after the tooltip is in place.
-        toolTip.run(animationGroup) {
+        
+        // Wait for animation to complete, then pause the game
+        // This ensures the tooltip is fully visible before freezing the scene
+        let pauseAction = SKAction.run {
             scene.isPaused = true
         }
+        let fullSequence = SKAction.sequence([animationGroup, pauseAction])
+        
+        // Run the animation (don't pause until animation completes)
+        toolTip.run(fullSequence)
 
         // Mark this tooltip as shown so it won't appear again.
         UserDefaults.standard.set(true, forKey: defaultsKey)
@@ -341,6 +380,21 @@ public class ToolTips {
         showToolTip(forKey: tooltipKey, in: scene)
     }
     
+    /// Triggers the ghost tooltip when a grave lilypad first appears on screen
+    /// Call this when a grave pad becomes visible to warn about potential ghosts
+    /// - Parameter scene: The game scene
+    public static func onGraveLilypadAppeared(in scene: SKScene) {
+        let entityType = "GRAVE"
+        let tooltipKey = "ghosts"
+        
+        // Check if already seen
+        if hasSeenEntity(entityType) { return }
+        
+        // Mark as seen and show tooltip
+        markEntityAsSeen(entityType)
+        showToolTip(forKey: tooltipKey, in: scene)
+    }
+    
     /// Resets the tracking for all tooltips, allowing them to be shown again.
     ///
     /// This is useful for development or if you add a "Reset Tutorial" button for players.
@@ -355,6 +409,27 @@ public class ToolTips {
         // Clear the queue and reset the showing state
         tooltipQueue.removeAll()
         isShowingTooltip = false
+        
+        // Clear retry attempts
+        retryAttempts.removeAll()
+    }
+    
+    // MARK: - Frog State Checking
+    
+    /// Checks if the frog is in a safe state to show tooltips (on a lilypad, not jumping or being dragged)
+    /// 
+    /// Uses the `TooltipSafetyChecking` protocol to determine if the scene is ready for tooltips.
+    /// 
+    /// - Parameter scene: The game scene to check
+    /// - Returns: True if it's safe to show a tooltip, false otherwise
+    public static func isFrogInSafeStateForTooltip(in scene: SKScene) -> Bool {
+        // Check if the scene conforms to our protocol
+        if let tooltipScene = scene as? TooltipSafetyChecking {
+            return tooltipScene.isSafeForTooltip()
+        }
+        
+        // Default to true for scenes that don't implement the protocol (menu scenes, etc.)
+        return true
     }
 }
 
@@ -374,22 +449,22 @@ private class ToolTipNode: SKSpriteNode {
         // Create and configure the message label - vertically centered, no title.
         let messageLabel = SKLabelNode()
         messageLabel.text = message
-        messageLabel.fontSize = 22
+        messageLabel.fontSize = 18
         messageLabel.fontColor = .black
         messageLabel.verticalAlignmentMode = .center
         messageLabel.horizontalAlignmentMode = .center
         messageLabel.numberOfLines = 0
         messageLabel.lineBreakMode = .byWordWrapping
         messageLabel.preferredMaxLayoutWidth = self.size.width - 80
-        messageLabel.position = CGPoint(x: 0, y: 20) // Slightly offset up to account for button below
+        messageLabel.position = CGPoint(x: 0, y: 44) // Moved up 24 pixels from original position (20 + 24)
         messageLabel.zPosition = 1 // Ensure it's above the background
         addChild(messageLabel)
         
         // Apply comic-like font AFTER adding to parent and setting all other properties
         // Try "Chalkboard SE" first (available on iOS), fallback to "Marker Felt" or "Comic Sans MS"
-        if UIFont(name: "ChalkboardSE-Bold", size: 22) != nil {
+        if UIFont(name: "ChalkboardSE-Bold", size: 18) != nil {
             messageLabel.fontName = "ChalkboardSE-Bold"
-        } else if UIFont(name: "MarkerFelt-Wide", size: 22) != nil {
+        } else if UIFont(name: "MarkerFelt-Wide", size: 18) != nil {
             messageLabel.fontName = "MarkerFelt-Wide"
         } else {
             messageLabel.fontName = "Noteworthy-Bold" // Another comic-like fallback

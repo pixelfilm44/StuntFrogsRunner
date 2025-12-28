@@ -82,6 +82,36 @@ class MenuViewController: UIViewController {
         return label
     }()
     
+    private lazy var statsLabel3: UILabel = {
+        let label = UILabel()
+        label.font = UIFont.systemFont(ofSize: 16, weight: .medium)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.numberOfLines = 1
+        // Add shadow for readability over background image
+        label.layer.shadowColor = UIColor.black.cgColor
+        label.layer.shadowOffset = CGSize(width: 1, height: 1)
+        label.layer.shadowOpacity = 0.8
+        label.layer.shadowRadius = 2
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var statsValue3: UILabel = {
+        let label = UILabel()
+        label.font = UIFont(name: "Fredoka-Bold", size: 24)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.numberOfLines = 1
+        // Add shadow for readability over background image
+        label.layer.shadowColor = UIColor.black.cgColor
+        label.layer.shadowOffset = CGSize(width: 1, height: 1)
+        label.layer.shadowOpacity = 0.8
+        label.layer.shadowRadius = 2
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
     private lazy var playButton: UIButton = {
         let button = UIButton(type: .custom)
         button.setBackgroundImage(UIImage(named: "primaryButton"), for: .normal)
@@ -106,7 +136,7 @@ class MenuViewController: UIViewController {
         button.setTitle("RACE", for: .normal)
         button.setBackgroundImage(UIImage(named: "secondaryButton"), for: .normal)
 
-        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 24)
+        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 18)
         // Light blue text
         button.setTitleColor(UIColor(red: 93/255, green: 173/255, blue: 226/255, alpha: 1), for: .normal)
        
@@ -211,16 +241,156 @@ class MenuViewController: UIViewController {
         return button
     }()
     
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        setupUI()
-        setupButtonAnimations()
-    }
+    private lazy var dailyChallengeButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("DAILY CHALLENGE", for: .normal)
+        button.setBackgroundImage(UIImage(named: "secondaryButton"), for: .normal)
+        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 18)
+        button.setTitleColor(UIColor(red: 93/255, green: 173/255, blue: 226/255, alpha: 1), for: .normal)
+        
+        // Add shadow
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOffset = CGSize(width: 0, height: 4)
+        button.layer.shadowOpacity = 0.3
+        button.layer.shadowRadius = 5
+        
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(handlePlayDailyChallenge), for: .touchUpInside)
+        return button
+    }()
     
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
+    // MARK: - Daily Challenge UI
+    
+    private lazy var dailyChallengeCard: UIView = {
+        let view = UIView()
+        view.backgroundColor = UIColor(white: 0.15, alpha: 0.95)
+        view.layer.cornerRadius = 16
+        view.layer.borderWidth = 2
+        view.layer.borderColor = UIColor(red: 52/255, green: 152/255, blue: 219/255, alpha: 1).cgColor
+        view.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Add shadow
+        view.layer.shadowColor = UIColor.black.cgColor
+        view.layer.shadowOffset = CGSize(width: 0, height: 4)
+        view.layer.shadowOpacity = 0.5
+        view.layer.shadowRadius = 8
+        
+        return view
+    }()
+    
+    private lazy var challengeTitleLabel: UILabel = {
+        let label = UILabel()
+        label.font = UIFont(name: Configuration.Fonts.cardHeader, size: 18)
+        label.textColor = UIColor(red: 52/255, green: 152/255, blue: 219/255, alpha: 1)
+        label.textAlignment = .left
+        label.numberOfLines = 1
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var challengeDescriptionLabel: UILabel = {
+        let label = UILabel()
+        label.font = UIFont.systemFont(ofSize: 14, weight: .regular)
+        label.textColor = UIColor(white: 0.9, alpha: 1)
+        label.textAlignment = .left
+        label.numberOfLines = 2
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var challengeStatsLabel: UILabel = {
+        let label = UILabel()
+        label.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        label.textColor = UIColor(white: 0.7, alpha: 1)
+        label.textAlignment = .left
+        label.numberOfLines = 1
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var playDailyChallengeButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("PLAY", for: .normal)
+        button.setBackgroundImage(UIImage(named: "primaryButton"), for: .normal)
+        button.titleLabel?.font = UIFont(name: "Fredoka-Bold", size: 18)
+        button.setTitleColor(UIColor(red: 186/255, green: 96/255, blue: 2/255, alpha: 1), for: .normal)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(handlePlayDailyChallenge), for: .touchUpInside)
+        return button
+    }()
+    
+    // Testing buttons
+    private lazy var prevDayButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("◀", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 24, weight: .bold)
+        button.setTitleColor(.white, for: .normal)
+        button.backgroundColor = UIColor(white: 0.2, alpha: 0.8)
+        button.layer.cornerRadius = 20
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(handlePrevDay), for: .touchUpInside)
+        return button
+    }()
+    
+    private lazy var nextDayButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("▶", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 24, weight: .bold)
+        button.setTitleColor(.white, for: .normal)
+        button.backgroundColor = UIColor(white: 0.2, alpha: 0.8)
+        button.layer.cornerRadius = 20
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(handleNextDay), for: .touchUpInside)
+        return button
+    }()
+    
+ 
+        
+        override func viewDidLoad() {
+                super.viewDidLoad()
+                setupUI()
+                setupButtonAnimations()
+                
+                // Listen for updates (when data loads or day changes)
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(refreshDailyChallengeUI),
+                    name: Notification.Name("DailyChallengeUpdated"),
+                    object: nil
+                )
+                
+                // Fetch data immediately
+                fetchRemoteChallenges()
+            }
+            
+           
+            
+            func fetchRemoteChallenges() {
+                // Show a loading state if you want, or just let it update silently
+                DailyChallenges.shared.fetchDailyChallenges { [weak self] success in
+                    if success {
+                        self?.updateDailyChallengeCard()
+                    }
+                }
+            }
+            
+            @objc private func refreshDailyChallengeUI() {
+                DispatchQueue.main.async {
+                    self.updateDailyChallengeCard()
+                }
+            }
+    
+    
+    
+    
+    override func viewWillAppear(_ animated: Bool) {    super.viewWillAppear(animated)
         updateStats()
         updateChallengeBadge()
+        updateDailyChallengeCard() // Shows local fallback immediately
+        
+        // Try fetching again on appear just in case
+        fetchRemoteChallenges()
+        
         coordinator?.authenticateGameCenter()
         SoundManager.shared.playMusic(.menu)
         animateTitleOnLoad()
@@ -243,6 +413,7 @@ class MenuViewController: UIViewController {
         view.addSubview(titleImageView)
         view.addSubview(playButton)
         view.addSubview(raceButton)
+        view.addSubview(dailyChallengeButton)
         view.addSubview(helpButton)
         view.addSubview(feedbackButton)
         
@@ -268,8 +439,13 @@ class MenuViewController: UIViewController {
         coinsStackView.alignment = .center
         coinsStackView.spacing = 4
         
-        // Create a horizontal stack view to hold both stat stacks
-        let statsContainerStackView = UIStackView(arrangedSubviews: [highScoreStackView, coinsStackView])
+        let comboStackView = UIStackView(arrangedSubviews: [statsLabel3, statsValue3])
+        comboStackView.axis = .vertical
+        comboStackView.alignment = .center
+        comboStackView.spacing = 4
+        
+        // Create a horizontal stack view to hold all stat stacks
+        let statsContainerStackView = UIStackView(arrangedSubviews: [highScoreStackView, coinsStackView, comboStackView])
         statsContainerStackView.axis = .horizontal
         statsContainerStackView.distribution = .fillEqually
         statsContainerStackView.alignment = .center
@@ -292,7 +468,7 @@ class MenuViewController: UIViewController {
             // Set max width to 85% of safe area width to prevent touching edges on wide screens
             titleImageView.widthAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.widthAnchor, multiplier: 0.95),
             
-            // The guide will fill the space between the top buttons and the stats section
+            // The guide will fill the space between the top buttons and the stats
             titleAreaGuide.topAnchor.constraint(equalTo: feedbackButton.bottomAnchor, constant: 10),
             titleAreaGuide.bottomAnchor.constraint(equalTo: statsContainerStackView.topAnchor, constant: -10),
             
@@ -318,17 +494,23 @@ class MenuViewController: UIViewController {
             secondaryActionsStackView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 50),
             secondaryActionsStackView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -50),
             
-            // Race button above the icon buttons
-            raceButton.bottomAnchor.constraint(equalTo: secondaryActionsStackView.topAnchor, constant: -25),
+            // Daily Challenge button above the icon buttons
+            dailyChallengeButton.bottomAnchor.constraint(equalTo: secondaryActionsStackView.topAnchor, constant: -10),
+            dailyChallengeButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            dailyChallengeButton.widthAnchor.constraint(equalToConstant: 180),
+            dailyChallengeButton.heightAnchor.constraint(equalToConstant: 50),
+            
+            // Race button above the daily challenge button
+            raceButton.bottomAnchor.constraint(equalTo: dailyChallengeButton.topAnchor, constant: -10),
             raceButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            raceButton.widthAnchor.constraint(equalToConstant: 200),
-            raceButton.heightAnchor.constraint(equalToConstant: 60),
+            raceButton.widthAnchor.constraint(equalToConstant: 180),
+            raceButton.heightAnchor.constraint(equalToConstant: 50),
 
             // Play button above the race button
-            playButton.bottomAnchor.constraint(equalTo: raceButton.topAnchor, constant: -12),
+            playButton.bottomAnchor.constraint(equalTo: raceButton.topAnchor, constant: -10),
             playButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            playButton.widthAnchor.constraint(equalToConstant: 225),
-            playButton.heightAnchor.constraint(equalToConstant: 70),
+            playButton.widthAnchor.constraint(equalToConstant: 220),
+            playButton.heightAnchor.constraint(equalToConstant: 50),
             
             // Stats container above the play button
             statsContainerStackView.bottomAnchor.constraint(equalTo: playButton.topAnchor, constant: -20),
@@ -336,12 +518,12 @@ class MenuViewController: UIViewController {
             statsContainerStackView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
 
             // Explicit size for the image buttons
-            shopButton.widthAnchor.constraint(equalToConstant: 45),
-            shopButton.heightAnchor.constraint(equalToConstant: 45),
-            challengesButton.widthAnchor.constraint(equalToConstant: 45),
-            challengesButton.heightAnchor.constraint(equalToConstant: 45),
-            leaderboardButton.widthAnchor.constraint(equalToConstant: 45),
-            leaderboardButton.heightAnchor.constraint(equalToConstant: 45),
+            shopButton.widthAnchor.constraint(equalToConstant: 32),
+            shopButton.heightAnchor.constraint(equalToConstant: 32),
+            challengesButton.widthAnchor.constraint(equalToConstant: 32),
+            challengesButton.heightAnchor.constraint(equalToConstant: 32),
+            leaderboardButton.widthAnchor.constraint(equalToConstant: 32),
+            leaderboardButton.heightAnchor.constraint(equalToConstant: 32),
 
             // Badge constraints relative to the challenges button
             challengeBadge.topAnchor.constraint(equalTo: challengesButton.topAnchor, constant: -8),
@@ -373,7 +555,7 @@ class MenuViewController: UIViewController {
     // MARK: - Button Animations
     
     private func setupButtonAnimations() {
-        let buttons = [playButton, raceButton, shopButton, leaderboardButton, challengesButton, helpButton, feedbackButton]
+        let buttons = [playButton, raceButton, dailyChallengeButton, shopButton, leaderboardButton, challengesButton, helpButton, feedbackButton]
         for button in buttons {
             button.addTarget(self, action: #selector(buttonPressed), for: .touchDown)
             button.addTarget(self, action: #selector(buttonReleased), for: [.touchUpInside, .touchUpOutside, .touchCancel])
@@ -395,10 +577,13 @@ class MenuViewController: UIViewController {
     private func updateStats() {
         let high = PersistenceManager.shared.highScore
         let coins = PersistenceManager.shared.totalCoins
+        let combo = PersistenceManager.shared.highestCombo
         statsLabel1.text = "High Score:"
         statsValue1.text = "\(high)"
         statsLabel2.text = "Coins:"
         statsValue2.text = "\(coins)"
+        statsLabel3.text = "Best Combo:"
+        statsValue3.text = "\(combo)"
     }
     
     @objc private func handlePlay() {
@@ -469,6 +654,43 @@ class MenuViewController: UIViewController {
             }
         }
         present(helpVC, animated: true)
+    }
+    
+    // MARK: - Daily Challenge Methods
+    
+    private func updateDailyChallengeCard() {
+        let challenge = DailyChallenges.shared.getTodaysChallenge()
+        challengeTitleLabel.text = challenge.name
+        challengeDescriptionLabel.text = challenge.description
+        
+        let bestTime = DailyChallenges.shared.getTodaysBestTime()
+        let attempts = DailyChallenges.shared.getTodaysAttempts()
+        
+        if bestTime > 0 {
+            let minutes = Int(bestTime) / 60
+            let seconds = Int(bestTime) % 60
+            let milliseconds = Int((bestTime.truncatingRemainder(dividingBy: 1)) * 100)
+            challengeStatsLabel.text = String(format: "Best: %d:%02d.%02d • Attempts: %d", minutes, seconds, milliseconds, attempts)
+        } else {
+            challengeStatsLabel.text = attempts > 0 ? "Attempts: \(attempts) • Not completed yet" : "Not attempted yet"
+        }
+    }
+    
+    @objc private func handlePlayDailyChallenge() {
+        HapticsManager.shared.playImpact(.medium)
+        coordinator?.startDailyChallenge()
+    }
+    
+    @objc private func handleNextDay() {
+        HapticsManager.shared.playImpact(.light)
+        DailyChallenges.shared.nextDay()
+        updateDailyChallengeCard()
+    }
+    
+    @objc private func handlePrevDay() {
+        HapticsManager.shared.playImpact(.light)
+        DailyChallenges.shared.prevDay()
+        updateDailyChallengeCard()
     }
 }
 

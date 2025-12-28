@@ -5,6 +5,6 @@
       location = "self:">
    </FileRef>
    <FileRef
-      location = "group:GameCoordinator.swift">
+      location = "group:DEEP_LINKING_SUMMARY.md">
    </FileRef>
 </Workspace>

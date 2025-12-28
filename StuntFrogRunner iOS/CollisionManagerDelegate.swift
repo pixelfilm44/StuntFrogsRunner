@@ -270,8 +270,20 @@ class CollisionManager {
     private func checkForLanding(frog: Frog, pads: [Pad], crocodiles: [Crocodile] = []) {
         var hasLanded = false
         
+        // BUGFIX: Don't check for water falls if frog is already floating (in grace period)
+        // This prevents the frog from losing multiple hearts rapidly when floating in water
+        let shouldCheckWaterFall = !frog.isFloating
+        
+        // BUGFIX: If frog is floating in water (grace period), they cannot land on pads
+        // This prevents sliding-off loops on icy/rainy pads where the frog repeatedly
+        // slides off -> falls in water -> re-lands on edge -> slides off again
+        let canLandOnPads = !frog.isFloating
+        
         // Check for crocodile landing
         for crocodile in crocodiles {
+            // BUGFIX: Skip crocodile landing checks if frog is floating (in grace period)
+            if !canLandOnPads { break }
+            
             // Check for crocodile landing
             if crocodile.state == .carrying && crocodile.isCarryingFrog {
                 let dx = abs(frog.position.x - crocodile.position.x)
@@ -308,6 +320,9 @@ class CollisionManager {
         }
         
         for pad in pads {
+            // BUGFIX: Skip pad landing checks if frog is floating (in grace period)
+            if !canLandOnPads { break }
+            
             // FIX: If Log Jumper ability is active, treat Logs as landing pads
             if pad.type == .log && !frog.canJumpLogs {
                 continue // Skip this log, fall through to water logic if no other pad found
@@ -331,7 +346,17 @@ class CollisionManager {
                 }
             } else {
                 // Circle Pad Logic
-                let currentPadRadius = pad.scaledRadius
+                var currentPadRadius = pad.scaledRadius
+                
+                // BUGFIX: For shrinking pads, use a more generous collision radius when checking
+                // if the frog is still on the pad they're already standing on.
+                // This prevents the frog from "falling through" when the pad shrinks to minimum size.
+                if pad.type == .shrinking && frog.onPad === pad {
+                    // Use the pad's base (unshrunk) radius instead of scaled radius
+                    // to maintain stable footing even when pad is at minimum visual size
+                    currentPadRadius = pad.baseRadius * Configuration.Dimensions.padPhysicsRadiusMultiplier
+                }
+                
                 let safetyBuffer = frogRadius * 0.90
                 let hitDistance = currentPadRadius + safetyBuffer
                 
@@ -359,7 +384,9 @@ class CollisionManager {
             }
         }
         
-        if !hasLanded {
+        // BUGFIX: Only call didFallIntoWater if we should check (not already floating)
+        // This prevents rapid repeated calls when frog is in grace period
+        if !hasLanded && shouldCheckWaterFall {
             delegate?.didFallIntoWater()
         }
     }
@@ -431,6 +458,7 @@ class CollisionManager {
         // BUT skip if super jumping - super jump handles all collisions without using items
         if frog.buffs.honey > 0 && !frog.isSuperJumping {
             var beeToDestroy: Enemy?
+            var isMidAirCollision = false
             
             for enemy in enemies where enemy.type == "BEE" && !enemy.isBeingDestroyed {
                 let dx = frog.position.x - enemy.position.x
@@ -444,6 +472,8 @@ class CollisionManager {
                 // If bee is in range and frog has honey, automatically throw honey
                 if distSq < honeyRangeSq && zDiff < 40 {
                     beeToDestroy = enemy
+                    // Check if frog is mid-jump (airborne)
+                    isMidAirCollision = frog.zHeight > 0
                     break // Only attack one bee per frame
                 }
             }
@@ -453,13 +483,22 @@ class CollisionManager {
                 // Mark as being destroyed IMMEDIATELY
                 bee.isBeingDestroyed = true
                 
-                // Trigger honey attack animation
-                frog.throwHoneyAt(bee) {
-                    // Enemy will be removed after animation completes
+                // If mid-air collision, bypass animation and instantly remove enemy
+                if isMidAirCollision {
                     bee.removeFromParent()
+                    // Decrement honey count without animation
+                    frog.buffs.honey -= 1
+                    delegate?.didDestroyEnemyWithHoney(bee)
+                } else {
+                    // On ground or landed: play full animation
+                    // Trigger honey attack animation
+                    frog.throwHoneyAt(bee) {
+                        // Enemy will be removed after animation completes
+                        bee.removeFromParent()
+                    }
+                    // Mark bee for removal (delegate should handle array cleanup)
+                    delegate?.didDestroyEnemyWithHoney(bee)
                 }
-                // Mark bee for removal (delegate should handle array cleanup)
-                delegate?.didDestroyEnemyWithHoney(bee)
             }
         }
         
@@ -467,6 +506,7 @@ class CollisionManager {
         // BUT skip if super jumping - super jump handles all collisions without using items
         if frog.buffs.swatter > 0 && !frog.isSuperJumping {
             var dragonflyToDestroy: Enemy?
+            var isMidAirCollision = false
             
             for enemy in enemies where enemy.type == "DRAGONFLY" && !enemy.isBeingDestroyed {
                 let dx = frog.position.x - enemy.position.x
@@ -481,6 +521,8 @@ class CollisionManager {
                 if distSq < swatterRangeSq && zDiff < 40 {
                     print("🏸 SWATTER: Found dragonfly in range! Distance: \(sqrt(distSq)), Z-diff: \(zDiff)")
                     dragonflyToDestroy = enemy
+                    // Check if frog is mid-jump (airborne)
+                    isMidAirCollision = frog.zHeight > 0
                     break // Only attack one dragonfly per frame
                 }
             }
@@ -491,14 +533,24 @@ class CollisionManager {
                 // Mark as being destroyed IMMEDIATELY
                 dragonfly.isBeingDestroyed = true
                 
-                // Trigger swatter attack animation
-                frog.swatDragonfly(dragonfly) {
-                    print("🏸 SWATTER: Animation completed, removing dragonfly from parent")
-                    // Dragonfly will be removed after animation completes
+                // If mid-air collision, bypass animation and instantly remove enemy
+                if isMidAirCollision {
+                    print("🏸 SWATTER: Mid-air collision - instant removal")
                     dragonfly.removeFromParent()
+                    // Decrement swatter count without animation
+                    frog.buffs.swatter -= 1
+                    delegate?.didDestroyDragonflyWithSwatter(dragonfly)
+                } else {
+                    // On ground or landed: play full animation
+                    // Trigger swatter attack animation
+                    frog.swatDragonfly(dragonfly) {
+                        print("🏸 SWATTER: Animation completed, removing dragonfly from parent")
+                        // Dragonfly will be removed after animation completes
+                        dragonfly.removeFromParent()
+                    }
+                    // Mark dragonfly for removal (delegate should handle array cleanup)
+                    delegate?.didDestroyDragonflyWithSwatter(dragonfly)
                 }
-                // Mark dragonfly for removal (delegate should handle array cleanup)
-                delegate?.didDestroyDragonflyWithSwatter(dragonfly)
             }
         }
         
@@ -507,6 +559,7 @@ class CollisionManager {
         if frog.buffs.axe > 0 && !frog.isSuperJumping {
             var targetToDestroy: GameEntity?
             var targetType: AxeTargetType = .snake
+            var isMidAirCollision = false
             
             enum AxeTargetType {
                 case snake
@@ -527,6 +580,7 @@ class CollisionManager {
                 if distSq < axeRangeSq && zDiff < 40 {
                     targetToDestroy = snake
                     targetType = .snake
+                    isMidAirCollision = frog.zHeight > 0
                     break // Only attack one target per frame
                 }
             }
@@ -547,6 +601,7 @@ class CollisionManager {
                     if distSq < axeRangeSq && zDiff < 40 {
                         targetToDestroy = cactus
                         targetType = .cactus
+                        isMidAirCollision = frog.zHeight > 0
                         break
                     }
                 }
@@ -565,6 +620,7 @@ class CollisionManager {
                     if distSq < axeRangeSq && zDiff < 40 {
                         targetToDestroy = pad
                         targetType = .log
+                        isMidAirCollision = frog.zHeight > 0
                         break
                     }
                 }
@@ -572,41 +628,66 @@ class CollisionManager {
             
             // Execute axe attack outside the loop to avoid concurrent modification
             if let target = targetToDestroy {
-                switch targetType {
-                case .snake:
-                    if let snake = target as? Snake {
-                        snake.isDestroyed = true
-                        frog.throwAxeAt(snake) {
+                // If mid-air collision, bypass animation and instantly remove target
+                if isMidAirCollision {
+                    switch targetType {
+                    case .snake:
+                        if let snake = target as? Snake {
+                            snake.isDestroyed = true
                             snake.removeFromParent()
+                            frog.buffs.axe -= 1
+                            delegate?.didDestroySnakeWithAxe(snake)
                         }
-                        delegate?.didDestroySnakeWithAxe(snake)
-                    }
-                    
-                case .cactus:
-                    if let cactus = target as? Cactus {
-                        cactus.isDestroyed = true
-                        frog.throwAxeAt(cactus) {
+                        
+                    case .cactus:
+                        if let cactus = target as? Cactus {
+                            cactus.isDestroyed = true
                             cactus.removeFromParent()
+                            frog.buffs.axe -= 1
+                            delegate?.didDestroyCactusWithAxe(cactus)
                         }
-                        delegate?.didDestroyCactusWithAxe(cactus)
-                    }
-                    
-                case .log:
-                    if let log = target as? Pad, log.type == .log {
-                        frog.throwAxeAt(log) {
+                        
+                    case .log:
+                        if let log = target as? Pad, log.type == .log {
                             log.removeFromParent()
+                            frog.buffs.axe -= 1
+                            delegate?.didDestroyLogWithAxe(log)
                         }
-                        delegate?.didDestroyLogWithAxe(log)
+                    }
+                } else {
+                    // On ground or landed: play full animation
+                    switch targetType {
+                    case .snake:
+                        if let snake = target as? Snake {
+                            snake.isDestroyed = true
+                            frog.throwAxeAt(snake) {
+                                snake.removeFromParent()
+                            }
+                            delegate?.didDestroySnakeWithAxe(snake)
+                        }
+                        
+                    case .cactus:
+                        if let cactus = target as? Cactus {
+                            cactus.isDestroyed = true
+                            frog.throwAxeAt(cactus) {
+                                cactus.removeFromParent()
+                            }
+                            delegate?.didDestroyCactusWithAxe(cactus)
+                        }
+                        
+                    case .log:
+                        if let log = target as? Pad, log.type == .log {
+                            frog.throwAxeAt(log) {
+                                log.removeFromParent()
+                            }
+                            delegate?.didDestroyLogWithAxe(log)
+                        }
                     }
                 }
             }
         }
         
-        if frog.isInvincible { return }
-        
-        // Cannon jump makes frog invincible to enemies (already handled above)
-        if frog.isCannonJumping { return }
-        
+        // Check enemy collisions - handle cannon jump separately
         for enemy in enemies where !enemy.isBeingDestroyed {
             let dx = frog.position.x - enemy.position.x
             let dy = frog.position.y - enemy.position.y
@@ -614,9 +695,20 @@ class CollisionManager {
             let zDiff = abs(frog.zHeight - enemy.zHeight)
             
             if distSq < enemyRadiusSq && zDiff < 30 {
-                // Mark enemy as being destroyed IMMEDIATELY to prevent re-triggering
-                enemy.isBeingDestroyed = true
-                delegate?.didCrash(into: enemy)
+                // Cannon jump destroys enemies without hurting the frog
+                if frog.isCannonJumping {
+                    enemy.isBeingDestroyed = true
+                    delegate?.didCrash(into: enemy)
+                    // Continue checking other enemies - cannon jump can destroy multiple
+                    continue
+                }
+                
+                // Regular collision - only if not invincible
+                if !frog.isInvincible {
+                    // Mark enemy as being destroyed IMMEDIATELY to prevent re-triggering
+                    enemy.isBeingDestroyed = true
+                    delegate?.didCrash(into: enemy)
+                }
             }
         }
         
@@ -634,7 +726,17 @@ class CollisionManager {
             // Frog can jump over snakes if zHeight difference > 10
             // (changed from zDiff < 20 to allow jumping over)
             if distSq < snakeRadiusSq && zDiff < 10 {
-                delegate?.didCrash(into: snake)
+                // Cannon jump destroys snakes without hurting the frog
+                if frog.isCannonJumping {
+                    delegate?.didCrash(into: snake)
+                    // Continue checking other snakes
+                    continue
+                }
+                
+                // Regular collision - only if not invincible
+                if !frog.isInvincible {
+                    delegate?.didCrash(into: snake)
+                }
             }
         }
         
@@ -655,7 +757,17 @@ class CollisionManager {
             // Only collide if frog is on the same level (not jumping significantly above)
             // Frog can jump over cacti if zHeight difference > 10
             if distSq < cactusRadiusSq && zDiff < 10 {
-                delegate?.didCrash(into: cactus)
+                // Cannon jump destroys cacti without hurting the frog
+                if frog.isCannonJumping {
+                    delegate?.didCrash(into: cactus)
+                    // Continue checking other cacti
+                    continue
+                }
+                
+                // Regular collision - only if not invincible
+                if !frog.isInvincible {
+                    delegate?.didCrash(into: cactus)
+                }
             }
         }
     }

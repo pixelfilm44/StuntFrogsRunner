@@ -58,6 +58,7 @@ enum ChallengeType: String, Codable {
     case consecutiveJumps     // X jumps without falling in water
     case crocodileRides       // Complete crocodile rides
     case winningStreak        // Win X races in a row
+    case comboStreak          // Achieve a combo streak
 }
 
 /// Manages all game challenges and persists progress
@@ -296,6 +297,30 @@ class ChallengeManager {
                 progress: 0,
                 isCompleted: false,
                 isRewardClaimed: false
+            ),
+            
+            // Combo Challenges
+            Challenge(
+                id: "combo_25",
+                title: "Combo Master",
+                description: "Achieve a combo streak of 25",
+                requirement: 25,
+                reward: .coins(250),
+                type: .comboStreak,
+                progress: 0,
+                isCompleted: false,
+                isRewardClaimed: false
+            ),
+            Challenge(
+                id: "combo_50",
+                title: "Ultimate Combo",
+                description: "Achieve a combo streak of 50",
+                requirement: 50,
+                reward: .coins(500),
+                type: .comboStreak,
+                progress: 0,
+                isCompleted: false,
+                isRewardClaimed: false
             )
         ]
     }
@@ -446,6 +471,15 @@ class ChallengeManager {
         updateChallenges(ofType: .winningStreak)
     }
     
+    /// Records a combo streak achievement
+    /// Call this when the combo counter increases
+    func recordComboStreak(_ combo: Int) {
+        if combo > stats.bestComboStreak {
+            stats.bestComboStreak = combo
+            updateChallenges(ofType: .comboStreak)
+        }
+    }
+    
     private func updateAllChallenges() {
         for i in challenges.indices {
             updateChallengeProgress(at: i)
@@ -489,6 +523,8 @@ class ChallengeManager {
             newProgress = stats.crocodileRidesCompleted
         case .winningStreak:
             newProgress = stats.currentWinningStreak
+        case .comboStreak:
+            newProgress = stats.bestComboStreak
         }
         
         challenges[index].progress = newProgress
@@ -582,4 +618,5 @@ struct ChallengeStats: Codable {
     var bestConsecutiveRaces: Int = 0
     var crocodileRidesCompleted: Int = 0
     var currentWinningStreak: Int = 0
+    var bestComboStreak: Int = 0
 }

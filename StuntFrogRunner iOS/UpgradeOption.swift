@@ -38,8 +38,17 @@ class UpgradeViewController: UIViewController {
     /// Set to true if the upgrade selection is for a race, to filter out certain items.
     var isForRace: Bool = false
     
+    /// Set to true if this is for a daily challenge
+    var isDailyChallenge: Bool = false
+    
+    /// The current daily challenge (if isDailyChallenge is true)
+    var currentDailyChallenge: DailyChallenge?
+    
     /// The distance traveled by the player, used to determine contextual upgrades.
     var distanceTraveled: Int = 0
+    
+    /// The current weather/climate in the game - used to filter upgrades
+    var currentWeather: WeatherType = .sunny
     
     // Available Upgrades Pool
     private let baseOptions: [UpgradeOption] = [
@@ -76,6 +85,26 @@ class UpgradeViewController: UIViewController {
             $0.zone == .any || $0.zone == currentZone
         }
         
+        // Determine the effective weather to use for filtering
+        let effectiveWeather: WeatherType
+        if isDailyChallenge, let challenge = currentDailyChallenge {
+            effectiveWeather = challenge.climate
+        } else {
+            effectiveWeather = currentWeather
+        }
+        
+        // Filter upgrades based on game context (weather, enemies, obstacles)
+        options = options.filter { option in
+            return isUpgradeUsableInCurrentContext(option.id, weather: effectiveWeather)
+        }
+        
+        // Filter upgrades for daily challenges based on challenge configuration
+        if isDailyChallenge, let challenge = currentDailyChallenge {
+            options = options.filter { option in
+                isUpgradeRelevantForChallenge(option.id, challenge: challenge)
+            }
+        }
+        
         // Don't offer heart boost if player already has full health
         if hasFullHealth {
             options.removeAll { $0.id == "HEARTBOOST" }
@@ -88,11 +117,14 @@ class UpgradeViewController: UIViewController {
         
         // Note: Super Jump is NOT added to regular pool - it only appears via the 20% special chance in generateOptions()
         
-        // Do not allow rockets as an initial upgrade for races
+        // Do not allow rockets as an initial upgrade for races or daily challenges
         // Rockets have a 10% chance to appear
-        if PersistenceManager.shared.hasRocketJump && !isForRace {
+        if PersistenceManager.shared.hasRocketJump && !isForRace && !isDailyChallenge {
             if Double.random(in: 0...1) < 0.10 {
-                options.append(rocketJumpOption)
+                // Check if rockets are usable in current context
+                if isUpgradeUsableInCurrentContext("ROCKET", weather: effectiveWeather) {
+                    options.append(rocketJumpOption)
+                }
             }
         }
         
@@ -101,18 +133,130 @@ class UpgradeViewController: UIViewController {
         if !PersistenceManager.shared.hasDoubleSuperJumpTime && PersistenceManager.shared.hasSuperJump {
             // Only offer if super jump is unlocked
             if Double.random(in: 0...1) < 0.05 {
-                options.append(doubleSuperJumpTimeOption)
+                // Check if usable in current context
+                if isUpgradeUsableInCurrentContext("DOUBLESUPERJUMPTIME", weather: effectiveWeather) {
+                    // Check daily challenge relevance
+                    if !isDailyChallenge || (currentDailyChallenge != nil && isUpgradeRelevantForChallenge("DOUBLESUPERJUMPTIME", challenge: currentDailyChallenge!)) {
+                        options.append(doubleSuperJumpTimeOption)
+                    }
+                }
             }
         }
         
         if !PersistenceManager.shared.hasDoubleRocketTime && PersistenceManager.shared.hasRocketJump {
             // Only offer if rocket jump is unlocked
             if Double.random(in: 0...1) < 0.05 {
-                options.append(doubleRocketTimeOption)
+                // Check if usable in current context
+                if isUpgradeUsableInCurrentContext("DOUBLEROCKETTIME", weather: effectiveWeather) {
+                    // Check daily challenge relevance
+                    if !isDailyChallenge || (currentDailyChallenge != nil && isUpgradeRelevantForChallenge("DOUBLEROCKETTIME", challenge: currentDailyChallenge!)) {
+                        options.append(doubleRocketTimeOption)
+                    }
+                }
             }
         }
         
         return options
+    }
+    
+    // MARK: - UI Elements
+    
+    /// Checks if an upgrade can be used in the current game context (based on weather, enemies, obstacles)
+    private func isUpgradeUsableInCurrentContext(_ upgradeID: String, weather: WeatherType) -> Bool {
+        switch upgradeID {
+        case "HONEY":
+            // Honey blocks bees - bees don't spawn in desert
+            return weather != .desert
+            
+        case "CROSS":
+            // Cross repels ghosts - ghosts only appear at night
+            return weather == .night
+            
+        case "SWATTER":
+            // Swatter swats dragonflies - dragonflies don't spawn in desert
+            return weather != .desert
+            
+        case "BOOTS":
+            // Rain boots prevent sliding - only useful in rain or winter (or on ice pads in winter)
+            return weather == .rain || weather == .winter
+            
+        case "AXE":
+            // Axe chops logs/cacti
+            // Logs spawn in: sunny, night, rain, winter (not desert or space)
+            // Cacti spawn in: desert only
+            // So the axe is useful in all weathers except space (where neither spawn)
+            return weather != .space
+            
+        case "VEST", "HEART", "HEARTBOOST":
+            // Universal health/survival items - always useful
+            return true
+            
+        case "SUPERJUMP", "ROCKET", "CANNONBALL":
+            // Movement/mobility upgrades - always useful
+            return true
+            
+        case "DOUBLESUPERJUMPTIME", "DOUBLEROCKETTIME":
+            // Permanent upgrades for purchased items - always useful if unlocked
+            return true
+            
+        default:
+            // Unknown upgrade - allow it by default
+            return true
+        }
+    }
+    
+    /// Checks if an upgrade is relevant for a specific daily challenge
+    /// This considers both the challenge's weather and its specific enemy/pad focus
+    private func isUpgradeRelevantForChallenge(_ upgradeID: String, challenge: DailyChallenge) -> Bool {
+        // First check if it's usable in the challenge's weather
+        guard isUpgradeUsableInCurrentContext(upgradeID, weather: challenge.climate) else {
+            return false
+        }
+        
+        // Then check challenge-specific relevance
+        switch upgradeID {
+        case "HONEY":
+            // Only relevant if bees can spawn
+            return DailyChallenges.shared.shouldSpawnEnemyType(.bee, in: challenge)
+            
+        case "SWATTER":
+            // Only relevant if dragonflies can spawn
+            return DailyChallenges.shared.shouldSpawnEnemyType(.dragonfly, in: challenge)
+            
+        case "CROSS":
+            // Only relevant if night climate (ghosts spawn at night)
+            return challenge.climate == .night
+            
+        case "BOOTS":
+            // Relevant if there's rain, winter, or ice pads
+            return challenge.focusPadTypes.contains(.ice) || 
+                   challenge.climate == .rain || 
+                   challenge.climate == .winter
+            
+        case "AXE":
+            // Relevant in any weather except space (logs spawn in natural weathers, cacti in desert)
+            return challenge.climate != .space
+            
+        case "VEST", "HEART", "HEARTBOOST":
+            // Universal - always relevant
+            return true
+            
+        case "SUPERJUMP", "ROCKET", "CANNONBALL":
+            // Movement upgrades - always relevant
+            return true
+            
+        case "DOUBLESUPERJUMPTIME":
+            // Only relevant if super jump is unlocked
+            return PersistenceManager.shared.hasSuperJump
+            
+        case "DOUBLEROCKETTIME":
+            // Only relevant if rocket jump is unlocked
+            return PersistenceManager.shared.hasRocketJump
+            
+        default:
+            // Unknown upgrade - allow it by default
+            return true
+        }
     }
     
     // MARK: - UI Elements
@@ -212,11 +356,28 @@ class UpgradeViewController: UIViewController {
         var chance1: Double = 0
         var chance2: Double = 0
         
+        // Determine effective weather for filtering
+        let effectiveWeather: WeatherType = isDailyChallenge && currentDailyChallenge != nil 
+            ? currentDailyChallenge!.climate 
+            : currentWeather
+        
         // 20% chance to offer Super Jump if the player has Super Jump unlocked
-        let shouldOfferSuperJump = PersistenceManager.shared.hasSuperJump && Double.random(in: 0...1) < 0.2
+        // But never offer during daily challenges
+        var shouldOfferSuperJump = PersistenceManager.shared.hasSuperJump 
+            && !isDailyChallenge
+            && Double.random(in: 0...1) < 0.2
+            && isUpgradeUsableInCurrentContext("SUPERJUMP", weather: effectiveWeather)
         
         // 20% chance to offer a Cannon Ball if the player has Cannon Jump unlocked
-        let shouldOfferCannonball = PersistenceManager.shared.hasCannonJump && Double.random(in: 0...1) < 0.2
+        // Cannon balls are allowed in daily challenges (unlike super jump and rockets)
+        var shouldOfferCannonball = PersistenceManager.shared.hasCannonJump 
+            && Double.random(in: 0...1) < 0.2
+            && isUpgradeUsableInCurrentContext("CANNONBALL", weather: effectiveWeather)
+        
+        // Filter out cannonball if not relevant to daily challenge
+        if isDailyChallenge, let challenge = currentDailyChallenge {
+            shouldOfferCannonball = shouldOfferCannonball && isUpgradeRelevantForChallenge("CANNONBALL", challenge: challenge)
+        }
         
         if shouldOfferSuperJump && shouldOfferCannonball {
             // Both special options triggered - offer both

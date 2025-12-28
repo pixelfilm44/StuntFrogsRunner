@@ -145,6 +145,20 @@ class SoundManager: NSObject, AVAudioPlayerDelegate {
         musicPlayer?.volume = max(0, min(1, volume))
     }
     
+    // MARK: - Unified Pause/Resume
+    
+    /// Pauses all audio (music and weather SFX) - useful when game is paused
+    func pauseAll() {
+        pauseMusic()
+        pauseWeatherSFX()
+    }
+    
+    /// Resumes all audio (music and weather SFX) - useful when game is unpaused
+    func resumeAll() {
+        resumeMusic()
+        resumeWeatherSFX()
+    }
+    
     // MARK: - Stop All Sounds
     
     func stopAllSoundEffects() {
@@ -162,6 +176,8 @@ class SoundManager: NSObject, AVAudioPlayerDelegate {
     
     // MARK: - Weather Sound Effects
     
+    /// Plays or transitions to weather-specific ambient sound effects.
+    /// Pass `nil` to stop all weather SFX.
     func playWeatherSFX(_ sfx: WeatherSFX?, fadeDuration: TimeInterval = 0.5) {
         let name = sfx?.rawValue
         
@@ -183,6 +199,27 @@ class SoundManager: NSObject, AVAudioPlayerDelegate {
         } else {
             currentWeatherSFX = nil
         }
+    }
+    
+    /// Convenience method to play weather SFX based on WeatherType.
+    /// Automatically maps weather types to appropriate sound effects.
+    func playWeatherSFX(for weather: WeatherType, fadeDuration: TimeInterval = 0.5) {
+        let sfx: WeatherSFX?
+        switch weather {
+        case .rain:
+            sfx = .rain
+        case .night:
+            sfx = .night
+        case .winter:
+            sfx = .winter
+        case .desert:
+            sfx = .desert
+        case .space:
+            sfx = .space
+        case .sunny:
+            sfx = nil  // No ambient sound for sunny weather
+        }
+        playWeatherSFX(sfx, fadeDuration: fadeDuration)
     }
     
     private func startWeatherSFX(name: String, fadeDuration: TimeInterval) {
@@ -313,7 +350,10 @@ class VFXManager {
     func transitionWeather(from oldWeather: WeatherType, to newWeather: WeatherType, in scene: GameScene, duration: TimeInterval) {
         self.currentScene = scene
 
-        // 1. Setup or update the screen overlay for darkness/color tinting
+        // 1. Transition weather sound effects
+        SoundManager.shared.playWeatherSFX(for: newWeather, fadeDuration: duration)
+
+        // 2. Setup or update the screen overlay for darkness/color tinting
         if self.weatherOverlay == nil, let cam = scene.camera {
             let overlay = SKSpriteNode(color: .clear, size: scene.size)
             overlay.zPosition = Layer.overlay
@@ -390,10 +430,12 @@ class VFXManager {
         switch weather {
         case .rain:
             emitter = createRainEmitter(width: sceneSize.width)
-            emitter?.position = CGPoint(x: 0, y: sceneSize.height / 2 + 50)
+            // Position well above the top of the screen to ensure full coverage
+            emitter?.position = CGPoint(x: 0, y: sceneSize.height / 2 + 100)
         case .winter:
             emitter = createSnowEmitter(width: sceneSize.width)
-            emitter?.position = CGPoint(x: 0, y: sceneSize.height / 2 + 50)
+            // Position well above the top of the screen to ensure full coverage
+            emitter?.position = CGPoint(x: 0, y: sceneSize.height / 2 + 100)
         case .night:
             emitter = createFirefliesEmitter(width: sceneSize.width, height: sceneSize.height)
             emitter?.position = .zero
@@ -470,16 +512,16 @@ class VFXManager {
     
     /// Triggers a single lightning strike with flash and thunder sound.
     func triggerLightning() {
-        guard let scene = currentScene else { return }
+        guard let scene = currentScene, let camera = scene.camera else { return }
         
         // Create or reuse the lightning overlay
         if lightningOverlay == nil {
             let overlay = SKSpriteNode(color: .white, size: scene.size)
-            overlay.position = CGPoint(x: scene.size.width / 2, y: scene.size.height / 2)
+            overlay.position = .zero  // Center on camera (camera is already at screen center)
             overlay.zPosition = 9999 // Above everything
             overlay.alpha = 0
             overlay.blendMode = .add
-            scene.addChild(overlay)
+            camera.addChild(overlay)  // Add to camera instead of scene
             lightningOverlay = overlay
         }
         
@@ -628,9 +670,9 @@ class VFXManager {
     func createRainEmitter(width: CGFloat) -> SKEmitterNode {
         let node = SKEmitterNode()
         node.particleTexture = SKTexture(imageNamed: "spark")
-        node.particleBirthRate = 150
-        node.particleLifetime = 1.5
-        node.particlePositionRange = CGVector(dx: width, dy: 0)
+        node.particleBirthRate = 200 // Increased to cover more area
+        node.particleLifetime = 2.0 // Increased lifetime for better coverage
+        node.particlePositionRange = CGVector(dx: width * 1.2, dy: 0) // Wider coverage
         node.particleSpeed = 600
         node.particleSpeedRange = 100
         node.emissionAngle = -CGFloat.pi / 2 // Down
@@ -645,9 +687,9 @@ class VFXManager {
     func createSnowEmitter(width: CGFloat) -> SKEmitterNode {
         let node = SKEmitterNode()
         node.particleTexture = SKTexture(imageNamed: "snowflake")
-        node.particleBirthRate = 20
-        node.particleLifetime = 4.0
-        node.particlePositionRange = CGVector(dx: width, dy: 0)
+        node.particleBirthRate = 30 // Increased to cover more area
+        node.particleLifetime = 6.0 // Increased lifetime for better coverage
+        node.particlePositionRange = CGVector(dx: width * 1.2, dy: 0) // Wider coverage
         node.particleSpeed = 80
         node.particleSpeedRange = 40
         node.emissionAngle = -CGFloat.pi / 2

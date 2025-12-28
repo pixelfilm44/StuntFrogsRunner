@@ -8,6 +8,7 @@ class PersistenceManager {
     private enum Keys {
         static let highScore = "sf_highscore"
         static let totalCoins = "sf_coins"
+        static let highestCombo = "sf_highest_combo"
         static let jumpLevel = "sf_upgrade_jump"
         static let healthLevel = "sf_upgrade_health"
         static let logJumper = "sf_upgrade_log_jumper" // NEW Key
@@ -23,6 +24,13 @@ class PersistenceManager {
         static let doubleSuperJumpTime = "sf_upgrade_double_superjump_time"
         static let doubleRocketTime = "sf_upgrade_double_rocket_time"
         static let hasSeenTutorial = "sf_has_seen_tutorial"
+        
+        // Carryover tracking for 4-pack items
+        static let carryoverHoneyItems = "sf_carryover_honey_items"
+        static let carryoverVestItems = "sf_carryover_vest_items"
+        static let carryoverCrossItems = "sf_carryover_cross_items"
+        static let carryoverSwatterItems = "sf_carryover_swatter_items"
+        static let carryoverAxeItems = "sf_carryover_axe_items"
     }
     
     private init() {}
@@ -244,5 +252,142 @@ class PersistenceManager {
             return true
         }
         return false
+    }
+    
+    // MARK: - Highest Combo
+    
+    var highestCombo: Int {
+        return defaults.integer(forKey: Keys.highestCombo)
+    }
+    
+    func saveCombo(_ combo: Int) -> Bool {
+        if combo > highestCombo {
+            defaults.set(combo, forKey: Keys.highestCombo)
+            return true
+        }
+        return false
+    }
+    
+    // MARK: - 4-Pack Carryover System
+    
+    /// Tracks remaining items from 4-packs when starting a run
+    /// Call this when an upgrade is selected to deduct from the total and track carryover
+    func usePackItem(type: String) {
+        switch type {
+        case "HONEY":
+            // Check if we already have carryover items from a previous run
+            var carryover = defaults.integer(forKey: Keys.carryoverHoneyItems)
+            if carryover > 0 {
+                // Use one from carryover and decrease the carryover count
+                carryover -= 1
+                defaults.set(carryover, forKey: Keys.carryoverHoneyItems)
+            } else if honeyItems > 0 {
+                // No carryover, start a new pack: deduct 1 from total inventory and save 3 for carryover
+                defaults.set(honeyItems - 1, forKey: Keys.honeyItems)
+                defaults.set(3, forKey: Keys.carryoverHoneyItems)
+            }
+            
+        case "VEST":
+            var carryover = defaults.integer(forKey: Keys.carryoverVestItems)
+            if carryover > 0 {
+                carryover -= 1
+                defaults.set(carryover, forKey: Keys.carryoverVestItems)
+            } else if vestItems > 0 {
+                defaults.set(vestItems - 1, forKey: Keys.vestItems)
+                defaults.set(3, forKey: Keys.carryoverVestItems)
+            }
+            
+        case "CROSS":
+            var carryover = defaults.integer(forKey: Keys.carryoverCrossItems)
+            if carryover > 0 {
+                carryover -= 1
+                defaults.set(carryover, forKey: Keys.carryoverCrossItems)
+            } else if crossItems > 0 {
+                defaults.set(crossItems - 1, forKey: Keys.crossItems)
+                defaults.set(3, forKey: Keys.carryoverCrossItems)
+            }
+            
+        case "SWATTER":
+            var carryover = defaults.integer(forKey: Keys.carryoverSwatterItems)
+            if carryover > 0 {
+                carryover -= 1
+                defaults.set(carryover, forKey: Keys.carryoverSwatterItems)
+            } else if swatterItems > 0 {
+                defaults.set(swatterItems - 1, forKey: Keys.swatterItems)
+                defaults.set(3, forKey: Keys.carryoverSwatterItems)
+            }
+            
+        case "AXE":
+            var carryover = defaults.integer(forKey: Keys.carryoverAxeItems)
+            if carryover > 0 {
+                carryover -= 1
+                defaults.set(carryover, forKey: Keys.carryoverAxeItems)
+            } else if axeItems > 0 {
+                defaults.set(axeItems - 1, forKey: Keys.axeItems)
+                defaults.set(3, forKey: Keys.carryoverAxeItems)
+            }
+            
+        default:
+            break
+        }
+    }
+    
+    /// Returns the number of carryover items for a given type
+    func getCarryoverItems(type: String) -> Int {
+        switch type {
+        case "HONEY": return defaults.integer(forKey: Keys.carryoverHoneyItems)
+        case "VEST": return defaults.integer(forKey: Keys.carryoverVestItems)
+        case "CROSS": return defaults.integer(forKey: Keys.carryoverCrossItems)
+        case "SWATTER": return defaults.integer(forKey: Keys.carryoverSwatterItems)
+        case "AXE": return defaults.integer(forKey: Keys.carryoverAxeItems)
+        default: return 0
+        }
+    }
+    
+    /// Restores carryover items back to the inventory (called when run ends)
+    func restoreCarryoverItems() {
+        // Honey
+        let carryoverHoney = defaults.integer(forKey: Keys.carryoverHoneyItems)
+        if carryoverHoney > 0 {
+            defaults.set(honeyItems + carryoverHoney, forKey: Keys.honeyItems)
+            defaults.set(0, forKey: Keys.carryoverHoneyItems)
+        }
+        
+        // Vest
+        let carryoverVest = defaults.integer(forKey: Keys.carryoverVestItems)
+        if carryoverVest > 0 {
+            defaults.set(vestItems + carryoverVest, forKey: Keys.vestItems)
+            defaults.set(0, forKey: Keys.carryoverVestItems)
+        }
+        
+        // Cross
+        let carryoverCross = defaults.integer(forKey: Keys.carryoverCrossItems)
+        if carryoverCross > 0 {
+            defaults.set(crossItems + carryoverCross, forKey: Keys.crossItems)
+            defaults.set(0, forKey: Keys.carryoverCrossItems)
+        }
+        
+        // Swatter
+        let carryoverSwatter = defaults.integer(forKey: Keys.carryoverSwatterItems)
+        if carryoverSwatter > 0 {
+            defaults.set(swatterItems + carryoverSwatter, forKey: Keys.swatterItems)
+            defaults.set(0, forKey: Keys.carryoverSwatterItems)
+        }
+        
+        // Axe
+        let carryoverAxe = defaults.integer(forKey: Keys.carryoverAxeItems)
+        if carryoverAxe > 0 {
+            defaults.set(axeItems + carryoverAxe, forKey: Keys.axeItems)
+            defaults.set(0, forKey: Keys.carryoverAxeItems)
+        }
+    }
+    
+    /// Clears all carryover items without restoring (use if player uses all items in a run)
+    func clearCarryoverItems() {
+        defaults.set(0, forKey: Keys.carryoverHoneyItems)
+        defaults.set(0, forKey: Keys.carryoverVestItems)
+        defaults.set(0, forKey: Keys.carryoverCrossItems)
+        defaults.set(0, forKey: Keys.carryoverSwatterItems)
+        defaults.set(0, forKey: Keys.carryoverAxeItems)
     }
 }
