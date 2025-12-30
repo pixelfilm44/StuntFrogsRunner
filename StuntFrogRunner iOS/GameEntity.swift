@@ -17,6 +17,7 @@ enum RocketState {
     case none
     case flying
     case landing
+    case descending  // Playing explosion and fall animations
 }
 
 enum FrogAnimationState {
@@ -25,6 +26,7 @@ enum FrogAnimationState {
     case recoiling   // Hit by enemy
     case cannon     // Cannon jump
     case eating     // Eating a fly
+    case splat      // Flattened/impact pose
 }
 
 // MARK: - Base Entity
@@ -76,6 +78,7 @@ class Frog: GameEntity {
     var rocketState: RocketState = .none
     var rocketTimer: TimeInterval = 0
     var landingTimer: TimeInterval = 0
+    var justLandedFromRocket: Bool = false  // Flag to preserve falling animation after rocket landing
     
     var maxHealth: Int = 3
     var currentHealth: Int = 3
@@ -84,6 +87,7 @@ class Frog: GameEntity {
     var isComboInvincible: Bool = false  // Invincibility from 25+ combo streak
     var recoilTimer: TimeInterval = 0  // Timer for recoil animation duration
     var eatingTimer: TimeInterval = 0  // Timer for eating animation duration
+    var splatTimer: TimeInterval = 0   // Timer for splat animation duration
     
     var onPad: Pad?
     var isFloating: Bool = false
@@ -110,13 +114,16 @@ class Frog: GameEntity {
     private let shadowNode = SKShapeNode(ellipseOf: CGSize(width: 40, height: 20))
     private let vestNode = SKShapeNode(circleOfRadius: 22)
     private let superAura = SKShapeNode()
-    private let rocketSprite = SKSpriteNode(imageNamed: "rocketRide")
+    private let rocketSprite = SKSpriteNode()
+    private var smokeEmitter: SKEmitterNode?
     
     // Preloaded textures for performance
     private static let sitTexture = SKTexture(imageNamed: "frogSit")
     private static let sitLvTexture = SKTexture(imageNamed: "frogSitLv")
     private static let recoilTexture = SKTexture(imageNamed: "frogRecoil")
     private static let cannonTexture = SKTexture(imageNamed: "cannon")
+    private static let splatTexture = SKTexture(imageNamed: "frogSplat")
+    private static let splatLvTexture = SKTexture(imageNamed: "frogSplatLv")
     private static let drowningTextures: [SKTexture] = [
         SKTexture(imageNamed: "frogDrown1"),
         SKTexture(imageNamed: "frogDrown2"),
@@ -244,6 +251,24 @@ class Frog: GameEntity {
     private static let eatLvAnimationTextures: [SKTexture] = {
         (1...5).map { SKTexture(imageNamed: "frogLvEat\($0)") }
     }()
+    
+    // Rocket ride animation textures (5 frames)
+    private static let rocketRideAnimationTextures: [SKTexture] = {
+        (1...5).map { SKTexture(imageNamed: "rocketRide\($0)") }
+    }()
+    
+    // Rocket explosion animation textures (6 frames) - rocket exploding when descending
+    private static let rocketExplodeAnimationTextures: [SKTexture] = {
+        (1...6).map { SKTexture(imageNamed: "rocketExplode\($0)") }
+    }()
+    
+    // Frog falling animation textures (8 frames) - frog falling after rocket explosion
+    private static let frogFallAnimationTextures: [SKTexture] = {
+        (1...8).map { SKTexture(imageNamed: "frogFall\($0)") }
+    }()
+    private static let frogFallLvAnimationTextures: [SKTexture] = {
+        (1...8).map { SKTexture(imageNamed: "frogLvFall\($0)") }
+    }()
 
     
     // Target heights for frog sprite (aspect ratio preserved automatically)
@@ -252,6 +277,8 @@ class Frog: GameEntity {
     private static let frogRecoilHeight: CGFloat = 60
     private static let cannonHeight: CGFloat = 60
     private static let frogEatHeight: CGFloat = 40
+    private static let frogFallHeight: CGFloat = 60  // Height for falling animation
+    private static let frogSplatHeight: CGFloat = 45  // Height for splat animation (flattened)
 
     
     /// Sets the frog sprite texture while preserving the image's aspect ratio
@@ -301,7 +328,8 @@ class Frog: GameEntity {
         
         // Setup rocket sprite (hidden by default, shown during rocket ride)
         // Use aspect-fit sizing to preserve image ratio
-        let rocketTexture = rocketSprite.texture ?? SKTexture(imageNamed: "rocketRide")
+        rocketSprite.texture = Frog.rocketRideAnimationTextures.first
+        let rocketTexture = rocketSprite.texture ?? SKTexture(imageNamed: "rocketRide1")
         let rocketTextureSize = rocketTexture.size()
         let rocketTargetHeight: CGFloat = 150
         let rocketAspectRatio = rocketTextureSize.width / rocketTextureSize.height
@@ -310,16 +338,10 @@ class Frog: GameEntity {
         rocketSprite.zPosition = -1  // Behind the frog sprite
         rocketSprite.isHidden = true
         
-        // Add flame sprite behind the rocket
-        let flameSprite = SKSpriteNode(imageNamed: "flame")
-        let flameTargetHeight: CGFloat = 80
-        let flameTexture = flameSprite.texture ?? SKTexture(imageNamed: "flame")
-        let flameTextureSize = flameTexture.size()
-        let flameAspectRatio = flameTextureSize.width / flameTextureSize.height
-        flameSprite.size = CGSize(width: flameTargetHeight * flameAspectRatio, height: flameTargetHeight)
-        flameSprite.position = CGPoint(x: 0, y: -rocketTargetHeight * 0.5)  // Position below the rocket
-        flameSprite.zPosition = -1  // Behind the rocket sprite
-        rocketSprite.addChild(flameSprite)
+       
+        
+        // Setup smoke trail emitter (hidden by default)
+        setupSmokeEmitter()
         
         bodyNode.addChild(rocketSprite)
         
@@ -329,6 +351,70 @@ class Frog: GameEntity {
         bodyNode.addChild(frogSprite)
         
       
+    }
+    
+    /// Sets up the smoke trail emitter for the rocket
+    private func setupSmokeEmitter() {
+        // Create a lightweight, performant smoke emitter
+        let emitter = SKEmitterNode()
+        
+        // Try to use a particle texture if available, otherwise use a simple circle
+        let particleTexture = SKTexture(imageNamed: "smokeParticle")
+        if particleTexture.size().width > 0 {
+            emitter.particleTexture = particleTexture
+        }
+        
+        // Emission configuration - BILLOWING SMOKE
+        emitter.particleBirthRate = 0  // Start at 0, will be set when rocket activates
+        emitter.particleLifetime = 2.0  // Long lifetime for smoke that lingers
+        emitter.particleLifetimeRange = 0.6
+        
+        // Position emitter at the rocket exhaust
+        emitter.position = CGPoint(x: 0, y: 0)
+        emitter.zPosition = 0  // Emitter's own z-position (relative to rocketSprite)
+        
+        // CRITICAL: Set particle z-position in the target node's coordinate space
+        // This ensures particles render above lilypads (Layer.pad = 10) when targetNode is set to scene
+        emitter.particleZPosition = Layer.shadow  // Above lilypads, below frog
+        
+        // Emission angle and spread - WIDE for billowing effect
+        emitter.emissionAngle = -.pi / 2  // Point downward
+        emitter.emissionAngleRange = .pi / 2.5  // Very wide spread for billowing
+        
+        // Particle movement - SLOWER for smoke-like behavior
+        emitter.particleSpeed = 40  // Slower initial speed
+        emitter.particleSpeedRange = 25  // Lots of variation
+        
+        // Visual appearance - SOFT AND BILLOWY
+        emitter.particleAlpha = 0.5  // Start more transparent for soft look
+        emitter.particleAlphaSpeed = -0.25  // Very slow fade
+        emitter.particleScale = 1.5  // Start large
+        emitter.particleScaleSpeed = 0.4  // Grow significantly (smoke expands)
+        emitter.particleScaleRange = 0.6  // Lots of size variation
+        
+        // Color - Soft white/gray smoke that darkens
+        emitter.particleColor = UIColor(white: 0.95, alpha: 1.0)  // Start very light
+        emitter.particleColorBlendFactor = 1.0
+        emitter.particleColorSequence = SKKeyframeSequence(keyframeValues: [
+            UIColor(white: 0.95, alpha: 1.0),  // Very light start
+            UIColor(white: 0.8, alpha: 1.0),   // Lighter gray
+            UIColor(white: 0.65, alpha: 1.0),  // Medium gray
+            UIColor(white: 0.5, alpha: 1.0)    // Darker gray at end
+        ], times: [0, 0.25, 0.6, 1.0])
+        
+        // Blend mode for soft, realistic smoke
+        emitter.particleBlendMode = .alpha
+        
+        // Add rotation for more natural smoke swirl
+        emitter.particleRotation = 0
+        emitter.particleRotationRange = .pi * 2
+        emitter.particleRotationSpeed = 0.5
+        
+        // DON'T set targetNode here - it will be set when the rocket starts
+        // because self.parent might be nil at this point
+        
+        rocketSprite.addChild(emitter)
+        self.smokeEmitter = emitter
     }
     
     // Helper function to create a blast/star-burst shape
@@ -380,6 +466,7 @@ class Frog: GameEntity {
             
             if recoilTimer > 0 { recoilTimer = max(0, recoilTimer - dt) }
             if eatingTimer > 0 { eatingTimer = max(0, eatingTimer - dt) }
+            if splatTimer > 0 { splatTimer = max(0, splatTimer - dt) }
             
             vestNode.isHidden = (buffs.vest == 0)
             
@@ -410,12 +497,15 @@ class Frog: GameEntity {
             updateVisuals()
         }
     func descend() {
-        rocketState = .none
+        rocketState = .descending  // Changed from .none to .descending
         rocketTimer = 0
         landingTimer = 0
         velocity.dx = 0
         velocity.dy = 2.5  // Keep drifting forward slowly during descent
         zVelocity = -32.0
+        
+        // Play the 6-frame descend animation
+        playDescendAnimation()
     }
     
     private func performFixedPhysicsStep(weather: WeatherType) {
@@ -499,6 +589,29 @@ class Frog: GameEntity {
 
         let sequence = SKAction.sequence([frameAnimation, returnToSit])
         frogSprite.run(sequence, withKey: "eatingAnimation")
+    }
+    
+    /// Plays a splat animation showing the frog flattened/squished
+    /// - Parameter duration: How long to show the splat pose (default: 0.3 seconds)
+    func playSplatAnimation(duration: TimeInterval = 0.3) {
+        // Set splat timer to control animation state
+        splatTimer = duration
+        
+        // Choose texture based on whether the frog is wearing a vest
+        let texture = buffs.vest > 0 ? Frog.splatLvTexture : Frog.splatTexture
+        
+        // Immediately show the splat texture
+        setFrogTexture(texture, height: Frog.frogSplatHeight)
+        
+        // Optional: Add a squish scale effect for extra impact
+        bodyNode.removeAction(forKey: "splatSquish")
+        let squishDown = SKAction.scaleX(to: 1.3, y: 0.7, duration: 0.05)
+        let squishUp = SKAction.scale(to: 1.0, duration: duration - 0.05)
+        squishUp.timingMode = .easeOut
+        let sequence = SKAction.sequence([squishDown, squishUp])
+        bodyNode.run(sequence, withKey: "splatSquish")
+        
+        // After duration, splatTimer will reach 0 and updateAnimationState will return to sitting
     }
     
     /// Plays a drowning animation where the frog sinks underwater and disappears.
@@ -712,79 +825,291 @@ class Frog: GameEntity {
             position.y += velocity.dy * CGFloat(dt) * 60.0
             // PERFORMANCE FIX: Use accumulated time instead of Date()
             zHeight = 60 + sin(CGFloat(accumulatedTime) * 5) * 5
+        } else if rocketState == .descending {
+            // During descent animation, continue moving forward slowly
+            position.y += velocity.dy * CGFloat(dt) * 60.0
+            
+            // DON'T update zHeight or zVelocity during descent animation
+            // The visual animation controls everything, and physics is frozen
+            // Landing will be detected by the animation sequence timing
         }
         constrainToRiver()
     }
     
     private func updateVisuals() {
-        if !isBeingDragged {
-            if isFloating {
-                // PERFORMANCE FIX: Use accumulated time instead of Date()
-                // This eliminates expensive Date.timeIntervalSince1970 calls every frame
-                let bobOffset = sin(CGFloat(accumulatedTime) * 5.0) * 3.0
-                bodyNode.position.y = bobOffset
-            } else {
-                bodyNode.position.y = zHeight
+            // During descent, the animation sequence controls bodyNode position and scale completely
+            if !isBeingDragged && rocketState != .descending {
+                if isFloating {
+                    let bobOffset = sin(CGFloat(accumulatedTime) * 5.0) * 3.0
+                    bodyNode.position.y = bobOffset
+                } else {
+                    bodyNode.position.y = zHeight
+                }
+                
+                // Update facing direction based on movement
+                let speed = sqrt(velocity.dx * velocity.dx + velocity.dy * velocity.dy)
+                if speed > 0.5 {
+                    lastFacingAngle = atan2(velocity.dy, velocity.dx) - CGFloat.pi / 2
+                    bodyNode.zRotation = lastFacingAngle
+                } else {
+                    bodyNode.zRotation = lastFacingAngle
+                }
             }
             
-            // Update facing direction based on movement
-            let speed = sqrt(velocity.dx * velocity.dx + velocity.dy * velocity.dy)
-            if speed > 0.5 {
-                // Calculate angle from velocity vector and store it
-                lastFacingAngle = atan2(velocity.dy, velocity.dx) - CGFloat.pi / 2
-                bodyNode.zRotation = lastFacingAngle
+            let shadowScale = max(0, 1.0 - (zHeight / 200.0))
+            shadowNode.setScale(shadowScale)
+            shadowNode.alpha = 0.3 * shadowScale
+            
+            // FIX: Completely bypass visibility toggling if descending.
+            // The playDescendAnimation sequence has full control over what is shown/hidden.
+            if rocketState != .descending {
+                
+                // Show/hide rocket during rocket ride (only flying or landing)
+                let shouldShowRocket = (rocketState == .flying || rocketState == .landing)
+                
+                let wasRocketHidden = rocketSprite.isHidden
+                
+                if shouldShowRocket && wasRocketHidden {
+                    // Rocket just became visible - start animation and hide frog
+                    rocketSprite.run(SKAction.unhide())
+                    frogSprite.run(SKAction.hide())
+                    startRocketAnimation()
+                } else if !shouldShowRocket && !wasRocketHidden {
+                    // Rocket just became hidden - stop animation and show frog
+                    rocketSprite.removeAllActions()
+                    smokeEmitter?.particleBirthRate = 0
+                    rocketSprite.run(SKAction.hide())
+                    
+                    frogSprite.removeAllActions()
+                    frogSprite.run(SKAction.sequence([
+                        SKAction.run { [weak self] in self?.frogSprite.alpha = 1.0 },
+                        SKAction.unhide()
+                    ]))
+                }
+                
+                // Only update standard animations if we aren't performing a sequence
+                updateAnimationState()
+            }
+            
+            // ... (Super Jump aura logic unchanged) ...
+            if isSuperJumping {
+                superAura.isHidden = false
+                superAura.position.y = bodyNode.position.y
+                frogSprite.colorBlendFactor = 0.5
+                frogSprite.color = .cyan
+                frogSprite.alpha = 1.0
             } else {
-                // Keep facing the last direction when stationary
-                bodyNode.zRotation = lastFacingAngle
+                superAura.isHidden = true
+                // ... (health flash logic unchanged) ...
+                if currentHealth == 1 && invincibilityTimer <= 0 {
+                    let flashPhase = Int(Date().timeIntervalSince1970 * 4) % 2
+                    frogSprite.colorBlendFactor = flashPhase == 0 ? 0.6 : 0.0
+                    frogSprite.color = .red
+                    frogSprite.alpha = 1.0
+                } else if invincibilityTimer > 0 {
+                    frogSprite.colorBlendFactor = 0.0
+                    let flash = (invincibilityTimer / 0.1).truncatingRemainder(dividingBy: 2) == 0
+                    frogSprite.alpha = flash ? 0.5 : 1.0
+                } else {
+                    frogSprite.colorBlendFactor = 0.0
+                    frogSprite.alpha = 1.0
+                }
             }
         }
+    /// Starts the 6-frame rocket ride animation
+    private func startRocketAnimation() {
+        // Create animation with 6 frames
+        let frameAnimation = SKAction.animate(with: Frog.rocketRideAnimationTextures, timePerFrame: 0.08)
+        let repeatAnimation = SKAction.repeatForever(frameAnimation)
+        rocketSprite.run(repeatAnimation, withKey: "rocketAnimation")
         
-        let shadowScale = max(0, 1.0 - (zHeight / 200.0))
-        shadowNode.setScale(shadowScale)
-        shadowNode.alpha = 0.3 * shadowScale
-        
-        // Show/hide rocket during rocket ride
-        rocketSprite.isHidden = (rocketState == .none)
-        
-        // Update animation state based on jump phase
-        updateAnimationState()
-        
-        if isSuperJumping {
-            superAura.isHidden = false
-            superAura.position.y = bodyNode.position.y
-            frogSprite.colorBlendFactor = 0.5
-            frogSprite.color = .cyan
-            frogSprite.alpha = 1.0
+        // CRITICAL: Set the target node for smoke trail
+        // This MUST be the scene (or a world node) so particles stay in place as rocket moves
+        if let scene = self.scene {
+            smokeEmitter?.targetNode = scene
+            print("🚀 Smoke emitter target set to scene")
+        } else if let parent = self.parent {
+            smokeEmitter?.targetNode = parent
+            print("🚀 Smoke emitter target set to parent")
         } else {
-            superAura.isHidden = true
-            
-            // Low health warning - flash red when at 1 heart
-            if currentHealth == 1 && invincibilityTimer <= 0 {
-                let flashPhase = Int(Date().timeIntervalSince1970 * 4) % 2
-                frogSprite.colorBlendFactor = flashPhase == 0 ? 0.6 : 0.0
-                frogSprite.color = .red
-                frogSprite.alpha = 1.0
-            } else if invincibilityTimer > 0 {
-                frogSprite.colorBlendFactor = 0.0
-                let flash = (invincibilityTimer / 0.1) /* was /10 */.truncatingRemainder(dividingBy: 2) == 0
-                frogSprite.alpha = flash ? 0.5 : 1.0
-            } else {
-                frogSprite.colorBlendFactor = 0.0
-                frogSprite.alpha = 1.0
-            }
+            print("⚠️ WARNING: No target node available for smoke emitter!")
         }
+        
+        // Start smoke trail
+        smokeEmitter?.particleBirthRate = 40
+        print("🚀 Smoke trail started with birth rate: \(smokeEmitter?.particleBirthRate ?? 0)")
     }
     
+    /// Plays the rocket explosion and frog falling animations when descending from the rocket
+    private func playDescendAnimation() {
+            // Stop the repeating rocket animation
+            rocketSprite.removeAction(forKey: "rocketAnimation")
+            
+            // Stop smoke trail
+            smokeEmitter?.particleBirthRate = 0
+            
+            // Hide the shadow during the descent animation
+            shadowNode.isHidden = true
+            
+            // Play explosion sound effect at full volume
+            SoundManager.shared.play("explosion", volume: 1.0)
+            
+            // Use frame counts to determine duration
+            let explosionDuration = 0.28 * Double(Frog.rocketExplodeAnimationTextures.count)
+            let fallTexturesCount = Double(Frog.frogFallAnimationTextures.count)
+            let fallAnimationDuration = 0.10 * fallTexturesCount
+            
+            // Total animation duration (use the longer of the two)
+            let totalDuration = max(explosionDuration, fallAnimationDuration)
+            
+            // Landing happens at ~80% through the fall animation (near the end but not quite)
+            let landingTime = totalDuration * 0.8
+            
+            // Setup frog for simultaneous animation
+            let setupFrog = SKAction.run { [weak self] in
+                guard let self = self else { return }
+                
+                // CRITICAL: Ensure bodyNode is positioned correctly at current zHeight
+                // This is where the descent starts - at the rocket's current altitude
+                self.bodyNode.position = CGPoint(x: 0, y: self.zHeight)
+                self.bodyNode.setScale(2.5)  // Start LARGE (at high altitude)
+                self.bodyNode.zRotation = 0  // Face forward during fall
+                
+                // Show frog sprite immediately (independent of rocket)
+                self.frogSprite.isHidden = false
+                self.frogSprite.alpha = 1.0
+                self.frogSprite.zPosition = 1  // Above rocket sprite
+                self.frogSprite.position = .zero  // Centered in bodyNode
+                self.frogSprite.zRotation = 0
+                
+                // Select textures based on vest status
+                let fallTextures = self.buffs.vest > 0 ?
+                    Frog.frogFallLvAnimationTextures :
+                    Frog.frogFallAnimationTextures
+                
+                // Set proper size and texture for the frog sprite
+                if let firstFrame = fallTextures.first {
+                    let textureSize = firstFrame.size()
+                    let aspectRatio = textureSize.width / textureSize.height
+                    self.frogSprite.size = CGSize(
+                        width: Frog.frogFallHeight * aspectRatio,
+                        height: Frog.frogFallHeight
+                    )
+                    self.frogSprite.texture = firstFrame
+                }
+                
+                // Start falling animation on the frog sprite
+                let fallAnimation = SKAction.animate(with: fallTextures, timePerFrame: 0.10)
+                self.frogSprite.run(fallAnimation, withKey: "fallAnimation")
+                
+                // PERSPECTIVE SCALING: Start large, shrink to 1.6x size as falling
+                // This creates the illusion of falling from altitude toward the ground
+                // Landing at 1.6x makes the impact feel more dramatic
+                let scaleDown = SKAction.scale(to: 1.6, duration: totalDuration)
+                scaleDown.timingMode = .easeIn  // Accelerate as getting closer
+                self.bodyNode.run(scaleDown, withKey: "fallScaleAnimation")
+                
+                // Animate bodyNode position from high altitude (zHeight) to ground (0)
+                // This makes the frog visually descend
+                let descendToGround = SKAction.moveTo(y: 0, duration: totalDuration)
+                descendToGround.timingMode = .easeIn
+                self.bodyNode.run(descendToGround, withKey: "fallDescentAnimation")
+            }
+            
+            // Play explosion animation on rocket sprite (in parallel with frog fall)
+            // The rocket stays where it is and explodes in place
+            let startExplosion = SKAction.run { [weak self] in
+                guard let self = self else { return }
+                let explodeAnimation = SKAction.animate(with: Frog.rocketExplodeAnimationTextures, timePerFrame: 0.28, resize: false, restore: false)
+                self.rocketSprite.run(explodeAnimation, withKey: "rocketExplosion")
+            }
+            
+            // Wait until landing moment
+            let waitForLanding = SKAction.wait(forDuration: landingTime)
+            
+            // Play landing impact at the right moment
+            let landingImpact = SKAction.run { [weak self] in
+                guard let self = self else { return }
+                
+                // Play splat sound immediately (explosion is played earlier and allows overlap)
+                SoundManager.shared.play("splat")
+                
+                // Trigger landing squish on the pad the frog is on
+                if let pad = self.onPad {
+                    pad.playLandingSquish()
+                }
+                
+                // Set physics state to grounded
+                self.zHeight = 0
+                self.zVelocity = 0
+            }
+            
+            // Wait for remaining animation time
+            let waitForCompletion = SKAction.wait(forDuration: totalDuration - landingTime)
+        
+            // Clean up and reset
+            let resetState = SKAction.run { [weak self] in
+                guard let self = self else { return }
+                
+                // Clean up rocket completely
+                self.rocketSprite.removeAllActions()
+                self.rocketSprite.isHidden = true
+                self.rocketSprite.texture = Frog.rocketRideAnimationTextures.first
+                self.rocketSprite.position = CGPoint(x: 0, y: -30)  // Reset to default position
+                self.smokeEmitter?.particleBirthRate = 0
+                
+                // Reset state flags
+                self.rocketState = .none
+                self.bodyNode.setScale(1.0)  // Return to normal scale after the 1.6x landing
+                self.shadowNode.isHidden = false
+                
+                // Reset frog sprite visibility
+                self.frogSprite.isHidden = false
+                self.frogSprite.alpha = 1.0
+                self.frogSprite.zPosition = 0  // Back to normal z-position
+                self.frogSprite.position = .zero
+                self.frogSprite.zRotation = 0
+                
+                // Show splat animation and keep it indefinitely (until next jump)
+                // Set timer to a very large value so it stays in splat state
+                self.splatTimer = 999999.0  // Effectively infinite - will be cleared on next jump
+                
+                // Set the splat texture immediately
+                let texture = self.buffs.vest > 0 ? Frog.splatLvTexture : Frog.splatTexture
+                self.setFrogTexture(texture, height: Frog.frogSplatHeight)
+                self.animationState = .splat
+            }
+            
+            // Run the sequence: setup frog, start both animations, wait for landing, trigger impact, wait for completion, reset
+            let sequence = SKAction.sequence([
+                setupFrog,
+                startExplosion,
+                waitForLanding,
+                landingImpact,
+                waitForCompletion,
+                resetState
+            ])
+            self.run(sequence, withKey: "descendTiming")
+        }
     private func updateAnimationState() {
         let newState: FrogAnimationState
         
-        // Priority 1: Show eating animation if eating recently
-        if eatingTimer > 0 {
+        // Priority 1: Show splat animation if splatting recently
+        if splatTimer > 0 {
+            newState = .splat
+        }
+        // Priority 2: Show eating animation if eating recently
+        else if eatingTimer > 0 {
             newState = .eating
         }
-        // Priority 2: Show recoil animation if hit recently
+        // Priority 3: Show recoil animation if hit recently
         else if recoilTimer > 0 {
             newState = .recoiling
+        }
+        // Priority 4: Preserve falling animation after rocket descent
+        else if justLandedFromRocket {
+            // Don't change state - keep the falling animation frame
+            return
         } else {
             // Determine animation based on whether the frog is in the air or not.
             if zHeight <= 0.1 && abs(zVelocity) < 0.1 {
@@ -802,9 +1127,9 @@ class Frog: GameEntity {
         
         // Only update texture or animation if the state has changed.
         if newState != animationState {
-            // If the new state forces a stop (e.g., recoiling, eating), clean up any existing jump animation.
+            // If the new state forces a stop (e.g., recoiling, eating, splat), clean up any existing jump animation.
             // Landing animations are stopped by the land() function itself.
-            if newState == .recoiling || newState == .eating {
+            if newState == .recoiling || newState == .eating || newState == .splat {
                 frogSprite.removeAction(forKey: "jumpFrameAnimation")
                 bodyNode.removeAction(forKey: "jumpScaleAnimation")
                 bodyNode.setScale(1.0)
@@ -825,6 +1150,9 @@ class Frog: GameEntity {
                 setFrogTexture(Frog.cannonTexture, height: Frog.cannonHeight)
             case .eating:
                 // Animation is triggered by playEatingAnimation(), so do nothing here.
+                break
+            case .splat:
+                // Splat texture is set by playSplatAnimation(), so do nothing here.
                 break
             }
         }
@@ -908,6 +1236,12 @@ class Frog: GameEntity {
         physicsAccumulator = 0
         
         resetPullOffset()
+        
+        // Clear the rocket landing flag when jumping
+        justLandedFromRocket = false
+        
+        // Reset animation state (this will clear any lingering falling animation frame)
+        animationState = .jumping
         
         // NOTE: SuperJump multiplier is now applied in GameScene.touchesEnded
         // and updateTrajectoryVisuals to keep trajectory prediction accurate.
@@ -1006,16 +1340,21 @@ class Frog: GameEntity {
         self.isFloating = false
         resetPullOffset()
         
+        // Play splat animation on landing (brief impact pose)
+        playSplatAnimation(duration: 0.15)
+        
         if isCannonJumpArmed {
             animationState = .cannon
             setFrogTexture(Frog.cannonTexture, height: Frog.cannonHeight)
         }
-        else {
-            // Transition to sitting state
+        else if !justLandedFromRocket {
+            // Only transition to sitting if we didn't just land from a rocket descent
+            // (preserve the falling animation frame in that case)
             animationState = .sitting
             let texture = buffs.vest > 0 ? Frog.sitLvTexture : Frog.sitTexture
             setFrogTexture(texture, height: Frog.frogSitHeight)
         }
+        
         let isIce = (pad.type == .ice)
         
         if (isRainEffectActive || isIce) && !isWearingBoots {

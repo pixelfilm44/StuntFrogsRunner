@@ -9,6 +9,44 @@ import Foundation
 
 extension GameScene {
     
+    // MARK: - Stored Properties (Add these to main GameScene class)
+    
+    /// Storage key for game start time
+    private static var gameStartTimeKey: UInt8 = 0
+    
+    /// The time when the current game session started
+    var gameStartTime: TimeInterval {
+        get {
+            objc_getAssociatedObject(self, &Self.gameStartTimeKey) as? TimeInterval ?? 0
+        }
+        set {
+            objc_setAssociatedObject(self, &Self.gameStartTimeKey, newValue, .OBJC_ASSOCIATION_RETAIN)
+        }
+    }
+    
+    /// Storage key for total enemies defeated
+    private static var totalEnemiesDefeatedKey: UInt8 = 0
+    
+    /// Total enemies defeated in this run
+    var totalEnemiesDefeated: Int {
+        get {
+            objc_getAssociatedObject(self, &Self.totalEnemiesDefeatedKey) as? Int ?? 0
+        }
+        set {
+            objc_setAssociatedObject(self, &Self.totalEnemiesDefeatedKey, newValue, .OBJC_ASSOCIATION_RETAIN)
+        }
+    }
+    
+    /// The current difficulty level (if not already defined in GameScene)
+    /// Override this if GameScene has its own difficultyLevel property
+    var difficultyLevel: Int {
+        // You can customize this logic based on your game's difficulty system
+        // For now, return a default value (0 = normal)
+        // You could also derive this from game state, e.g.:
+        // 0 = easy, 1 = normal, 2 = hard, etc.
+        return 0
+    }
+    
     // MARK: - Analytics Tracking Methods
     
     /// Call this at the start of resetGame() to track game session
@@ -40,13 +78,13 @@ extension GameScene {
         if case .dailyChallenge(let challenge) = gameMode {
             if score >= 2000 {
                 AnalyticsManager.shared.trackDailyChallengeCompleted(
-                    challengeId: challenge.id,
+                    challengeId: challenge.date,
                     timeSeconds: challengeElapsedTime,
                     seed: challenge.seed
                 )
             } else {
                 AnalyticsManager.shared.trackDailyChallengeFailure(
-                    challengeId: challenge.id,
+                    challengeId: challenge.date,
                     distanceReached: score,
                     timeSeconds: challengeElapsedTime
                 )
@@ -129,13 +167,19 @@ extension GameScene {
         )
     }
     
-    func trackTreasureChestOpened(reward: TreasureChestReward) {
+    func trackTreasureChestOpened(reward: TreasureChest.Reward) {
         let rewardName: String
         switch reward {
-        case .coins(let amount):
-            rewardName = "coins_\(amount)"
-        case .powerup(let type):
-            rewardName = "powerup_\(type)"
+        case .heartsRefill:
+            rewardName = "hearts_refill"
+        case .lifevest4Pack:
+            rewardName = "lifevest_4pack"
+        case .cross4Pack:
+            rewardName = "cross_4pack"
+        case .axe4Pack:
+            rewardName = "axe_4pack"
+        case .swatter4Pack:
+            rewardName = "swatter_4pack"
         }
         
         AnalyticsManager.shared.trackSpecialEvent(
@@ -252,11 +296,15 @@ extension GameScene {
     trackTreasureChestOpened(reward: reward)
  
  
- 9. ADD gameStartTime PROPERTY to GameScene:
+ 9. PROPERTIES HANDLED:
     ─────────────────────────────────────────────────────
-    // Near the top of GameScene class with other properties:
-    private var gameStartTime: TimeInterval = 0
-    private var totalEnemiesDefeated: Int = 0  // If not already tracked
+    // gameStartTime and totalEnemiesDefeated are now handled via associated objects
+    // in this extension. If you prefer, you can add them directly to GameScene:
+    // private var gameStartTime: TimeInterval = 0
+    // private var totalEnemiesDefeated: Int = 0
+    
+    // Note: difficultyLevel currently returns "normal" by default.
+    // Override it in GameScene if you have a difficulty system.
  
  
 10. TRACK enemies defeated:

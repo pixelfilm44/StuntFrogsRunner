@@ -270,6 +270,39 @@ class PersistenceManager {
     
     // MARK: - 4-Pack Carryover System
     
+    /// Checks if the player has items available (inventory + carryover)
+    func hasItemsAvailable(type: String) -> Bool {
+        let inventory: Int
+        let carryover = getCarryoverItems(type: type)
+        
+        switch type {
+        case "HONEY": inventory = honeyItems
+        case "VEST": inventory = vestItems
+        case "CROSS": inventory = crossItems
+        case "SWATTER": inventory = swatterItems
+        case "AXE": inventory = axeItems
+        default: return false
+        }
+        
+        return (inventory > 0 || carryover > 0)
+    }
+    
+    /// Returns total available items (inventory + carryover)
+    func getTotalAvailableItems(type: String) -> Int {
+        let inventory: Int
+        
+        switch type {
+        case "HONEY": inventory = honeyItems
+        case "VEST": inventory = vestItems
+        case "CROSS": inventory = crossItems
+        case "SWATTER": inventory = swatterItems
+        case "AXE": inventory = axeItems
+        default: return 0
+        }
+        
+        return inventory + getCarryoverItems(type: type)
+    }
+    
     /// Tracks remaining items from 4-packs when starting a run
     /// Call this when an upgrade is selected to deduct from the total and track carryover
     func usePackItem(type: String) {
@@ -344,7 +377,7 @@ class PersistenceManager {
         }
     }
     
-    /// Restores carryover items back to the inventory (called when run ends)
+    /// Restores carryover items back to the inventory (called when run ends or is abandoned)
     func restoreCarryoverItems() {
         // Honey
         let carryoverHoney = defaults.integer(forKey: Keys.carryoverHoneyItems)

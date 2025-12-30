@@ -15,14 +15,30 @@ class LoadingViewController: UIViewController {
         "heart",
         "water",
         "waterNight",
+        "waterSand",
+        "waterSpace",
         "menuScreen",
+        "backdrop",
+        "StuntFrogTitle",
         "primaryButton",
         "secondaryButton",
-        "waterSand",
+        "shoppingButton",
+        "leadersButton",
+        "challengesButton",
+        "helpButton",
+        "supportButton",
+        "closeButton",
         "toolTipBackdrop",
+        "helpBackdrop",
+        "storeBackdrop",
+        "pauseBackdrop",
+        "itemBackdrop",
+        "badge",
+        "goldBadge",
         
         // Frog Assets
         "frogSit",
+        "frogSitLv",
         "frogJump1",
         "frogJump2",
         "frogJump3",
@@ -38,45 +54,215 @@ class LoadingViewController: UIViewController {
         "frogDrown1",
         "frogDrown2",
         "frogDrown3",
-        "frogDrown4",
-        "frogDrown5",
-        "frogDrown6",
         "frogRecoil",
-        "rocketRide",
+        "cannon",
+        
+        // Frog Jump Variants (Cool, Wild, Extreme)
+        "frogJumpCool1",
+        "frogJumpCool2",
+        "frogJumpCool3",
+        "frogJumpCool4",
+        "frogJumpCool5",
+        "frogJumpCool6",
+        "frogJumpCoolLv1",
+        "frogJumpCoolLv2",
+        "frogJumpCoolLv3",
+        "frogJumpCoolLv4",
+        "frogJumpCoolLv5",
+        "frogJumpCoolLv6",
+        "frogJumpWild1",
+        "frogJumpWild2",
+        "frogJumpWild3",
+        "frogJumpWild4",
+        "frogJumpWild5",
+        "frogJumpWild6",
+        "frogJumpWildLv1",
+        "frogJumpWildLv2",
+        "frogJumpWildLv3",
+        "frogJumpWildLv4",
+        "frogJumpWildLv5",
+        "frogJumpWildLv6",
+        "frogJumpExtreme1",
+        "frogJumpExtreme2",
+        "frogJumpExtreme3",
+        "frogJumpExtreme4",
+        "frogJumpExtreme5",
+        "frogJumpExtreme6",
+        "frogJumpExtremeLv1",
+        "frogJumpExtremeLv2",
+        "frogJumpExtremeLv3",
+        "frogJumpExtremeLv4",
+        "frogJumpExtremeLv5",
+        "frogJumpExtremeLv6",
+        
+        // Frog Eat Animation
+        "frogEat1",
+        "frogEat2",
+        "frogEat3",
+        "frogEat4",
+        "frogEat5",
+        "frogLvEat1",
+        "frogLvEat2",
+        "frogLvEat3",
+        "frogLvEat4",
+        "frogLvEat5",
+        
+        // Rocket Animations
+        "rocketRide1",
+        "rocketRide2",
+        "rocketRide3",
+        "rocketRide4",
+        "rocketRide5",
+        "rocketExplode1",
+        "rocketExplode2",
+        "rocketExplode3",
+        "rocketExplode4",
+        "rocketExplode5",
+        "rocketExplode6",
+        
+        // Frog Fall Animation (8 frames)
+        "frogFall1",
+        "frogFall2",
+        "frogFall3",
+        "frogFall4",
+        "frogFall5",
+        "frogFall6",
+        "frogFall7",
+        "frogFall8",
+        "frogLvFall1",
+        "frogLvFall2",
+        "frogLvFall3",
+        "frogLvFall4",
+        "frogLvFall5",
+        "frogLvFall6",
+        "frogLvFall7",
+        "frogLvFall8",
+        
+        // Snake Animation Assets - Sunny
         "snake1",
         "snake2",
         "snake3",
         "snake4",
         "snake5",
         
-        // Lilypad Assets
+        // Snake Animation Assets - Night
+        "snakeNight1",
+        "snakeNight2",
+        "snakeNight3",
+        "snakeNight4",
+        "snakeNight5",
+        
+        // Snake Animation Assets - Rain
+        "snakeRain1",
+        "snakeRain2",
+        "snakeRain3",
+        "snakeRain4",
+        "snakeRain5",
+        
+        // Snake Animation Assets - Winter
+        "snakeWinter1",
+        "snakeWinter2",
+        "snakeWinter3",
+        "snakeWinter4",
+        "snakeWinter5",
+        
+        // Snake Animation Assets - Desert
+        "snakeDesert1",
+        "snakeDesert2",
+        "snakeDesert3",
+        "snakeDesert4",
+        "snakeDesert5",
+        
+        // Snake Animation Assets - Space
+        "snakeSpace1",
+        "snakeSpace2",
+        "snakeSpace3",
+        "snakeSpace4",
+        "snakeSpace5",
+        
+        // Lilypad Assets - Standard
         "lilypadDay",
         "lilypadNight",
         "lilypadRain",
         "lilypadIce",
         "lilypadSnow",
+        "lilypadDesert",
+        "lilypadSpace",
+        "launchPad",
         "lilypadGrave",
+        
+        // Lilypad Assets - Shrinking
         "lilypadShrink",
+        "lilypadShrinkNight",
+        "lilypadShrinkRain",
+        "lilypadShrinkSnow",
+        "lilypadShrinkSand",
+        "lilypadShrinkSpace",
+        
+        // Lilypad Assets - Water Lily
         "lilypadWater",
         "lilypadWaterNight",
         "lilypadWaterRain",
         "lilypadWaterSnow",
         "lilypadWaterSand",
+        "lilypadWaterSpace",
+        
+        // Lilypad Decoration
         "plantLeft",
         "plantRight",
         
-        // Object Assets
+        // Log Assets
         "log",
+        "logNight",
+        "logRain",
+        "logWinter",
+        "logDesert",
+        "logSpace",
         
-        // Enemy Assets
+        // Enemy Assets - Bee
         "bee",
+        "beeNight",
+        "beeRain",
+        "beeWinter",
+        "beeDesert",
+        "beeSpace",
+        
+        // Enemy Assets - Dragonfly
         "dragonfly",
+        "dragonflyNight",
+        "dragonflyRain",
+        "dragonflyWinter",
+        "dragonflyDesert",
+        "asteroid",
+        
+        // Enemy Assets - Other
         "ghostFrog",
         
-        // VFX Assets
+        // Crocodile Assets
+        "crocodile",
+        "crocodile1",
+        "crocodile2",
+        "crocodile3",
+        "crocodile4",
+        "crocodile5",
+        
+        // Cactus Assets
+        "cactus",
+        "cactusDesert",
+        
+        // Treasure and Collectibles
+        "treasureChest",
+        
+        // Flotsam (Debris)
+        "bottle",
+        "boot",
+        "twig",
+        
+        // VFX and Particle Assets
         "spark",
         "firefly",
-        "helpBackdrop"
+        "smokeParticle",
+        "particle"
     ]
     
     /// All audio assets to preload (sound effects)
@@ -88,7 +274,8 @@ class LoadingViewController: UIViewController {
         "splash",
         "swat",
         "chop",
-        "treasure"
+        "treasure",
+        "explosion"
     ]
     
     /// All music assets to preload
@@ -98,6 +285,7 @@ class LoadingViewController: UIViewController {
         "night_music",
         "rain_music",
         "winter_music"
+        
     ]
     
     // MARK: - UI Elements
@@ -201,12 +389,28 @@ class LoadingViewController: UIViewController {
     }
     
     private func preloadVisualAssets() async {
-        let textures = visualAssets.map { SKTexture(imageNamed: $0) }
+        // Process textures in batches to avoid cache contention
+        let batchSize = 20
         
-        // Use Swift's modern concurrency to await SpriteKit's preloading.
-        await withCheckedContinuation { continuation in
-            SKTexture.preload(textures) {
-                continuation.resume()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async {
+                let group = DispatchGroup()
+                
+                // Split assets into batches
+                for batch in stride(from: 0, to: self.visualAssets.count, by: batchSize) {
+                    let endIndex = min(batch + batchSize, self.visualAssets.count)
+                    let batchAssets = Array(self.visualAssets[batch..<endIndex])
+                    let textures = batchAssets.map { SKTexture(imageNamed: $0) }
+                    
+                    group.enter()
+                    SKTexture.preload(textures) {
+                        group.leave()
+                    }
+                }
+                
+                group.notify(queue: .main) {
+                    continuation.resume()
+                }
             }
         }
     }

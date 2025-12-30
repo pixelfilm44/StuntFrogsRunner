@@ -167,18 +167,17 @@ extension PersistenceManager {
     /// Update player level tracking
     func updatePlayerLevelTracking() {
         // Calculate an aggregate player level based on upgrades
-        let totalLevel = jumpLevel + healthLevel + rocketCount + vestCount
+        let totalLevel = jumpLevel + healthLevel
         AnalyticsManager.shared.setPlayerLevel(level: totalLevel)
     }
     
     /// Update total games played tracking
-    func trackGamePlayed() {
-        let gamesPlayed = totalGamesPlayed + 1
-        AnalyticsManager.shared.setTotalGamesPlayed(count: gamesPlayed)
+    func trackGamePlayed(currentGamesPlayed: Int) {
+        AnalyticsManager.shared.setTotalGamesPlayed(count: currentGamesPlayed)
         
         // Update player type based on games played
         let playerType: PlayerType
-        switch gamesPlayed {
+        switch currentGamesPlayed {
         case 0..<5:
             playerType = .new
         case 5..<20:
@@ -203,7 +202,7 @@ extension PersistenceManager {
     ─────────────────────────────────────────────────────
     // After awarding coins from gameplay:
     func awardCoins(amount: Int, from source: String) {
-        totalCoins += amount
+        addCoins(amount)
         trackCoinsEarned(amount: amount, source: source)
     }
  
@@ -217,6 +216,9 @@ extension PersistenceManager {
  3. ADD game played tracking:
     ─────────────────────────────────────────────────────
     // At the start of each game (in GameScene.resetGame or similar):
-    PersistenceManager.shared.trackGamePlayed()
+    // You'll need to track games played count separately (e.g., in UserDefaults)
+    // and pass it to this method:
+    let gamesPlayed = // retrieve from your game stats tracking
+    PersistenceManager.shared.trackGamePlayed(currentGamesPlayed: gamesPlayed)
  
 */

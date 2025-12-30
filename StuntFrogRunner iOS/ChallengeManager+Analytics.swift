@@ -170,9 +170,9 @@ extension DailyChallenges {
         AnalyticsManager.shared.trackSpecialEvent(
             name: "daily_challenge_viewed",
             parameters: [
-                "challenge_id": challenge.id,
+                "challenge_date": challenge.date,
                 "climate": challenge.climate.rawValue,
-                "difficulty": challenge.difficulty.rawValue
+                "challenge_name": challenge.name
             ]
         )
     }
@@ -182,9 +182,9 @@ extension DailyChallenges {
         AnalyticsManager.shared.trackSpecialEvent(
             name: "daily_challenge_started",
             parameters: [
-                "challenge_id": challenge.id,
+                "challenge_date": challenge.date,
                 "climate": challenge.climate.rawValue,
-                "difficulty": challenge.difficulty.rawValue,
+                "challenge_name": challenge.name,
                 "seed": challenge.seed
             ]
         )
@@ -195,7 +195,7 @@ extension DailyChallenges {
         AnalyticsManager.shared.trackSpecialEvent(
             name: "daily_challenge_personal_best",
             parameters: [
-                "challenge_id": challenge.id,
+                "challenge_date": challenge.date,
                 "time": Int(timeSeconds)
             ]
         )
@@ -236,7 +236,7 @@ extension DailyChallenges {
         
         // Check if it's a personal best
         if completed {
-            let existingBest = getPersonalBest(for: challenge.id)
+            let existingBest = getPersonalBest(for: challenge.date)
             if existingBest == nil || timeInSeconds < existingBest! {
                 trackPersonalBest(challenge: challenge, timeSeconds: timeInSeconds)  // <-- Add this
             }
@@ -252,14 +252,18 @@ extension ChallengeStats {
     /// Generate analytics report from stats
     func generateAnalyticsReport() -> [String: Any] {
         return [
-            "total_distance": totalDistance,
+            "total_score": totalScore,
             "total_coins": totalCoins,
-            "total_enemies_defeated": totalEnemiesDefeated,
-            "total_games": totalGames,
+            "total_enemies_defeated": enemiesDefeated,
+            "total_games": gamesPlayed,
             "crocodile_rides": crocodileRidesCompleted,
             "rockets_used": rocketsUsed,
-            "highest_combo": highestCombo,
-            "best_single_run": bestSingleRunScore
+            "highest_combo": bestComboStreak,
+            "best_single_run": bestSingleRunScore,
+            "best_coins_in_run": bestCoinsInRun,
+            "weathers_survived": weathersSurvived,
+            "best_consecutive_jumps": bestConsecutiveJumps,
+            "current_winning_streak": currentWinningStreak
         ]
     }
     

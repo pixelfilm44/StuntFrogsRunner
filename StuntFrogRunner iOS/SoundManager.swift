@@ -41,24 +41,73 @@ class SoundManager: NSObject, AVAudioPlayerDelegate {
     }
     
     func preloadSounds() {
-        let sounds = ["jump", "land", "coin", "hit", "splash", "rocket", "ghost", "crocodileMashing", "crocodileRide", "thunder", "gameOver", "ouch", "laser","eat","splat"]
+        let sounds = ["jump", "land", "coin", "hit", "splash", "rocket", "ghost", "crocodileMashing", "crocodileRide", "thunder", "gameOver", "ouch", "laser","eat","splat","explosion"]
+        let extensions = ["mp3", "wav", "caf", "m4a"]  // Try multiple audio formats
+        
+        print("🔊 SoundManager: Starting to preload \(sounds.count) sounds...")
         for sound in sounds {
-            if let url = Bundle.main.url(forResource: sound, withExtension: "mp3") {
-                if let player = try? AVAudioPlayer(contentsOf: url) {
-                    player.prepareToPlay()
-                    players[sound] = player
+            var loaded = false
+            
+            // Try each extension until we find the file
+            for ext in extensions {
+                if let url = Bundle.main.url(forResource: sound, withExtension: ext) {
+                    do {
+                        let player = try AVAudioPlayer(contentsOf: url)
+                        player.prepareToPlay()
+                        players[sound] = player
+                        print("✅ Loaded sound: \(sound).\(ext)")
+                        loaded = true
+                        break  // Found it, stop trying other extensions
+                    } catch {
+                        print("❌ Failed to load \(sound).\(ext) - Error: \(error.localizedDescription)")
+                    }
                 }
             }
+            
+            if !loaded {
+                print("❌ Sound file not found: \(sound) (tried extensions: \(extensions.joined(separator: ", ")))")
+            }
         }
+        print("🔊 SoundManager: Finished preloading. Total loaded: \(players.count)/\(sounds.count)")
     }
     
     func playThunder() {
         play("thunder")
     }
     
-    func play(_ name: String) {
-        guard let player = players[name] else { return }
-        if player.isPlaying { player.stop(); player.currentTime = 0 }
+    func play(_ name: String, allowOverlap: Bool = true, volume: Float? = nil) {
+        guard let player = players[name] else {
+            print("⚠️ SoundManager: No player found for sound '\(name)'")
+            return
+        }
+        
+        if !allowOverlap && player.isPlaying {
+            print("🔊 SoundManager: Stopping already playing sound '\(name)'")
+            player.stop()
+            player.currentTime = 0
+        } else if player.isPlaying && allowOverlap {
+            // Create a new player instance to allow overlapping sounds
+            if let url = player.url {
+                do {
+                    let overlappingPlayer = try AVAudioPlayer(contentsOf: url)
+                    overlappingPlayer.volume = volume ?? 1.0
+                    overlappingPlayer.prepareToPlay()
+                    overlappingPlayer.play()
+                    print("🔊 SoundManager: Playing overlapping sound '\(name)' at volume \(overlappingPlayer.volume)")
+                    return
+                } catch {
+                    print("⚠️ Failed to create overlapping player for '\(name)': \(error)")
+                }
+            }
+        }
+        
+        // Set volume if specified
+        if let vol = volume {
+            player.volume = vol
+        }
+        
+        print("🔊 SoundManager: Playing sound '\(name)' at volume \(player.volume)")
+        player.currentTime = 0
         player.play()
     }
     

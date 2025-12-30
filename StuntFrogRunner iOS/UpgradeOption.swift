@@ -98,6 +98,41 @@ class UpgradeViewController: UIViewController {
             return isUpgradeUsableInCurrentContext(option.id, weather: effectiveWeather)
         }
         
+        // PRIORITY BOOST: Items you own should appear more frequently
+        // Check inventory and prioritize items the player has purchased
+        var prioritizedOptions: [UpgradeOption] = []
+        var regularOptions: [UpgradeOption] = []
+        
+        for option in options {
+            let hasItemsInInventory: Bool
+            switch option.id {
+            case "HONEY":
+                hasItemsInInventory = PersistenceManager.shared.getTotalAvailableItems(type: "HONEY") > 0
+            case "VEST":
+                hasItemsInInventory = PersistenceManager.shared.getTotalAvailableItems(type: "VEST") > 0
+            case "AXE":
+                hasItemsInInventory = PersistenceManager.shared.getTotalAvailableItems(type: "AXE") > 0
+            case "SWATTER":
+                hasItemsInInventory = PersistenceManager.shared.getTotalAvailableItems(type: "SWATTER") > 0
+            case "CROSS":
+                hasItemsInInventory = PersistenceManager.shared.getTotalAvailableItems(type: "CROSS") > 0
+            default:
+                hasItemsInInventory = false
+            }
+            
+            if hasItemsInInventory {
+                // Add owned items multiple times to increase their chance of appearing
+                prioritizedOptions.append(option)
+                prioritizedOptions.append(option)
+                prioritizedOptions.append(option) // 3x more likely to appear
+            } else {
+                regularOptions.append(option)
+            }
+        }
+        
+        // Combine prioritized and regular options
+        options = prioritizedOptions + regularOptions
+        
         // Filter upgrades for daily challenges based on challenge configuration
         if isDailyChallenge, let challenge = currentDailyChallenge {
             options = options.filter { option in
@@ -120,7 +155,7 @@ class UpgradeViewController: UIViewController {
         // Do not allow rockets as an initial upgrade for races or daily challenges
         // Rockets have a 10% chance to appear
         if PersistenceManager.shared.hasRocketJump && !isForRace && !isDailyChallenge {
-            if Double.random(in: 0...1) < 0.10 {
+            if Double.random(in: 0...1) < 0.90 { // change back to 0.10
                 // Check if rockets are usable in current context
                 if isUpgradeUsableInCurrentContext("ROCKET", weather: effectiveWeather) {
                     options.append(rocketJumpOption)

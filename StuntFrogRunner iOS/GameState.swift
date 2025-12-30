@@ -245,6 +245,9 @@ class GameCoordinator: GameCoordinatorDelegate {
         guard currentState != .gameOver else { return }
         currentState = .gameOver
         
+        // Restore any unused pack items (4-pack carryover system)
+        PersistenceManager.shared.restoreCarryoverItems()
+        
         // Stop all sound effects when game ends
         SoundManager.shared.stopAllSoundEffects()
         SoundManager.shared.stopWeatherSFX()

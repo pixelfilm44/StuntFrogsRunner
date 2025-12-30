@@ -51,7 +51,7 @@ class AnalyticsManager {
         case .dailyChallenge(let challenge):
             modeString = "daily_challenge"
             Analytics.logEvent("daily_challenge_start", parameters: [
-                "challenge_id": challenge.id,
+                "challenge_date": challenge.date,
                 "challenge_seed": challenge.seed,
                 "climate": challenge.climate.rawValue
             ])
@@ -101,7 +101,7 @@ class AnalyticsManager {
                 parameters["race_result"] = "win"
             case .lose(let reason):
                 parameters["race_result"] = "lose"
-                parameters["race_lose_reason"] = reason.rawValue
+                parameters["race_lose_reason"] = String(describing: reason)
             }
         }
         
@@ -357,7 +357,7 @@ extension RaceResult {
         case .win:
             return "win"
         case .lose(let reason):
-            return "lose_\(reason.rawValue)"
+            return "lose_\(String(describing: reason))"
         }
     }
 }

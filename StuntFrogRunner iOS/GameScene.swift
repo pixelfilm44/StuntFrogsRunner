@@ -16,6 +16,17 @@ struct ParallaxPlant {
 
 class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     
+    // MARK: - Item Consumption Tracking
+    /// Tracks how many items were loaded at run start for consumption tracking
+    private struct ItemsLoaded {
+        var vest: Int = 0
+        var honey: Int = 0
+        var cross: Int = 0
+        var swatter: Int = 0
+        var axe: Int = 0
+    }
+    private var itemsLoadedThisRun = ItemsLoaded()
+    
     // MARK: - Dependencies
     weak var coordinator: GameCoordinator?
     private let collisionManager = CollisionManager()
@@ -25,7 +36,7 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     var gameMode: GameMode = .endless
     var boatSpeedMultiplier: CGFloat = 1.0
     var raceRewardBonus: Int = 0
-    private var raceResult: RaceResult?
+    var raceResult: RaceResult?
     private enum RaceState {
         case none
         case countdown
@@ -40,7 +51,7 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     // Daily Challenge Timer Properties
     private let timerLabel = SKLabelNode(fontNamed: Configuration.Fonts.primaryBold)
     private var challengeStartTime: TimeInterval = 0
-    private var challengeElapsedTime: TimeInterval = 0
+    var challengeElapsedTime: TimeInterval = 0
     
     // MARK: - Race Components
     private var boat: Boat?
@@ -237,9 +248,9 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     private var rocketSteeringTouch: UITouch?
     private var rocketSteeringDirection: CGFloat = 0  // -1 for left, 1 for right, 0 for none
     private var lastUpdateTime: TimeInterval = 0
-    private var score: Int = 0
+     var score: Int = 0
     private var totalCoins: Int = 0
-    private var coinsCollectedThisRun: Int = 0
+    var coinsCollectedThisRun: Int = 0
     private var isGameEnding: Bool = false
     private var currentWeather: WeatherType = .sunny
     private let weatherChangeInterval: Int = 600 // in meters
@@ -275,14 +286,14 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     private var lastTrajectoryUpdate: TimeInterval = 0
     
     // MARK: - Challenge Tracking
-    private var padsLandedThisRun: Int = 0
+    var padsLandedThisRun: Int = 0
     private var consecutiveJumps: Int = 0
     private var bestConsecutiveJumps: Int = 0
     private var crocodilesSpawnedThisRun: Int = 0
     
     // MARK: - Hype Combo System
-    private var comboCount: Int = 0
-    private var maxComboThisRun: Int = 0  // Track the highest combo achieved this run
+   var comboCount: Int = 0
+    var maxComboThisRun: Int = 0  // Track the highest combo achieved this run
     private var lastLandTime: TimeInterval = 0
     private var comboMultiplier: Double = 1.0
     private let comboTimeout: TimeInterval = 1.0
@@ -352,6 +363,10 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+        
+        // Safety net: Restore any unused pack items when scene is deallocated
+        // This ensures items aren't lost if the scene is dismissed abnormally
+        PersistenceManager.shared.restoreCarryoverItems()
     }
     
     // MARK: - Performance Monitoring
@@ -2156,6 +2171,8 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         comboLabel.position = CGPoint(x: position.x, y: position.y + 60)
         comboLabel.zPosition = Layer.ui
         comboLabel.alpha = 0
+        comboLabel.horizontalAlignmentMode = .center
+        comboLabel.verticalAlignmentMode = .center
         
         // Add a glowing outline effect
         let outline = SKLabelNode(fontNamed: Configuration.Fonts.primaryHeavy)
@@ -2166,6 +2183,8 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         outline.zPosition = -1
         outline.setScale(1.1)
         outline.alpha = 0.5
+        outline.horizontalAlignmentMode = .center
+        outline.verticalAlignmentMode = .center
         comboLabel.addChild(outline)
         
         worldNode.addChild(comboLabel)
@@ -3334,37 +3353,33 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         frog.rocketState = .none
         frog.buffs = Frog.Buffs()
         
-        // Apply starting consumables from inventory (one 4-pack of each type owned)
-        // Lifevests
-        for _ in 0..<4 {
-            if PersistenceManager.shared.useVestItem() {
-                frog.buffs.vest += 1
-            }
-        }
-        // Honey Pots
-        for _ in 0..<4 {
-            if PersistenceManager.shared.useHoneyItem() {
-                frog.buffs.honey += 1
-            }
-        }
-        // Crosses
-        for _ in 0..<4 {
-            if PersistenceManager.shared.useCrossItem() {
-                frog.buffs.cross += 1
-            }
-        }
-        // Fly Swatters
-        for _ in 0..<4 {
-            if PersistenceManager.shared.useSwatterItem() {
-                frog.buffs.swatter += 1
-            }
-        }
-        // Axes
-        for _ in 0..<4 {
-            if PersistenceManager.shared.useAxeItem() {
-                frog.buffs.axe += 1
-            }
-        }
+        // Load purchased items from inventory into buffs HUD for display and use during gameplay
+        // Items are loaded but NOT consumed from inventory yet
+        // They will only be consumed when actually USED in gameplay (via consume methods)
+        // At run end, unused items remain in inventory via the carryover system
+        
+        // Check total available items (inventory + any carryover from previous run)
+        let availableVests = PersistenceManager.shared.getTotalAvailableItems(type: "VEST")
+        let availableHoney = PersistenceManager.shared.getTotalAvailableItems(type: "HONEY")
+        let availableCrosses = PersistenceManager.shared.getTotalAvailableItems(type: "CROSS")
+        let availableSwatters = PersistenceManager.shared.getTotalAvailableItems(type: "SWATTER")
+        let availableAxes = PersistenceManager.shared.getTotalAvailableItems(type: "AXE")
+        
+        // Load items into buffs (up to 4 of each type per run)
+        frog.buffs.vest = min(availableVests, 4)
+        frog.buffs.honey = min(availableHoney, 4)
+        frog.buffs.cross = min(availableCrosses, 4)
+        frog.buffs.swatter = min(availableSwatters, 4)
+        frog.buffs.axe = min(availableAxes, 4)
+        
+        // Track how many of each we loaded for consumption tracking
+        itemsLoadedThisRun = ItemsLoaded(
+            vest: frog.buffs.vest,
+            honey: frog.buffs.honey,
+            cross: frog.buffs.cross,
+            swatter: frog.buffs.swatter,
+            axe: frog.buffs.axe
+        )
         
         // Grant cannon jumps if purchased
         if PersistenceManager.shared.hasCannonJump {
@@ -4001,8 +4016,35 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     // MARK: - 4-Pack Carryover System
     
     /// Restores unused items from 4-packs back to inventory
-    /// This should be called when a run ends to ensure remaining items carry over
+    /// This compares what was loaded at run start vs what remains in buffs
+    /// Only consumed items are deducted from inventory
     private func restoreUnusedPackItems() {
+        // Calculate how many of each item were actually used during the run
+        let vestsUsed = itemsLoadedThisRun.vest - frog.buffs.vest
+        let honeyUsed = itemsLoadedThisRun.honey - frog.buffs.honey
+        let crossesUsed = itemsLoadedThisRun.cross - frog.buffs.cross
+        let swattersUsed = itemsLoadedThisRun.swatter - frog.buffs.swatter
+        let axesUsed = itemsLoadedThisRun.axe - frog.buffs.axe
+        
+        // Deduct used items from inventory using the carryover system
+        for _ in 0..<vestsUsed {
+            PersistenceManager.shared.usePackItem(type: "VEST")
+        }
+        for _ in 0..<honeyUsed {
+            PersistenceManager.shared.usePackItem(type: "HONEY")
+        }
+        for _ in 0..<crossesUsed {
+            PersistenceManager.shared.usePackItem(type: "CROSS")
+        }
+        for _ in 0..<swattersUsed {
+            PersistenceManager.shared.usePackItem(type: "SWATTER")
+        }
+        for _ in 0..<axesUsed {
+            PersistenceManager.shared.usePackItem(type: "AXE")
+        }
+        
+        // Restore any carryover items back to inventory
+        // (This handles items that were deducted but not fully used)
         PersistenceManager.shared.restoreCarryoverItems()
     }
     
@@ -7363,20 +7405,19 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             drawHearts()
         case "HONEY":
             frog.buffs.honey += 1
-            // Track carryover: deduct from inventory and save 3 for later
-            PersistenceManager.shared.usePackItem(type: "HONEY")
+            // Items are now consumed at run end based on actual usage
         case "VEST":
             frog.buffs.vest += 1
-            PersistenceManager.shared.usePackItem(type: "VEST")
+            // Items are now consumed at run end based on actual usage
         case "AXE":
             frog.buffs.axe += 1
-            PersistenceManager.shared.usePackItem(type: "AXE")
+            // Items are now consumed at run end based on actual usage
         case "SWATTER":
             frog.buffs.swatter += 1
-            PersistenceManager.shared.usePackItem(type: "SWATTER")
+            // Items are now consumed at run end based on actual usage
         case "CROSS":
             frog.buffs.cross += 1
-            PersistenceManager.shared.usePackItem(type: "CROSS")
+            // Items are now consumed at run end based on actual usage
         case "BOOTS":
             frog.buffs.bootsCount += 1
             if currentWeather == .rain && !frog.isWearingBoots {
