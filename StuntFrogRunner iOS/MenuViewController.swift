@@ -414,11 +414,9 @@ class MenuViewController: UIViewController {
         view.addSubview(playButton)
         view.addSubview(raceButton)
         view.addSubview(dailyChallengeButton)
-        view.addSubview(helpButton)
-        view.addSubview(feedbackButton)
         
-        // Create a horizontal stack view for shop, challenges, and leaderboard buttons
-        let secondaryActionsStackView = UIStackView(arrangedSubviews: [shopButton, challengesButton, leaderboardButton])
+        // Create a horizontal stack view for all 5 bottom icons: shop, challenges, leaderboard, help, and feedback
+        let secondaryActionsStackView = UIStackView(arrangedSubviews: [shopButton, challengesButton, leaderboardButton, helpButton, feedbackButton])
         secondaryActionsStackView.axis = .horizontal
         secondaryActionsStackView.distribution = .equalSpacing
         secondaryActionsStackView.alignment = .center
@@ -468,8 +466,8 @@ class MenuViewController: UIViewController {
             // Set max width to 85% of safe area width to prevent touching edges on wide screens
             titleImageView.widthAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.widthAnchor, multiplier: 0.95),
             
-            // The guide will fill the space between the top buttons and the stats
-            titleAreaGuide.topAnchor.constraint(equalTo: feedbackButton.bottomAnchor, constant: 10),
+            // The guide will fill the space between the top of safe area and the stats
+            titleAreaGuide.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
             titleAreaGuide.bottomAnchor.constraint(equalTo: statsContainerStackView.topAnchor, constant: -10),
             
             // Center the title image view vertically within this guide
@@ -477,25 +475,13 @@ class MenuViewController: UIViewController {
             // Also constrain its height to not exceed the guide's height (with some padding)
             titleImageView.heightAnchor.constraint(lessThanOrEqualTo: titleAreaGuide.heightAnchor, multiplier: 0.8),
 
-            // Help button - top right corner
-            helpButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
-            helpButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -32),
-            helpButton.widthAnchor.constraint(equalToConstant: 44),
-            helpButton.heightAnchor.constraint(equalToConstant: 44),
-            
-            // Feedback button - top left corner
-            feedbackButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
-            feedbackButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 32),
-            feedbackButton.widthAnchor.constraint(equalToConstant: 44),
-            feedbackButton.heightAnchor.constraint(equalToConstant: 44),
-            
-            // Icon buttons at the very bottom
-            secondaryActionsStackView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
-            secondaryActionsStackView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 50),
-            secondaryActionsStackView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -50),
+            // Icon buttons at the very bottom - now with all 5 buttons
+            secondaryActionsStackView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -36),
+            secondaryActionsStackView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 40),
+            secondaryActionsStackView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -40),
             
             // Daily Challenge button above the icon buttons
-            dailyChallengeButton.bottomAnchor.constraint(equalTo: secondaryActionsStackView.topAnchor, constant: -10),
+            dailyChallengeButton.bottomAnchor.constraint(equalTo: secondaryActionsStackView.topAnchor, constant: -26),
             dailyChallengeButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             dailyChallengeButton.widthAnchor.constraint(equalToConstant: 180),
             dailyChallengeButton.heightAnchor.constraint(equalToConstant: 50),
@@ -517,13 +503,17 @@ class MenuViewController: UIViewController {
             statsContainerStackView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
             statsContainerStackView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
 
-            // Explicit size for the image buttons
+            // Explicit size for all the image buttons
             shopButton.widthAnchor.constraint(equalToConstant: 32),
             shopButton.heightAnchor.constraint(equalToConstant: 32),
             challengesButton.widthAnchor.constraint(equalToConstant: 32),
             challengesButton.heightAnchor.constraint(equalToConstant: 32),
             leaderboardButton.widthAnchor.constraint(equalToConstant: 32),
             leaderboardButton.heightAnchor.constraint(equalToConstant: 32),
+            helpButton.widthAnchor.constraint(equalToConstant: 32),
+            helpButton.heightAnchor.constraint(equalToConstant: 32),
+            feedbackButton.widthAnchor.constraint(equalToConstant: 32),
+            feedbackButton.heightAnchor.constraint(equalToConstant: 32),
 
             // Badge constraints relative to the challenges button
             challengeBadge.topAnchor.constraint(equalTo: challengesButton.topAnchor, constant: -8),

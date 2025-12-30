@@ -473,8 +473,8 @@ class ShopViewController: UIViewController {
             HapticsManager.shared.playNotification(.success)
             SoundManager.shared.play("coin")
             
-            // Track if this is a 4-pack item for the tooltip
-            var is4PackItem = false
+            // Track if this is a 4-pack item and check if user already has items before purchase
+            var shouldShow4PackTooltip = false
             
             switch type {
             case .jump: PersistenceManager.shared.upgradeJump()
@@ -483,28 +483,43 @@ class ShopViewController: UIViewController {
             case .superJump: PersistenceManager.shared.unlockSuperJump()
             case .rocketJump: PersistenceManager.shared.unlockRocketJump()
             case .lifevestPack:
+                // Check if they already have 4+ items (buying second 4-pack)
+                if PersistenceManager.shared.vestItems >= 4 {
+                    shouldShow4PackTooltip = true
+                }
                 PersistenceManager.shared.addVestItems(4)
-                is4PackItem = true
             case .honeyPack:
+                // Check if they already have 4+ items (buying second 4-pack)
+                if PersistenceManager.shared.honeyItems >= 4 {
+                    shouldShow4PackTooltip = true
+                }
                 PersistenceManager.shared.addHoneyItems(4)
-                is4PackItem = true
             case .cannonJump: PersistenceManager.shared.unlockCannonJump()
             case .crossPack:
+                // Check if they already have 4+ items (buying second 4-pack)
+                if PersistenceManager.shared.crossItems >= 4 {
+                    shouldShow4PackTooltip = true
+                }
                 PersistenceManager.shared.addCrossItems(4)
-                is4PackItem = true
             case .swatterPack:
+                // Check if they already have 4+ items (buying second 4-pack)
+                if PersistenceManager.shared.swatterItems >= 4 {
+                    shouldShow4PackTooltip = true
+                }
                 PersistenceManager.shared.addSwatterItems(4)
-                is4PackItem = true
             case .axePack:
+                // Check if they already have 4+ items (buying second 4-pack)
+                if PersistenceManager.shared.axeItems >= 4 {
+                    shouldShow4PackTooltip = true
+                }
                 PersistenceManager.shared.addAxeItems(4)
-                is4PackItem = true
             }
             
             refreshData()
             
-            // Show tooltip if this is the first 4-pack purchase
-            if is4PackItem {
-                show4PackTooltipIfNeeded()
+            // Show tooltip if user is buying their second or subsequent 4-pack
+            if shouldShow4PackTooltip {
+                show4PackMultipleTooltipIfNeeded()
             }
         } else {
             HapticsManager.shared.playNotification(.error)
@@ -526,6 +541,32 @@ class ShopViewController: UIViewController {
         let alert = UIAlertController(
             title: "",
             message: "I can only carry 1 4 pack per run. Others will be saved for later.",
+            preferredStyle: .alert
+        )
+        
+        let okAction = UIAlertAction(title: "OK", style: .default) { _ in
+            HapticsManager.shared.playImpact(.light)
+        }
+        alert.addAction(okAction)
+        
+        present(alert, animated: true)
+    }
+    
+    /// Shows a tooltip when user buys multiple 4-packs, explaining they can only carry one at a time
+    private func show4PackMultipleTooltipIfNeeded() {
+        let tooltipKey = "shop_4pack_multiple"
+        let defaultsKey = "tooltip_shown_\(tooltipKey)"
+        
+        // Only show once ever
+        guard !UserDefaults.standard.bool(forKey: defaultsKey) else { return }
+        
+        // Mark as shown
+        UserDefaults.standard.set(true, forKey: defaultsKey)
+        
+        // Show an alert explaining carrying limit
+        let alert = UIAlertController(
+            title: "",
+            message: "I can only carry 1 4 pack of an item at a time.",
             preferredStyle: .alert
         )
         

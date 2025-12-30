@@ -951,8 +951,12 @@ class Frog: GameEntity {
             // Hide the shadow during the descent animation
             shadowNode.isHidden = true
             
-            // Play explosion sound effect at full volume
+            // Stop all sound effects and play explosion
+            SoundManager.shared.stopAllSoundEffects()
             SoundManager.shared.play("explosion", volume: 1.0)
+            
+            // Heavy haptic feedback for dramatic explosion
+            HapticsManager.shared.playImpact(.heavy)
             
             // Use frame counts to determine duration
             let explosionDuration = 0.28 * Double(Frog.rocketExplodeAnimationTextures.count)
@@ -1031,8 +1035,10 @@ class Frog: GameEntity {
             let landingImpact = SKAction.run { [weak self] in
                 guard let self = self else { return }
                 
-                // Play splat sound immediately (explosion is played earlier and allows overlap)
-                SoundManager.shared.play("splat")
+                // Play splat sound with a slight delay so explosion can be heard
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    SoundManager.shared.play("splat")
+                }
                 
                 // Trigger landing squish on the pad the frog is on
                 if let pad = self.onPad {
@@ -1376,6 +1382,9 @@ class Frog: GameEntity {
             }
         }
         SoundManager.shared.play("land")
+        
+        // Medium haptic feedback for landing on lilypad
+        HapticsManager.shared.playImpact(.medium)
     }
     
     func bounce(weather: WeatherType, comboCount: Int = 0) {

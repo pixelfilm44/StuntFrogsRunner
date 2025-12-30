@@ -98,41 +98,6 @@ class UpgradeViewController: UIViewController {
             return isUpgradeUsableInCurrentContext(option.id, weather: effectiveWeather)
         }
         
-        // PRIORITY BOOST: Items you own should appear more frequently
-        // Check inventory and prioritize items the player has purchased
-        var prioritizedOptions: [UpgradeOption] = []
-        var regularOptions: [UpgradeOption] = []
-        
-        for option in options {
-            let hasItemsInInventory: Bool
-            switch option.id {
-            case "HONEY":
-                hasItemsInInventory = PersistenceManager.shared.getTotalAvailableItems(type: "HONEY") > 0
-            case "VEST":
-                hasItemsInInventory = PersistenceManager.shared.getTotalAvailableItems(type: "VEST") > 0
-            case "AXE":
-                hasItemsInInventory = PersistenceManager.shared.getTotalAvailableItems(type: "AXE") > 0
-            case "SWATTER":
-                hasItemsInInventory = PersistenceManager.shared.getTotalAvailableItems(type: "SWATTER") > 0
-            case "CROSS":
-                hasItemsInInventory = PersistenceManager.shared.getTotalAvailableItems(type: "CROSS") > 0
-            default:
-                hasItemsInInventory = false
-            }
-            
-            if hasItemsInInventory {
-                // Add owned items multiple times to increase their chance of appearing
-                prioritizedOptions.append(option)
-                prioritizedOptions.append(option)
-                prioritizedOptions.append(option) // 3x more likely to appear
-            } else {
-                regularOptions.append(option)
-            }
-        }
-        
-        // Combine prioritized and regular options
-        options = prioritizedOptions + regularOptions
-        
         // Filter upgrades for daily challenges based on challenge configuration
         if isDailyChallenge, let challenge = currentDailyChallenge {
             options = options.filter { option in
@@ -422,24 +387,26 @@ class UpgradeViewController: UIViewController {
             chance1 = calculateChance(for: option1, inPool: options, specialOffered: true)
             chance2 = calculateChance(for: option2, inPool: options, specialOffered: true)
         } else if shouldOfferSuperJump {
-            // Offer super jump and one regular option
+            // Offer super jump and one regular option (ensure it's different)
             option1 = superJumpOption
-            option2 = options.shuffled().first!
+            option2 = options.shuffled().first(where: { $0.id != option1.id })!
             
             chance1 = calculateChance(for: option1, inPool: options, specialOffered: true)
             chance2 = calculateChance(for: option2, inPool: options, specialOffered: true)
         } else if shouldOfferCannonball {
-            // Offer cannonball and one regular option
+            // Offer cannonball and one regular option (ensure it's different)
             option1 = cannonBallOption
-            option2 = options.shuffled().first!
+            option2 = options.shuffled().first(where: { $0.id != option1.id })!
             
             chance1 = calculateChance(for: option1, inPool: options, specialOffered: true)
             chance2 = calculateChance(for: option2, inPool: options, specialOffered: true)
         } else {
-            // Pick 2 distinct random options
+            // Pick 2 distinct random options (ensure they're different)
             let shuffled = options.shuffled()
             option1 = shuffled[0]
-            option2 = shuffled[1]
+            
+            // Find the first option that has a different ID than option1
+            option2 = shuffled.first(where: { $0.id != option1.id }) ?? shuffled[1]
             
             chance1 = calculateChance(for: option1, inPool: options, specialOffered: false)
             chance2 = calculateChance(for: option2, inPool: options, specialOffered: false)

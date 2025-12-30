@@ -3018,12 +3018,26 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     private func drawHearts() {
         heartNodes.forEach { $0.removeFromParent() }
         heartNodes.removeAll()
+        
         let startX = -(size.width / 2) + hudMargin + 10
-        let yPos = (size.height / 2) - 100
+        let baseYPos = (size.height / 2) - 100
+        let heartsPerRow = 5
+        let heartSpacing: CGFloat = 20
+        let rowSpacing: CGFloat = 20
+        
         for i in 0..<frog.maxHealth {
             let heart = SKSpriteNode(imageNamed: "heart")
             heart.size = CGSize(width: 16, height: 16)
-            heart.position = CGPoint(x: startX + (CGFloat(i) * 20), y: yPos)
+            
+            // Calculate row and column
+            let row = i / heartsPerRow
+            let col = i % heartsPerRow
+            
+            // Position heart based on row and column
+            let xPos = startX + (CGFloat(col) * heartSpacing)
+            let yPos = baseYPos - (CGFloat(row) * rowSpacing)
+            heart.position = CGPoint(x: xPos, y: yPos)
+            
             if i < frog.currentHealth {
                 heart.alpha = 1.0
             } else {
@@ -3034,6 +3048,11 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             uiNode.addChild(heart)
             heartNodes.append(heart)
         }
+        
+        // Adjust buffsNode position based on number of heart rows
+        let numRows = (frog.maxHealth + heartsPerRow - 1) / heartsPerRow // Ceiling division
+        let extraOffset = numRows > 1 ? CGFloat(numRows - 1) * rowSpacing : 0
+        buffsNode.position = CGPoint(x: -(size.width / 2) + hudMargin, y: (size.height / 2) - 140 - extraOffset)
     }
 
     /// Calculates the required width for a buff item display node.
@@ -4020,11 +4039,13 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     /// Only consumed items are deducted from inventory
     private func restoreUnusedPackItems() {
         // Calculate how many of each item were actually used during the run
-        let vestsUsed = itemsLoadedThisRun.vest - frog.buffs.vest
-        let honeyUsed = itemsLoadedThisRun.honey - frog.buffs.honey
-        let crossesUsed = itemsLoadedThisRun.cross - frog.buffs.cross
-        let swattersUsed = itemsLoadedThisRun.swatter - frog.buffs.swatter
-        let axesUsed = itemsLoadedThisRun.axe - frog.buffs.axe
+        // Use max(0, ...) to ensure we never have negative values
+        // (Items can be picked up during gameplay, increasing buffs beyond what was loaded)
+        let vestsUsed = max(0, itemsLoadedThisRun.vest - frog.buffs.vest)
+        let honeyUsed = max(0, itemsLoadedThisRun.honey - frog.buffs.honey)
+        let crossesUsed = max(0, itemsLoadedThisRun.cross - frog.buffs.cross)
+        let swattersUsed = max(0, itemsLoadedThisRun.swatter - frog.buffs.swatter)
+        let axesUsed = max(0, itemsLoadedThisRun.axe - frog.buffs.axe)
         
         // Deduct used items from inventory using the carryover system
         for _ in 0..<vestsUsed {
