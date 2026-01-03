@@ -1,5 +1,12 @@
 import UIKit
 
+// MARK: - Array Safe Subscript Extension
+extension Array {
+    subscript(safe index: Int) -> Element? {
+        return indices.contains(index) ? self[index] : nil
+    }
+}
+
 enum UpgradeZone {
     case any
     case early  // < 1000m
@@ -165,16 +172,24 @@ class UpgradeViewController: UIViewController {
     private func isUpgradeUsableInCurrentContext(_ upgradeID: String, weather: WeatherType) -> Bool {
         switch upgradeID {
         case "HONEY":
-            // Honey blocks bees - bees don't spawn in desert
-            return weather != .desert
+            // Honey blocks bees - bees don't spawn in desert or space
+            // CHANGED: Allow in daily challenges to ensure variety
+            if isDailyChallenge {
+                return true  // Allow for variety in daily challenges
+            }
+            return weather != .desert && weather != .space
             
         case "CROSS":
             // Cross repels ghosts - ghosts only appear at night
             return weather == .night
             
         case "SWATTER":
-            // Swatter swats dragonflies - dragonflies don't spawn in desert
-            return weather != .desert
+            // Swatter swats dragonflies - dragonflies don't spawn in desert or space
+            // CHANGED: Allow in daily challenges to ensure variety
+            if isDailyChallenge {
+                return true  // Allow for variety in daily challenges
+            }
+            return weather != .desert && weather != .space
             
         case "BOOTS":
             // Rain boots prevent sliding - only useful in rain or winter (or on ice pads in winter)
@@ -187,8 +202,16 @@ class UpgradeViewController: UIViewController {
             // So the axe is useful in all weathers except space (where neither spawn)
             return weather != .space
             
-        case "VEST", "HEART", "HEARTBOOST":
-            // Universal health/survival items - always useful
+        case "VEST":
+            // Life vest lets you float on water - not useful in desert (no water)
+            // CHANGED: Allow in daily challenges to ensure variety
+            if isDailyChallenge {
+                return true  // Allow for variety in daily challenges
+            }
+            return weather != .desert
+            
+        case "HEART", "HEARTBOOST":
+            // Universal health items - always useful
             return true
             
         case "SUPERJUMP", "ROCKET", "CANNONBALL":
@@ -213,15 +236,13 @@ class UpgradeViewController: UIViewController {
             return false
         }
         
-        // Then check challenge-specific relevance
+        // CHANGED: For variety, always allow core defensive items in daily challenges
+        // Even if they're not perfectly matched to the challenge, they provide strategic options
+        // This ensures players always have at least 4-5 upgrade choices
         switch upgradeID {
-        case "HONEY":
-            // Only relevant if bees can spawn
-            return DailyChallenges.shared.shouldSpawnEnemyType(.bee, in: challenge)
-            
-        case "SWATTER":
-            // Only relevant if dragonflies can spawn
-            return DailyChallenges.shared.shouldSpawnEnemyType(.dragonfly, in: challenge)
+        case "HONEY", "SWATTER", "VEST":
+            // Allow defensive items for variety, even if not perfectly matched
+            return true
             
         case "CROSS":
             // Only relevant if night climate (ghosts spawn at night)
@@ -237,7 +258,7 @@ class UpgradeViewController: UIViewController {
             // Relevant in any weather except space (logs spawn in natural weathers, cacti in desert)
             return challenge.climate != .space
             
-        case "VEST", "HEART", "HEARTBOOST":
+        case "HEART", "HEARTBOOST":
             // Universal - always relevant
             return true
             
@@ -402,11 +423,51 @@ class UpgradeViewController: UIViewController {
             chance2 = calculateChance(for: option2, inPool: options, specialOffered: true)
         } else {
             // Pick 2 distinct random options (ensure they're different)
-            let shuffled = options.shuffled()
+            var shuffled = options.shuffled()
+            
+            // Safety check: ensure we have at least two DIFFERENT options
+            if shuffled.count < 2 {
+                // Fallback: if insufficient options, add universal options (hearts are always useful)
+                let heartBoost = UpgradeOption(id: "HEARTBOOST", name: "Heart Boost", desc: "Refill all hearts", icon: "", iconImage: "heartBoost", zone: .any)
+                let heartContainer = UpgradeOption(id: "HEART", name: "Heart Container", desc: "+1 Max HP & heal", icon: "", iconImage: "heart", zone: .any)
+                let axe = UpgradeOption(id: "AXE", name: "Woodcutter's Axe", desc: "Chops down 1 log/cactus", icon: "", iconImage: "ax", zone: .any)
+                
+                // Build a guaranteed set of different options
+                var fallbackOptions: [UpgradeOption] = []
+                
+                // Add existing options first
+                fallbackOptions.append(contentsOf: shuffled)
+                
+                // Add missing universal options
+                if !fallbackOptions.contains(where: { $0.id == "HEARTBOOST" }) && !hasFullHealth {
+                    fallbackOptions.append(heartBoost)
+                }
+                if !fallbackOptions.contains(where: { $0.id == "HEART" }) && currentMaxHealth < 6 {
+                    fallbackOptions.append(heartContainer)
+                }
+                if !fallbackOptions.contains(where: { $0.id == "AXE" }) {
+                    fallbackOptions.append(axe)
+                }
+                
+                shuffled = fallbackOptions.shuffled()
+            }
+            
             option1 = shuffled[0]
             
-            // Find the first option that has a different ID than option1
-            option2 = shuffled.first(where: { $0.id != option1.id }) ?? shuffled[1]
+            // Ensure option2 is ALWAYS different from option1
+            option2 = shuffled.first(where: { $0.id != option1.id }) ?? shuffled[safe: 1] ?? option1
+            
+            // Final safety: if they're still the same, force a different option
+            if option2.id == option1.id {
+                // This should rarely happen, but just in case, offer a guaranteed different universal option
+                if option1.id != "HEART" && currentMaxHealth < 6 {
+                    option2 = UpgradeOption(id: "HEART", name: "Heart Container", desc: "+1 Max HP & heal", icon: "", iconImage: "heart", zone: .any)
+                } else if option1.id != "AXE" {
+                    option2 = UpgradeOption(id: "AXE", name: "Woodcutter's Axe", desc: "Chops down 1 log/cactus", icon: "", iconImage: "ax", zone: .any)
+                } else if option1.id != "HEARTBOOST" && !hasFullHealth {
+                    option2 = UpgradeOption(id: "HEARTBOOST", name: "Heart Boost", desc: "Refill all hearts", icon: "", iconImage: "heartBoost", zone: .any)
+                }
+            }
             
             chance1 = calculateChance(for: option1, inPool: options, specialOffered: false)
             chance2 = calculateChance(for: option2, inPool: options, specialOffered: false)

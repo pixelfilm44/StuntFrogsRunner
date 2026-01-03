@@ -570,8 +570,11 @@ class DailyChallenges {
         }
         
         // Axe chops logs (natural weathers) and cacti (desert)
-        // Only exclude from space where neither spawn
-        if challenge.climate != .space {
+        // Also useful if challenge focuses on crocodiles (logs) or if it's a desert challenge (cacti)
+        let needsAxe = challenge.climate != .space || 
+                       challenge.focusEnemyTypes.contains(.crocodile) || 
+                       challenge.climate == .desert
+        if needsAxe {
             relevantUpgrades.append("AXE")
         }
         

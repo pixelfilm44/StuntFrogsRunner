@@ -149,7 +149,7 @@ class ShopViewController: UIViewController {
         ])
     }
     
-    enum UpgradeType { case jump, health, logJumper, superJump, rocketJump, lifevestPack, honeyPack, cannonJump, crossPack, swatterPack, axePack }
+    enum UpgradeType { case jump, health, logJumper, superJump, rocketJump, lifevestPack, honeyPack, cannonJump, crossPack, swatterPack, axePack, comboBoost }
     
     private func createItemView(type: UpgradeType) -> UIView {
         let cardView = UIView()
@@ -289,6 +289,13 @@ class ShopViewController: UIViewController {
             maxLevel = -1 // Indicates no max level
             title.text = "Axes (4-Pack)"
             desc.text = "Chop through logs/cactus/snakes. You have: \(currentItems)"
+        case .comboBoost:
+            isPurchased = PersistenceManager.shared.hasComboBoost
+            cost = Configuration.Shop.comboBoostCost
+            maxLevel = 1
+            currentLevel = isPurchased ? 1 : 0
+            title.text = "Combo Boost"
+            desc.text = "Become invincible after 15 combos instead of 25"
         }
         
         let userCoins = PersistenceManager.shared.totalCoins
@@ -312,7 +319,7 @@ class ShopViewController: UIViewController {
             switch type {
             case .lifevestPack, .honeyPack, .crossPack, .swatterPack, .axePack:
                 buttonTitle = "BUY"
-            case .logJumper, .superJump, .rocketJump, .cannonJump:
+            case .logJumper, .superJump, .rocketJump, .cannonJump, .comboBoost:
                 buttonTitle = isPurchased ? "OWNED" : "UNLOCK"
             default:
                 buttonTitle = "UPGRADE"
@@ -453,6 +460,7 @@ class ShopViewController: UIViewController {
         stackView.addArrangedSubview(createItemView(type: .health))
         stackView.addArrangedSubview(createItemView(type: .logJumper))
         stackView.addArrangedSubview(createItemView(type: .cannonJump))
+        stackView.addArrangedSubview(createItemView(type: .comboBoost))
         
         // Section: Upgrade Menu Unlocks
         stackView.addArrangedSubview(createSectionHeader(title: "UPGRADE MENU UNLOCKS"))
@@ -513,6 +521,8 @@ class ShopViewController: UIViewController {
                     shouldShow4PackTooltip = true
                 }
                 PersistenceManager.shared.addAxeItems(4)
+            case .comboBoost:
+                PersistenceManager.shared.unlockComboBoost()
             }
             
             refreshData()

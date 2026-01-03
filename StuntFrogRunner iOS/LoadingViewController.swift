@@ -389,29 +389,68 @@ class LoadingViewController: UIViewController {
     }
     
     private func preloadVisualAssets() async {
-        // Process textures in batches to avoid cache contention
+        // CRITICAL FIX: Process textures SEQUENTIALLY to avoid concurrent modification
+        // of SpriteKit's internal collections during enumeration
         let batchSize = 20
         
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             DispatchQueue.main.async {
-                let group = DispatchGroup()
-                
-                // Split assets into batches
-                for batch in stride(from: 0, to: self.visualAssets.count, by: batchSize) {
-                    let endIndex = min(batch + batchSize, self.visualAssets.count)
-                    let batchAssets = Array(self.visualAssets[batch..<endIndex])
-                    let textures = batchAssets.map { SKTexture(imageNamed: $0) }
-                    
-                    group.enter()
-                    SKTexture.preload(textures) {
-                        group.leave()
-                    }
-                }
-                
-                group.notify(queue: .main) {
+                // Process batches sequentially instead of concurrently
+                self.preloadBatchSequentially(startIndex: 0, batchSize: batchSize) {
                     continuation.resume()
                 }
             }
+        }
+    }
+    
+    /// Recursively preloads texture batches one at a time to avoid race conditions
+    private func preloadBatchSequentially(startIndex: Int, batchSize: Int, completion: @escaping () -> Void) {
+        // Base case: all batches processed
+        guard startIndex < visualAssets.count else {
+            completion()
+            return
+        }
+        
+        // Process current batch
+        let endIndex = min(startIndex + batchSize, visualAssets.count)
+        let batchAssets = Array(visualAssets[startIndex..<endIndex])
+        
+        // SAFETY: Filter out any textures that don't exist to avoid crashes
+        // This prevents issues if an asset is missing or named incorrectly
+        let textures = batchAssets.compactMap { assetName -> SKTexture? in
+            // Check if the image exists before creating a texture
+            if UIImage(named: assetName) != nil {
+                return SKTexture(imageNamed: assetName)
+            } else {
+                print("⚠️ Warning: Missing texture asset: \(assetName)")
+                return nil
+            }
+        }
+        
+        // Skip this batch if no valid textures
+        guard !textures.isEmpty else {
+            // Move to next batch
+            self.preloadBatchSequentially(
+                startIndex: startIndex + batchSize,
+                batchSize: batchSize,
+                completion: completion
+            )
+            return
+        }
+        
+        // Preload this batch, then move to next batch
+        SKTexture.preload(textures) { [weak self] in
+            guard let self = self else {
+                completion()
+                return
+            }
+            
+            // Recursively process next batch
+            self.preloadBatchSequentially(
+                startIndex: startIndex + batchSize,
+                batchSize: batchSize,
+                completion: completion
+            )
         }
     }
     

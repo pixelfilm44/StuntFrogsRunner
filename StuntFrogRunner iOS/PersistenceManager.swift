@@ -24,6 +24,7 @@ class PersistenceManager {
         static let doubleSuperJumpTime = "sf_upgrade_double_superjump_time"
         static let doubleRocketTime = "sf_upgrade_double_rocket_time"
         static let hasSeenTutorial = "sf_has_seen_tutorial"
+        static let comboBoost = "sf_upgrade_combo_boost"
         
         // Carryover tracking for 4-pack items
         static let carryoverHoneyItems = "sf_carryover_honey_items"
@@ -218,6 +219,16 @@ class PersistenceManager {
     
     func unlockDoubleRocketTime() {
         defaults.set(true, forKey: Keys.doubleRocketTime)
+    }
+    
+    // MARK: - Combo Boost
+    
+    var hasComboBoost: Bool {
+        return defaults.bool(forKey: Keys.comboBoost)
+    }
+    
+    func unlockComboBoost() {
+        defaults.set(true, forKey: Keys.comboBoost)
     }
     
     // MARK: - Help Tutorial

@@ -47,15 +47,24 @@ struct Configuration {
     
     
     struct Colors {
-        static let sunny = SKColor(red: 52/255, green: 152/255, blue: 219/255, alpha: 1)
-        static let rain = SKColor(red: 44/255, green: 62/255, blue: 80/255, alpha: 1)
-        static let night = SKColor(red: 12/255, green: 21/255, blue: 32/255, alpha: 0.75)
-        static let winter = SKColor(red: 160/255, green: 190/255, blue: 220/255, alpha: 1)
-        static let desert = SKColor(red: 240/255, green: 210/255, blue: 120/255, alpha: 0.5) // Sandy sky for desert
-        static let space = SKColor(red: 15/255, green: 10/255, blue: 35/255, alpha: 1.0) // Deep purple space (more visible than pure black)
-        static let blackVoid = SKColor.black // Instant death water for desert
-    }
-    
+            static let sunny = SKColor(red: 52/255, green: 152/255, blue: 219/255, alpha: 1)
+            static let rain = SKColor(red: 44/255, green: 62/255, blue: 80/255, alpha: 1)
+            static let night = SKColor(red: 8/255, green: 15/255, blue: 40/255, alpha: 0.75)
+            static let winter = SKColor(red: 160/255, green: 190/255, blue: 220/255, alpha: 1)
+            
+            // Desert void colors - dark gradient from brown to black
+            static let desertTop = SKColor(red: 40/255, green: 30/255, blue: 20/255, alpha: 1.0)      // Dark brown
+            static let desertBottom = SKColor(red: 10/255, green: 8/255, blue: 5/255, alpha: 1.0)    // Near black with brown tint
+            
+            // Legacy flat desert color (no longer used)
+            static let desert = SKColor(red: 240/255, green: 210/255, blue: 120/255, alpha: 0.5)
+            
+            // NOTE: This is no longer used as scene backgroundColor to avoid dark overlay
+            // Kept for reference/consistency with other weather colors
+            static let space = SKColor(red: 100/255, green: 110/255, blue: 180/255, alpha: 1.0)
+            
+            static let blackVoid = SKColor.black
+        }
     /// Centralized font configuration for all UI elements
     ///
     /// Usage examples:
@@ -312,12 +321,12 @@ struct Configuration {
         
         /// Difficulty level when logs start appearing
         static let logStartLevel: Int = 1
-        /// Base probability of spawning a log (once unlocked)
-        static let baseLogProbability: Double = 0.6
+        /// Base probability of spawning a log (once unlocked) - increased for more frequent spawns
+        static let baseLogProbability: Double = 0.35
         /// Additional log probability per level after unlock
-        static let logProbabilityPerLevel: Double = 0.3
-        /// Maximum log spawn probability
-        static let maxLogProbability: Double = 0.6
+        static let logProbabilityPerLevel: Double = 0.05
+        /// Maximum log spawn probability - increased for more frequent spawns
+        static let maxLogProbability: Double = 0.70
         /// Weather conditions where logs can spawn (natural settings, not desert/space)
         static let logWeathers: Set<WeatherType> = [.sunny, .night, .rain, .winter]
         
@@ -402,22 +411,18 @@ struct Configuration {
         /// Minimum score before snakes can appear (start of desert biome)
         static let snakeStartScore: Int = Weather.desertStart
         /// Base probability of spawning a snake in desert (once unlocked)
-        static let baseSnakeProbability: Double = 0.90  // Increased for testing (was 0.15)
+        static let baseSnakeProbability: Double = 0.15
         /// Additional snake probability per level after unlock
-        static let snakeProbabilityPerLevel: Double = 0.95
+        static let snakeProbabilityPerLevel: Double = 0.02
         /// Maximum snake spawn probability
-        static let maxSnakeProbability: Double = 0.90  // Increased cap (was 0.40)
+        static let maxSnakeProbability: Double = 0.40
         /// Maximum snakes on screen at once
         static let snakeMaxOnScreen: Int = 3
         
         /// Calculates the probability of a snake spawning. Snakes spawn primarily in desert, but start appearing slightly before the cutscene.
         static func snakeProbability(forScore score: Int, weather: WeatherType) -> Double {
-            // DEBUG: Log all parameters
-            let debugLog = score >= 2400 && score <= 2500
-            
             // Allow snakes to start spawning at the score threshold, even if desert cutscene hasn't played yet
             guard score >= snakeStartScore else {
-                if debugLog { print("🐍❌ Score \(score) < start score \(snakeStartScore)") }
                 return 0.0
             }
             
@@ -429,10 +434,6 @@ struct Configuration {
             let weatherMultiplier: Double = weather == .desert ? 1.0 : 0.5
             let baseProbability = min(maxSnakeProbability, baseSnakeProbability + (Double(effectiveLevel) * snakeProbabilityPerLevel))
             let finalProbability = baseProbability * weatherMultiplier
-            
-            if debugLog {
-                print("🐍📊 Snake prob calc: score=\(score), weather=\(weather), startLevel=\(snakeStartLevel), currentLevel=\(currentLevel), effectiveLevel=\(effectiveLevel), baseProb=\(baseProbability), multiplier=\(weatherMultiplier), final=\(finalProbability)")
-            }
             
             return finalProbability
         }
@@ -483,6 +484,7 @@ struct Configuration {
         static let cross4PackCost = 20
         static let swatter4PackCost = 20
         static let axe4PackCost = 20
+        static let comboBoostCost = 500
     }
     
     struct GameCenter {

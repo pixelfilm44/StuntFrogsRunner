@@ -129,6 +129,7 @@ class Frog: GameEntity {
         SKTexture(imageNamed: "frogDrown2"),
         SKTexture(imageNamed: "frogDrown3")
     ]
+    private static let desertDrownTexture = SKTexture(imageNamed: "frogDrown4")
     
     // MARK: - Jump Animation Texture Sets (Combo-Based)
     // Base jump animations (combo 0-2)
@@ -141,7 +142,9 @@ class Frog: GameEntity {
     
     // Cool jump animations (combo 3-5) - Try alternative sets, fallback to base
     private static let jumpCoolAnimationTextures: [SKTexture] = {
+        #if DEBUG
         print("🔍 INITIALIZING Cool Jump Textures...")
+        #endif
         // Try to load frogJumpCool1-6, fallback to base if not found
         let textures = (1...6).map { index -> SKTexture in
             let imageName = "frogJumpCool\(index)"
@@ -149,27 +152,39 @@ class Frog: GameEntity {
             
             // Check if texture loaded successfully by checking size
             if texture.size() == .zero {
+                #if DEBUG
                 print("❌ Missing: \(imageName) (texture size is zero)")
+                #endif
                 return jumpAnimationTextures[index - 1]
             } else {
+                #if DEBUG
                 print("✅ Found: \(imageName) - size: \(texture.size())")
+                #endif
                 return texture
             }
         }
+        #if DEBUG
         print("🎯 Loaded \(textures.count) cool jump textures (may include fallbacks)")
+        #endif
         return textures
     }()
     private static let jumpCoolLvAnimationTextures: [SKTexture] = {
+        #if DEBUG
         print("🔍 INITIALIZING Cool Jump Lv Textures...")
+        #endif
         let textures = (1...6).map { index -> SKTexture in
             let imageName = "frogJumpCoolLv\(index)"
             let texture = SKTexture(imageNamed: imageName)
             
             if texture.size() == .zero {
+                #if DEBUG
                 print("❌ Missing: \(imageName)")
+                #endif
                 return jumpLvAnimationTextures[index - 1]
             } else {
+                #if DEBUG
                 print("✅ Found: \(imageName)")
+                #endif
                 return texture
             }
         }
@@ -178,32 +193,44 @@ class Frog: GameEntity {
     
     // Wild jump animations (combo 6-9) - More energetic
     private static let jumpWildAnimationTextures: [SKTexture] = {
+        #if DEBUG
         print("🔍 INITIALIZING Wild Jump Textures...")
+        #endif
         let textures = (1...6).map { index -> SKTexture in
             let imageName = "frogJumpWild\(index)"
             let texture = SKTexture(imageNamed: imageName)
             
             if texture.size() == .zero {
+                #if DEBUG
                 print("❌ Missing: \(imageName) - falling back to cool")
+                #endif
                 return jumpCoolAnimationTextures[index - 1]
             } else {
+                #if DEBUG
                 print("✅ Found: \(imageName) - size: \(texture.size())")
+                #endif
                 return texture
             }
         }
         return textures
     }()
     private static let jumpWildLvAnimationTextures: [SKTexture] = {
+        #if DEBUG
         print("🔍 INITIALIZING Wild Jump Lv Textures...")
+        #endif
         let textures = (1...6).map { index -> SKTexture in
             let imageName = "frogJumpWildLv\(index)"
             let texture = SKTexture(imageNamed: imageName)
             
             if texture.size() == .zero {
+                #if DEBUG
                 print("❌ Missing: \(imageName)")
+                #endif
                 return jumpCoolLvAnimationTextures[index - 1]
             } else {
+                #if DEBUG
                 print("✅ Found: \(imageName)")
+                #endif
                 return texture
             }
         }
@@ -212,32 +239,44 @@ class Frog: GameEntity {
     
     // Extreme jump animations (combo 10+) - Wildest animations
     private static let jumpExtremeAnimationTextures: [SKTexture] = {
+        #if DEBUG
         print("🔍 INITIALIZING Extreme Jump Textures...")
+        #endif
         let textures = (1...6).map { index -> SKTexture in
             let imageName = "frogJumpExtreme\(index)"
             let texture = SKTexture(imageNamed: imageName)
             
             if texture.size() == .zero {
+                #if DEBUG
                 print("❌ Missing: \(imageName) - falling back to wild")
+                #endif
                 return jumpWildAnimationTextures[index - 1]
             } else {
+                #if DEBUG
                 print("✅ Found: \(imageName) - size: \(texture.size())")
+                #endif
                 return texture
             }
         }
         return textures
     }()
     private static let jumpExtremeLvAnimationTextures: [SKTexture] = {
+        #if DEBUG
         print("🔍 INITIALIZING Extreme Jump Lv Textures...")
+        #endif
         let textures = (1...6).map { index -> SKTexture in
             let imageName = "frogJumpExtremeLv\(index)"
             let texture = SKTexture(imageNamed: imageName)
             
             if texture.size() == .zero {
+                #if DEBUG
                 print("❌ Missing: \(imageName)")
+                #endif
                 return jumpWildLvAnimationTextures[index - 1]
             } else {
+                #if DEBUG
                 print("✅ Found: \(imageName)")
+                #endif
                 return texture
             }
         }
@@ -615,8 +654,10 @@ class Frog: GameEntity {
     }
     
     /// Plays a drowning animation where the frog sinks underwater and disappears.
-    /// - Parameter completion: Called when the animation finishes
-    func playDrowningAnimation(completion: @escaping () -> Void) {
+    /// - Parameters:
+    ///   - isDesert: If true, plays a simple fall animation instead of drowning
+    ///   - completion: Called when the animation finishes
+    func playDrowningAnimation(isDesert: Bool = false, completion: @escaping () -> Void) {
         // Stop any running jump animation and reset scale
         frogSprite.removeAction(forKey: "jumpFrameAnimation")
         bodyNode.removeAction(forKey: "jumpScaleAnimation")
@@ -629,6 +670,28 @@ class Frog: GameEntity {
         // Disable physics updates during animation
         isInvincible = true
         
+        // Desert variant: Simple shrink and fall animation
+        if isDesert {
+            let duration: TimeInterval = 1.0
+            
+            // Set the frogDrown4 texture as the frog falls into darkness
+            setFrogTexture(Frog.desertDrownTexture, height: Frog.frogSitHeight)
+            
+            // Shrink the frog while fading out
+            let shrink = SKAction.scale(to: 0.0, duration: duration)
+            shrink.timingMode = .easeIn
+            
+            let fadeOut = SKAction.fadeOut(withDuration: duration)
+            
+            let group = SKAction.group([shrink, fadeOut])
+            bodyNode.run(group, completion: completion)
+            
+            // Also fade the shadow
+            shadowNode.run(SKAction.fadeOut(withDuration: duration))
+            return
+        }
+        
+        // Normal water drowning animation
         // Total duration for the texture-based drowning animation
         let animationDuration: TimeInterval = 1.2
         let timePerFrame = animationDuration / Double(Frog.drowningTextures.count)
@@ -659,7 +722,7 @@ class Frog: GameEntity {
         shadowNode.run(SKAction.fadeOut(withDuration: totalDuration))
     }
     
-    func playWailingAnimation() {
+    func playWailingAnimation(isDesert: Bool = false) {
         // Stop any running jump animation and reset scale
         frogSprite.removeAction(forKey: "jumpFrameAnimation")
         bodyNode.removeAction(forKey: "jumpScaleAnimation")
@@ -672,6 +735,22 @@ class Frog: GameEntity {
         // Disable physics updates during animation
         isInvincible = true
         
+        // Desert variant: Simple shrinking animation (play once)
+        if isDesert {
+            let shrinkDuration: TimeInterval = 1.0
+            
+            // Shrink down and fade slightly
+            let shrink = SKAction.scale(to: 0.3, duration: shrinkDuration)
+            shrink.timingMode = .easeIn
+            let fadePartial = SKAction.fadeAlpha(to: 0.3, duration: shrinkDuration)
+            
+            // Play the shrinking animation once
+            let shrinkAnimation = SKAction.group([shrink, fadePartial])
+            bodyNode.run(shrinkAnimation, withKey: "wailingAnimation")
+            return
+        }
+        
+        // Normal wailing animation for water
         // Total duration for one loop of the texture-based wailing animation
         let animationDuration: TimeInterval = 1.2
         let timePerFrame = animationDuration / Double(Frog.drowningTextures.count)
@@ -927,17 +1006,25 @@ class Frog: GameEntity {
         // This MUST be the scene (or a world node) so particles stay in place as rocket moves
         if let scene = self.scene {
             smokeEmitter?.targetNode = scene
+            #if DEBUG
             print("🚀 Smoke emitter target set to scene")
+            #endif
         } else if let parent = self.parent {
             smokeEmitter?.targetNode = parent
+            #if DEBUG
             print("🚀 Smoke emitter target set to parent")
+            #endif
         } else {
+            #if DEBUG
             print("⚠️ WARNING: No target node available for smoke emitter!")
+            #endif
         }
         
         // Start smoke trail
         smokeEmitter?.particleBirthRate = 40
+        #if DEBUG
         print("🚀 Smoke trail started with birth rate: \(smokeEmitter?.particleBirthRate ?? 0)")
+        #endif
     }
     
     /// Plays the rocket explosion and frog falling animations when descending from the rocket
@@ -1610,9 +1697,9 @@ class Pad: GameEntity {
     /// - Parameters:
     ///   - yPosition: The Y position to check
     ///   - existingPads: Array of existing pads to check against
-    ///   - minYDistance: Minimum required Y distance from moving lilypads/logs (default: 150)
+    ///   - minYDistance: Minimum required Y distance from moving lilypads/logs (default: 80 - reduced for more spawns)
     /// - Returns: True if the Y position is safe for spawning a log
-    static func isYPositionSafeForLog(_ yPosition: CGFloat, existingPads: [Pad], minYDistance: CGFloat = 150) -> Bool {
+    static func isYPositionSafeForLog(_ yPosition: CGFloat, existingPads: [Pad], minYDistance: CGFloat = 80) -> Bool {
         for pad in existingPads {
             // Only check moving lilypads and existing logs
             // Note: waterLily pads are stationary and don't need spacing requirements
@@ -1631,9 +1718,9 @@ class Pad: GameEntity {
     /// - Parameters:
     ///   - logPosition: The proposed position for the log
     ///   - existingPads: Array of existing pads to check against
-    ///   - safetyMargin: Additional safety margin around pads (default: 70 - log width/2 + pad radius + buffer)
+    ///   - safetyMargin: Additional safety margin around pads (default: 30 - reduced for more spawns)
     /// - Returns: True if the log's path is clear of lilypads, false if it would collide
-    static func isLogPathClear(at logPosition: CGPoint, existingPads: [Pad], safetyMargin: CGFloat = 70) -> Bool {
+    static func isLogPathClear(at logPosition: CGPoint, existingPads: [Pad], safetyMargin: CGFloat = 30) -> Bool {
         // Log dimensions: width = 120, height = 40
         let logHalfWidth: CGFloat = 60.0
         let logHalfHeight: CGFloat = 20.0
@@ -1681,6 +1768,9 @@ class Pad: GameEntity {
             let sprite = SKSpriteNode(texture: texture, size: CGSize(width: 120, height: 40))
             addChild(sprite)
             self.padSprite = sprite
+            #if DEBUG
+            print("🪵 Log sprite created - texture size: \(texture.size()), sprite size: \(sprite.size), sprite parent: \(sprite.parent != nil)")
+            #endif
         } else if type == .ice {
             // Use ice lilypad texture - scale to match physics body
             let texture = Pad.iceTexture
@@ -1739,7 +1829,13 @@ class Pad: GameEntity {
             
             let sprite = SKSpriteNode(texture: texture)
             // Scale sprite to match the actual pad radius (multiplied by physics multiplier for tighter hit zone)
-            let visualDiameter = baseRadius * 2 * Configuration.Dimensions.padPhysicsRadiusMultiplier
+            var visualDiameter = baseRadius * 2 * Configuration.Dimensions.padPhysicsRadiusMultiplier
+            
+            // Make grave pads (skeletons) at least 2x smaller
+            if type == .grave {
+                visualDiameter = visualDiameter / 2.0
+            }
+            
             sprite.size = CGSize(width: visualDiameter, height: visualDiameter)
             addChild(sprite)
             self.padSprite = sprite
@@ -1752,20 +1848,23 @@ class Pad: GameEntity {
     /// Applies a subtle hue variation to the pad sprite for visual diversity
     /// Uses color blending which is GPU-accelerated and performant
     private func applyHueVariation() {
-        guard let sprite = padSprite else { return }
-        
-        // Skip hue variation for special pads that need specific appearances
-        guard type != .launchPad && type != .warp && type != .grave && type != .waterLily && type != .moving else { return }
-        
-        // Convert hue shift to a color (hue variation is in range -0.15 to 0.15)
-        // We'll use UIColor to create a subtle tint
-        let hue = 0.33 + hueVariation // Base green hue (0.33) with variation
-        let tintColor = UIColor(hue: hue, saturation: 0.5, brightness: 1.0, alpha: 1.0)
-        
-        sprite.color = tintColor
-        sprite.colorBlendFactor = 0.85 // Noticeable blend while maintaining texture detail
-    }
-    
+            guard let sprite = padSprite else { return }
+            
+            // DISABLE tinting for Space weather to keep the purple/blue texture bright
+            if currentWeather == .space {
+                sprite.colorBlendFactor = 0.0
+                return
+            }
+            
+            // Skip for special pads
+            guard type != .launchPad && type != .warp && type != .grave && type != .waterLily && type != .moving else { return }
+            
+            let hue = 0.33 + hueVariation
+            let tintColor = UIColor(hue: hue, saturation: 0.5, brightness: 1.0, alpha: 1.0)
+            
+            sprite.color = tintColor
+            sprite.colorBlendFactor = 0.85
+        }
     /// Converts this pad to a normal pad if its type is incompatible with the given weather
     func convertToNormalIfIncompatible(weather: WeatherType) {
         let shouldConvert: Bool
@@ -1784,7 +1883,9 @@ class Pad: GameEntity {
         }
         
         if shouldConvert {
+            #if DEBUG
             print("🔄 Converting \(type) pad to normal pad due to weather change to \(weather)")
+            #endif
             self.type = .normal
             self.moveSpeed = 0 // Stop movement for moving/log pads
             currentWeather = weather // Update tracked weather
@@ -1792,93 +1893,80 @@ class Pad: GameEntity {
         }
     }
     
-    func updateColor(weather: WeatherType, duration: TimeInterval = 0) {
-        guard type == .normal || type == .moving || type == .waterLily || type == .shrinking || type == .log else { return }
-        
-        // Don't change if already correct
-        if weather == currentWeather && padSprite?.texture != nil { return }
-        currentWeather = weather
-        
-        let texture: SKTexture
-        if type == .log {
-            texture = Pad.logTextureForWeather(weather)
-        } else if type == .waterLily || type == .moving {
-            switch weather {
-            case .sunny:
-                texture = Pad.waterLilyTexture
-          
-            case .night:
-                texture = Pad.waterLilyNightTexture
-            case .rain:
-                texture = Pad.waterLilyRainTexture
-            case .winter:
-                texture = Pad.waterLilySnowTexture
-            case .desert:
-                texture = Pad.waterLilySandTexture
-            case .space:
-                texture = Pad.waterLilySpaceTexture
+
+        func updateColor(weather: WeatherType, duration: TimeInterval = 0) {
+            // 1. Determine the Texture (Keep your existing texture logic)
+            let texture: SKTexture
+            if type == .log {
+                 texture = Pad.logTextureForWeather(weather)
+            } else if type == .waterLily || type == .moving {
+                 switch weather {
+                     case .sunny: texture = Pad.waterLilyTexture
+                     case .night: texture = Pad.waterLilyNightTexture
+                     case .rain: texture = Pad.waterLilyRainTexture
+                     case .winter: texture = Pad.waterLilySnowTexture
+                     case .desert: texture = Pad.waterLilySandTexture
+                     case .space: texture = Pad.waterLilySpaceTexture
+                 }
+            } else if type == .shrinking {
+                 // ... (Keep your shrinking texture switch) ...
+                 switch weather {
+                     case .space: texture = Pad.shrinkSpaceTexture
+                     default: texture = Pad.shrinkTexture // Simplified for brevity
+                 }
+            } else if type == .grave {
+                // CRITICAL FIX: Grave pads should ALWAYS use the grave texture
+                texture = Pad.graveTexture
+            } else if type == .ice {
+                // Ice pads should keep their ice texture
+                texture = Pad.iceTexture
+            } else if type == .launchPad {
+                // Launch pads keep their special texture
+                texture = Pad.launchPadTexture
+            } else if type == .warp {
+                // Warp pads keep their special texture
+                texture = Pad.warpPadTexture
+            } else {
+                 // Normal pads use weather-based textures
+                 switch weather {
+                     case .sunny: texture = Pad.dayTexture
+                     case .night: texture = Pad.nightTexture
+                     case .rain: texture = Pad.rainTexture
+                     case .winter: texture = Pad.snowTexture
+                     case .desert: texture = Pad.desertTexture
+                     case .space: texture = Pad.spaceTexture
+                 }
             }
-        } else if type == .shrinking {
-            switch weather {
-            case .sunny:
-                texture = Pad.shrinkTexture
-            case .night:
-                texture = Pad.shrinkNightTexture
-            case .rain:
-                texture = Pad.shrinkRainTexture
-            case .winter:
-                texture = Pad.shrinkSnowTexture
-            case .desert:
-                texture = Pad.shrinkSandTexture
-            case .space:
-                texture = Pad.shrinkSpaceTexture
-            }
-        } else {
-            switch weather {
-            case .sunny:
-                texture = Pad.dayTexture
-            case .night:
-                texture = Pad.nightTexture
-            case .rain:
-                texture = Pad.rainTexture
+
+            // 2. Lighting Configuration
+            // Since all SKLightNode instances are removed from the scene,
+            // we don't need to modify lightingBitMask - nodes will render at full brightness by default.
+            // Keeping this line commented out as a reference:
+            // let targetMask: UInt32 = (weather == .space) ? 0 : (weather == .night || weather == .rain ? 1 : 0)
             
-            case .winter:
-                texture = Pad.snowTexture
-            case .desert:
-                texture = Pad.desertTexture
-            case .space:
-                texture = Pad.spaceTexture
+            // 3. THE FIX: Force "Pure Color" for Space
+            // If Space, remove all tinting (White + 0.0 blend).
+            let targetColor: SKColor
+            let targetBlend: CGFloat
+            
+            if weather == .space {
+                targetColor = .white
+                targetBlend = 0.0
+            } else {
+                // Restore random tint for other weathers
+                let hue = 0.33 + hueVariation
+                targetColor = UIColor(hue: hue, saturation: 0.5, brightness: 1.0, alpha: 1.0)
+                targetBlend = 0.85
+            }
+
+            // 4. Apply immediately (Stop using Actions for this, they are unreliable during transitions)
+            if let sprite = padSprite {
+                sprite.texture = texture
+                // Don't modify lightingBitMask - let nodes render at full brightness
+                sprite.color = targetColor
+                sprite.colorBlendFactor = targetBlend
             }
         }
-        
-        guard let sprite = padSprite, sprite.texture != texture else { return }
-
-        if duration > 0 {
-            let crossfadeDuration = duration * 0.5 // Crossfade over a portion of the total transition
-            let oldSprite = self.padSprite
-            
-            let newSprite = SKSpriteNode(texture: texture)
-            newSprite.size = sprite.size
-            newSprite.alpha = 0
-            newSprite.zRotation = sprite.zRotation
-            addChild(newSprite)
-            self.padSprite = newSprite
-
-            newSprite.run(SKAction.fadeIn(withDuration: crossfadeDuration))
-            oldSprite?.run(SKAction.sequence([
-                SKAction.fadeOut(withDuration: crossfadeDuration),
-                SKAction.removeFromParent()
-            ]))
-            
-            // Apply hue variation to the new sprite
-            applyHueVariation()
-        } else {
-            sprite.texture = texture
-            // Apply hue variation after texture change
-            applyHueVariation()
-        }
-    }
-    
     /// Smoothly transforms the pad to its desert variant over a duration.
     func transformToDesert(duration: TimeInterval) {
         // Only transform pads that can change appearance.
@@ -2066,7 +2154,7 @@ class Enemy: GameEntity {
     private var originalPosition: CGPoint
     private var angle: CGFloat = 0.0
     private var currentWeather: WeatherType = .sunny
-    private var enemySprite: SKSpriteNode?
+     var enemySprite: SKSpriteNode?
     var isBeingDestroyed: Bool = false  // Flag to prevent multiple collision handling
     
     // Preloaded textures for performance - organized by enemy type and weather
@@ -2152,6 +2240,11 @@ class Enemy: GameEntity {
             addChild(sprite)
             self.enemySprite = sprite
         }
+        // --- ADD THIS ---
+                if currentWeather == .space {
+                    self.enemySprite?.color = .white
+                    self.enemySprite?.colorBlendFactor = 0.0
+                }
     }
     
     /// Updates the enemy's visual appearance when weather changes
@@ -2164,6 +2257,19 @@ class Enemy: GameEntity {
         
         let newTexture = Enemy.textureForEnemy(type, weather: weather)
         sprite.texture = newTexture
+        
+        // After self.enemySprite = sprite:
+                if currentWeather == .space {
+                    // FIX: Apply to the enemy sprite
+                    self.enemySprite?.color = .white
+                    self.enemySprite?.colorBlendFactor = 0.0
+                    self.enemySprite?.lightingBitMask = 0
+                    
+                    // FIX: Apply to the root node (self) just in case
+                    self.color = .white
+                    self.colorBlendFactor = 0.0
+                    self.lightingBitMask = 0
+                }
     }
     func update(dt: TimeInterval, target: CGPoint? = nil) {
         if type == "DRAGONFLY" {
@@ -2417,7 +2523,9 @@ class Cactus: GameEntity {
             addChild(cactusSprite)
         } else {
             // Fallback: Create a simple cactus shape if texture is missing
+            #if DEBUG
             print("🌵 Cactus texture missing! Using fallback shape.")
+            #endif
             let cactusShape = createFallbackCactus()
             addChild(cactusShape)
         }
@@ -2564,20 +2672,24 @@ class Snake: GameEntity {
     
     private func setupVisuals() {
         
-        // Debug print the names of the textures being loaded
+        // Snake sprite
         let textures = Snake.animationTexturesForWeather(currentWeather)
+        let texture = textures.first ?? SKTexture(imageNamed: "snake1")
+        let textureSize = texture.size()
+        
+        #if DEBUG
+        // Debug print the names of the textures being loaded
         for (i, tex) in textures.enumerated() {
             print("🐍 Attempted to load texture 'snake\(currentWeather)\(i+1)': size = \(tex.size())")
         }
-        
-        // Snake sprite
-        let texture = textures.first ?? SKTexture(imageNamed: "snake1")
-        let textureSize = texture.size()
         print("🐍 First snake texture size: \(textureSize)")
+        #endif
         
         // Check if texture is valid (has actual image data)
         if textureSize.width > 0 && textureSize.height > 0 {
+            #if DEBUG
             print("🐍 Using valid snake texture for sprite")
+            #endif
             // Valid texture found - use it
             let targetHeight: CGFloat = 50
             let aspectRatio = textureSize.width / textureSize.height
@@ -2586,7 +2698,9 @@ class Snake: GameEntity {
             bodySprite.zPosition = 1
             addChild(bodySprite)
         } else {
+            #if DEBUG
             print("🐍 Snake texture missing or invalid! Drawing fallback or placeholder.")
+            #endif
         }
     }
       

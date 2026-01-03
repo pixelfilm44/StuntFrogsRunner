@@ -5,6 +5,12 @@ public protocol TooltipSafetyChecking {
     func isSafeForTooltip() -> Bool
 }
 
+/// Protocol for modal nodes that want to explicitly block tooltips
+/// Modals can conform to this protocol and set isBlockingTooltips = true
+public protocol TooltipBlocking {
+    var isBlockingTooltips: Bool { get }
+}
+
 /// Manages the creation and display of tooltips that provide contextual help to the player.
 public class ToolTips {
     
@@ -40,6 +46,45 @@ public class ToolTips {
         
         // Show it immediately (this will set isShowingTooltip to true)
         showToolTipImmediately(forKey: nextTooltip.key, in: nextTooltip.scene)
+    }
+    
+    /// Checks if any modals are currently visible in the scene
+    /// This ensures tooltips don't overlap with other UI elements like daily challenge intros
+    /// - Parameter scene: The scene to check for existing modals
+    /// - Returns: True if any modal overlays are currently visible
+    private static func hasVisibleModals(in scene: SKScene) -> Bool {
+        // Check the UI container (camera or scene) for any existing overlays or modals
+        let uiContainer = scene.camera ?? scene
+        
+        // Look for high z-position overlays (typically used by modals)
+        // Check z-positions >= 900 to catch most modal implementations
+        for child in uiContainer.children {
+            // Check if this node explicitly blocks tooltips via protocol
+            if let blockingNode = child as? TooltipBlocking, blockingNode.isBlockingTooltips {
+                return true
+            }
+            
+            if child.zPosition >= 900 {
+                // Filter out our own tooltip overlays (they'll be cleaned up properly)
+                // Check for typical modal indicators: large sprites, specific names, or high alpha overlays
+                if let sprite = child as? SKSpriteNode,
+                   sprite.size.width > 100 && sprite.size.height > 100,
+                   sprite.alpha > 0.3 {
+                    return true
+                }
+                
+                // Check for custom modal node types (your specific modals might have unique names)
+                if let nodeName = child.name,
+                   nodeName.lowercased().contains("modal") ||
+                   nodeName.lowercased().contains("banner") ||
+                   nodeName.lowercased().contains("challenge") ||
+                   nodeName.lowercased().contains("intro") {
+                    return true
+                }
+            }
+        }
+        
+        return false
     }
     
     /// Checks if a specific entity type has triggered its tooltip already
@@ -211,6 +256,17 @@ public class ToolTips {
         guard currentRetries < maxRetryAttempts else {
             print("⚠️ Tooltip '\(key)' exceeded max retry attempts. Canceling to prevent infinite loop.")
             retryAttempts.removeValue(forKey: key)
+            return
+        }
+        
+        // Check if any other modals are currently visible
+        // This prevents tooltips from overlapping with daily challenge intros, etc.
+        if hasVisibleModals(in: scene) {
+            retryAttempts[key] = currentRetries + 1
+            // Defer the tooltip until other modals are dismissed
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                showToolTip(forKey: key, in: scene)
+            }
             return
         }
         

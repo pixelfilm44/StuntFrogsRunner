@@ -62,10 +62,10 @@ class CollisionManager {
             checkForLanding(frog: frog, pads: pads, crocodiles: crocodiles)
         }
         
-        // Check collisions for airborne frog
-        if frog.zHeight > 0 {
-            checkFrogBoatCollision(frog: frog, boat: boat)
-        }
+        // DISABLED: Boat collision disabled in race mode to prevent interference with frog jumping
+        // if frog.zHeight > 0 {
+        //     checkFrogBoatCollision(frog: frog, boat: boat)
+        // }
         
         checkEntityCollisions(frog: frog, enemies: enemies, coins: coins, treasureChests: treasureChests, snakes: snakes, cacti: cacti, flies: flies, pads: pads)
         checkObstacleCollisions(frog: frog, pads: pads)

@@ -112,11 +112,19 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     private var cachedWaterTextures: [WeatherType: SKTexture] = [:]
     
     private let flotsamNode = SKNode()
-    private var moonlightNode: SKSpriteNode?
-    private var spaceGlowNode: SKSpriteNode?
     
-    // MARK: - Moonlight Renderer
+    // MARK: - Moonlight Renderer (Night & Space)
     private var moonlightRenderer: MoonlightRenderer?
+    
+    // MARK: - Background Renderers
+    private var spaceBackground: SpaceBackgroundRenderer?
+    private var desertBackground: DesertBackgroundRenderer?
+    
+    // MARK: - Desert Skeleton Decorations
+    private let desertSkeletonNode = SKNode()
+    private var desertSkeletons: [SKSpriteNode] = []
+    private var lastSkeletonSpawnY: CGFloat = 0
+    private let skeletonSpawnInterval: CGFloat = 400  // Distance between skeleton spawns
     
     // MARK: - Trajectory Renderer
     private var trajectoryRenderer: TrajectoryRenderer?
@@ -364,6 +372,11 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     deinit {
         NotificationCenter.default.removeObserver(self)
         
+        // Cleanup background renderers
+        spaceBackground?.cleanup()
+        desertBackground?.cleanup()
+        moonlightRenderer?.cleanup()
+        
         // Safety net: Restore any unused pack items when scene is deallocated
         // This ensures items aren't lost if the scene is dismissed abnormally
         PersistenceManager.shared.restoreCarryoverItems()
@@ -402,6 +415,14 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         camera = cam
         addChild(worldNode)
         worldNode.name = "GameWorld"
+        
+        // CRITICAL: Remove any SKLightNode instances that might be in the scene
+        // This ensures no lighting effects are active
+        worldNode.enumerateChildNodes(withName: "//*") { node, _ in
+            if node is SKLightNode {
+                node.removeFromParent()
+            }
+        }
         
         // Add gradient water background - attached to worldNode so it moves with the world
         createWaterBackground()
@@ -443,6 +464,10 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         // Add flotsam node
         flotsamNode.zPosition = Layer.water + 2 // Above leaves, below pads
         worldNode.addChild(flotsamNode)
+        
+        // Add desert skeleton node for desert decorations
+        desertSkeletonNode.zPosition = Layer.water - 5 // Behind water, visible on sand
+        worldNode.addChild(desertSkeletonNode)
         
         uiNode.zPosition = Layer.ui
         cam.addChild(uiNode)
@@ -488,16 +513,42 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         crosshairNode.isHidden = true
         worldNode.addChild(crosshairNode)
 
-        // Add moonlight node for night scenes
-        let moon = createMoonlightNode()
-        self.moonlightNode = moon
-        worldNode.addChild(moon)
+        // Setup moonlight renderer (will activate when weather changes to night or space)
+        setupMoonlightRenderer()
         
-        // Add space glow node for space scenes
-        let spaceGlow = createSpaceBackgroundGlow()
-        self.spaceGlowNode = spaceGlow
-        worldNode.addChild(spaceGlow)
+        // Setup background renderers (will activate based on weather)
+        setupBackgroundRenderers()
     }
+    
+    /// Sets up the moonlight renderer for night and space effects
+    private func setupMoonlightRenderer() {
+        // Moonlight renderer will be created when needed based on weather
+        // This avoids creating it unnecessarily if the player never reaches night/space
+    }
+    
+    /// Sets up the background renderers for space and desert weather
+        private func setupBackgroundRenderers() {
+            // FIX: Ensure we cover the full screen even if the scene hasn't resized yet.
+            // On first launch, self.size might be small (before layout).
+            // Using UIScreen.main.bounds guarantees we cover the physical device.
+            let width = max(self.size.width, UIScreen.main.bounds.width)
+            let height = max(self.size.height, UIScreen.main.bounds.height)
+            let referenceSize = CGSize(width: width, height: height)
+            
+            // Create space background renderer
+            spaceBackground = SpaceBackgroundRenderer.createOptimized(
+                for: worldNode,
+                camera: cam,
+                screenSize: referenceSize
+            )
+            
+            // Create desert background renderer
+            desertBackground = DesertBackgroundRenderer.createOptimized(
+                for: worldNode,
+                camera: cam,
+                screenSize: referenceSize
+            )
+        }
     
     private func startSpawningLeaves() {
         // Skip leaf decorations on low-end devices for better performance
@@ -1037,11 +1088,12 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             return (top, middle, bottom)
             
         case .night:
-            // FIXED: Brighter night water - moonlit dark blue instead of near-black
-            // Increased from ~3-8 to 20-45 for better visibility
-            let top = UIColor(red: 25/255, green: 35/255, blue: 65/255, alpha: 1.0)
-            let middle = UIColor(red: 20/255, green: 30/255, blue: 55/255, alpha: 1.0)
-            let bottom = UIColor(red: 15/255, green: 25/255, blue: 45/255, alpha: 1.0)
+            // FIXED: MUCH BRIGHTER night water for better gameplay visibility
+            // Increased to match rain brightness levels for Daily Challenges
+            // Still blue-tinted for night atmosphere but playable
+            let top = UIColor(red: 50/255, green: 75/255, blue: 120/255, alpha: 1.0)
+            let middle = UIColor(red: 40/255, green: 65/255, blue: 105/255, alpha: 1.0)
+            let bottom = UIColor(red: 30/255, green: 55/255, blue: 90/255, alpha: 1.0)
             return (top, middle, bottom)
             
         case .winter:
@@ -1059,12 +1111,13 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             return (top, middle, bottom)
             
         case .space:
-            // Deep cosmic void with purple tint
-            let top = UIColor(red: 18/255, green: 12/255, blue: 40/255, alpha: 1.0)
-            let middle = UIColor(red: 12/255, green: 8/255, blue: 28/255, alpha: 1.0)
-            let bottom = UIColor(red: 6/255, green: 3/255, blue: 18/255, alpha: 1.0)
-            return (top, middle, bottom)
-        }
+                    // DEEP SPACE: Black-to-purple gradient for outer space atmosphere
+                    // Dark purple-black at edges, richer purple in center
+                    let top = UIColor(red: 13/255, green: 0/255, blue: 26/255, alpha: 1.0)     // Very dark purple-black
+                    let middle = UIColor(red: 38/255, green: 20/255, blue: 64/255, alpha: 1.0) // Rich purple
+                    let bottom = UIColor(red: 26/255, green: 13/255, blue: 38/255, alpha: 1.0) // Dark purple-black
+                    return (top, middle, bottom)
+                }
     }
     
     /// Adds subtle noise/texture to the gradient for visual interest
@@ -1192,14 +1245,14 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     
     // MARK: - Water Stars System (Night Mode)
     
-    /// Creates and displays dynamic stars on the water surface for night weather
+    /// Creates and displays dynamic stars on the water surface for night and space weather
     private func createWaterStars() {
         // Skip on low-end devices for performance
         guard PerformanceSettings.showBackgroundEffects else {
             return
         }
         
-        guard currentWeather == .night else { return }
+        guard currentWeather == .night || currentWeather == .space else { return }
         
         // Clear any existing stars
         removeWaterStars()
@@ -1760,6 +1813,9 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     
     /// Updates shore segments to follow the camera and recycle old segments
     private func updateShores() {
+        // Don't update shores in environments where they shouldn't be visible
+        guard currentWeather != .desert && currentWeather != .space else { return }
+        
         let camY = cam.position.y
         let viewHeight = size.height
         
@@ -1813,6 +1869,10 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     
     /// Removes all shore segments (e.g., during space transition)
     private func removeShores() {
+        // Hide the parent nodes immediately to prevent new segments from showing
+        leftShoreNode.isHidden = true
+        rightShoreNode.isHidden = true
+        
         for segment in leftShoreSegments {
             let fadeOut = SKAction.fadeOut(withDuration: 0.5)
             let remove = SKAction.removeFromParent()
@@ -1832,121 +1892,16 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     /// Restores shores after returning to normal environment
     private func restoreShores() {
         guard leftShoreSegments.isEmpty else { return }  // Already have shores
+        
+        // Show the parent nodes
+        leftShoreNode.isHidden = false
+        rightShoreNode.isHidden = false
+        
         setupShores()
     }
     
-    private func createMoonlightNode() -> SKSpriteNode {
-        // The node needs to be large enough to cover the screen even with parallax.
-        // 2x screen size is a safe bet.
-        let nodeSize = CGSize(width: size.width * 4, height: size.height * 4)
-        
-        // Create the gradient texture programmatically.
-        let renderer = UIGraphicsImageRenderer(size: nodeSize)
-        let image = renderer.image { context in
-            let center = CGPoint(x: nodeSize.width / 2, y: nodeSize.height / 2)
-            let radius = nodeSize.width / 2
-            
-            // FIXED: Much brighter moonlight - increased from 0.28 to 0.6 alpha
-            // Soft blue-white glow that actually illuminates the scene
-            let colors = [UIColor.blue.withAlphaComponent(0.9).cgColor, UIColor.clear.cgColor]
-            let locations: [CGFloat] = [0.0, 1.0]
-            
-            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                          colors: colors as CFArray,
-                                          locations: locations) {
-                context.cgContext.drawRadialGradient(gradient,
-                                                      startCenter: center, startRadius: 0,
-                                                      endCenter: center, endRadius: radius,
-                                                      options: [])
-            }
-        }
-        
-        let texture = SKTexture(image: image)
-        let node = SKSpriteNode(texture: texture, size: nodeSize)
-        
-        // Position it above the water tiles (-100) but below everything else on the water.
-        node.zPosition = -99
-        
-        // Additive blending creates a realistic lighting effect.
-        node.blendMode = .add
-        
-        // Start hidden.
-        node.isHidden = true
-        
-        return node
-    }
     
-    /// Creates a space background glow with purple/blue nebula effect
-    private func createSpaceBackgroundGlow() -> SKSpriteNode {
-        let nodeSize = CGSize(width: size.width * 2, height: size.height * 2)
-        
-        let renderer = UIGraphicsImageRenderer(size: nodeSize)
-        let image = renderer.image { context in
-            let ctx = context.cgContext
-            
-            // Create multiple gradient overlays for a nebula effect
-            
-            // Bottom gradient - purple glow
-            let bottomCenter = CGPoint(x: nodeSize.width / 2, y: nodeSize.height * 0.3)
-            let bottomRadius = nodeSize.height * 0.6
-            let purpleColors = [
-                UIColor(red: 0.4, green: 0.2, blue: 0.6, alpha: 0.4).cgColor,
-                UIColor(red: 0.2, green: 0.1, blue: 0.3, alpha: 0.2).cgColor,
-                UIColor.clear.cgColor
-            ]
-            let purpleLocations: [CGFloat] = [0.0, 0.5, 1.0]
-            
-            if let purpleGradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                               colors: purpleColors as CFArray,
-                                               locations: purpleLocations) {
-                ctx.drawRadialGradient(purpleGradient,
-                                       startCenter: bottomCenter, startRadius: 0,
-                                       endCenter: bottomCenter, endRadius: bottomRadius,
-                                       options: [])
-            }
-            
-            // Top gradient - blue glow
-            let topCenter = CGPoint(x: nodeSize.width * 0.7, y: nodeSize.height * 0.7)
-            let topRadius = nodeSize.height * 0.5
-            let blueColors = [
-                UIColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 0.3).cgColor,
-                UIColor(red: 0.1, green: 0.2, blue: 0.4, alpha: 0.15).cgColor,
-                UIColor.clear.cgColor
-            ]
-            let blueLocations: [CGFloat] = [0.0, 0.5, 1.0]
-            
-            if let blueGradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                             colors: blueColors as CFArray,
-                                             locations: blueLocations) {
-                ctx.drawRadialGradient(blueGradient,
-                                       startCenter: topCenter, startRadius: 0,
-                                       endCenter: topCenter, endRadius: topRadius,
-                                       options: [])
-            }
-            
-            // Add some "stars" (small white dots)
-            ctx.setFillColor(UIColor.white.cgColor)
-            for _ in 0..<50 {
-                let x = CGFloat.random(in: 0...nodeSize.width)
-                let y = CGFloat.random(in: 0...nodeSize.height)
-                let size = CGFloat.random(in: 1...3)
-                let alpha = CGFloat.random(in: 0.3...0.8)
-                ctx.setAlpha(alpha)
-                ctx.fillEllipse(in: CGRect(x: x, y: y, width: size, height: size))
-            }
-        }
-        
-        let texture = SKTexture(image: image)
-        let node = SKSpriteNode(texture: texture, size: nodeSize)
-        node.zPosition = -99
-        node.blendMode = .add
-        node.name = "spaceGlow"
-        
-        // Start hidden - will be shown when transitioning to space weather
-        node.isHidden = true
-        
-        return node
-    }
+    // REMOVED: createMoonlightNode() - No longer using lighting engine
     
     // MARK: - Legacy Water Methods (Deprecated)
     
@@ -2108,6 +2063,11 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
                 y: frog.position.y - node.position.y
             )
             spawnLaserBlast(from: node, frogOffset: frogOffset)
+            return
+        }
+        
+        // In desert, no ripples (no water)
+        if currentWeather == .desert {
             return
         }
         
@@ -2932,6 +2892,7 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     private func setupTutorialOverlay() {
         // Semi-transparent dark overlay
         let overlay = SKShapeNode(rectOf: CGSize(width: size.width, height: size.height))
+        overlay.name = "tutorialDarkOverlay"
         overlay.fillColor = .black.withAlphaComponent(0.7)
         overlay.strokeColor = .clear
         overlay.zPosition = 0
@@ -2993,6 +2954,13 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     private func showTutorialOverlay() {
         // Only show if the user hasn't seen it before
         guard !PersistenceManager.shared.hasSeenTutorial else { return }
+        
+        // Adjust overlay opacity based on current weather
+        // Space and night are already dark, so use lighter overlay
+        if let overlay = tutorialOverlay.childNode(withName: "tutorialDarkOverlay") as? SKShapeNode {
+            let overlayAlpha: CGFloat = (currentWeather == .space || currentWeather == .night || currentWeather == .rain) ? 0.4 : 0.7
+            overlay.fillColor = .black.withAlphaComponent(overlayAlpha)
+        }
         
         tutorialOverlay.isHidden = false
         tutorialOverlay.alpha = 0
@@ -3329,6 +3297,19 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     
     private func startGame() {
         isGameEnding = false
+        
+        moonlightRenderer?.cleanup()
+                moonlightRenderer = nil
+                
+        // Cleanup background renderers
+        spaceBackground?.deactivate(animated: false)
+        desertBackground?.deactivate(animated: false)
+        removeDesertSkeletons()
+        
+        //currentWeather = .sunny
+                // -----------------------
+
+               
         pads.forEach { $0.removeFromParent() }
         enemies.forEach { $0.removeFromParent() }
         coins.forEach { $0.removeFromParent() }
@@ -3364,6 +3345,9 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         raceResult = nil
         raceState = .none
         
+        // Remove challenge finish line if it exists
+        worldNode.childNode(withName: "finishLine")?.removeFromParent()
+        
         frog.position = CGPoint(x: Configuration.Dimensions.riverWidth / 2, y: 0)
         frog.zHeight = 0
         frog.velocity = .zero
@@ -3371,6 +3355,14 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         frog.currentHealth = frog.maxHealth
         frog.rocketState = .none
         frog.buffs = Frog.Buffs()
+        
+        // CRITICAL: Remove any SKLightNode instances from the scene at game start
+        // This ensures the scene starts with no lighting effects
+        worldNode.enumerateChildNodes(withName: "//*") { node, _ in
+            if node is SKLightNode {
+                node.removeFromParent()
+            }
+        }
         
         // Load purchased items from inventory into buffs HUD for display and use during gameplay
         // Items are loaded but NOT consumed from inventory yet
@@ -3415,10 +3407,7 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         
         worldNode.addChild(frog)
         
-        // MARK: - Initialize Moonlight Renderer
-        // Setup moonlight effect for night scenes, aimed at screen center
-        moonlightRenderer = MoonlightRenderer.createOptimized(for: worldNode, target: frog, camera: cam)
-        moonlightRenderer?.deactivate(animated: false)
+        // NO MORE LIGHTING ENGINE - Everything stays bright!
         
         // TrajectoryRenderer is initialized in setupScene() - just reset if needed
         trajectoryRenderer?.hide()
@@ -3466,18 +3455,6 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         lastKnownBuffs = frog.buffs // Initialize buff state for comparison
         descendBg.isHidden = true
         
-        // MARK: - Initialize Weather Based on Starting Score
-        if Configuration.Debug.debugMode && Configuration.Debug.startingScore > 0 {
-            // Determine the correct weather based on the starting score
-            let startWeather = weatherForScore(Configuration.Debug.startingScore)
-            setWeather(startWeather, duration: 0.0)
-            // Calculate the next weather change point
-            let weatherIndex = WeatherType.allCases.firstIndex(of: startWeather) ?? 0
-            nextWeatherChangeScore = (weatherIndex + 1) * weatherChangeInterval
-        } else {
-            setWeather(.sunny, duration: 0.0)
-        }
-        
         stopDrowningGracePeriod()
         
         // Reset cutscene state for a new game
@@ -3491,7 +3468,10 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         hasHitWarpPad = false
         warpPadY = 0
 
+        // MARK: - Initialize Weather Based on Game Mode
         if gameMode == .beatTheBoat {
+            // Race mode uses sunny weather
+            setWeather(.sunny, duration: 0.0)
             raceState = .countdown
             isUserInteractionEnabled = false
             setupRace()
@@ -3502,9 +3482,14 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             currentChallenge = challenge
             challengeRNG = SeededRandomNumberGenerator(seed: UInt64(abs(challenge.seed)))
             
-            // Lock weather to challenge climate
-            // Use a short duration instead of 0 to ensure particles are created properly
-            setWeather(challenge.climate, duration: 0.1)
+            // --- FIX START ---
+                // Do NOT manually set currentWeather or recreate background here.
+                // Let setWeather handle the full transition from .sunny (default) to the target climate.
+                
+                // This ensures oldWeather is .sunny and newWeather is .desert,
+                // triggering all activation logic correctly.
+                setWeather(challenge.climate, duration: 0.0)
+                // --- FIX END ---
             
             baseMusic = .gameplay
             SoundManager.shared.playMusic(baseMusic)
@@ -3519,8 +3504,20 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             // Show tutorial overlay for first-time players
             showTutorialOverlay()
         } else {
-            // Not a daily challenge - hide the timer
+            // Endless game mode
             timerLabel.isHidden = true
+            
+            // Initialize weather based on starting score (for debug mode)
+            if Configuration.Debug.debugMode && Configuration.Debug.startingScore > 0 {
+                // Determine the correct weather based on the starting score
+                let startWeather = weatherForScore(Configuration.Debug.startingScore)
+                setWeather(startWeather, duration: 0.0)
+                // Calculate the next weather change point
+                let weatherIndex = WeatherType.allCases.firstIndex(of: startWeather) ?? 0
+                nextWeatherChangeScore = (weatherIndex + 1) * weatherChangeInterval
+            } else {
+                setWeather(.sunny, duration: 0.0)
+            }
             
             baseMusic = .gameplay
             SoundManager.shared.playMusic(baseMusic)
@@ -3610,20 +3607,44 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     }
 
     private func spawnInitialPads() {
-        // Start spawning pads at the frog's current Y position (accounts for debug mode)
-        var yPos: CGFloat = frog.position.y
-        for _ in 0..<5 {
-            let pad = Pad(type: .normal, position: CGPoint(x: size.width / 2, y: yPos))
-            worldNode.addChild(pad)
-            pads.append(pad)
-            yPos += 100
+            var yPos: CGFloat = frog.position.y
+            for _ in 0..<5 {
+                let pad = Pad(type: .normal, position: CGPoint(x: size.width / 2, y: yPos))
+                
+                // Update to Space visuals
+                pad.updateColor(weather: currentWeather, duration: 0.0)
+                
+                if currentWeather == .space {
+                    // FIX: Apply to the Pad itself (the root sprite)
+                    pad.color = .white
+                    pad.colorBlendFactor = 0.0
+                    pad.lightingBitMask = 0
+                    
+                    // FIX: Apply to all children (decorations, flowers)
+                    pad.enumerateChildNodes(withName: "//*") { node, _ in
+                        if let sprite = node as? SKSpriteNode {
+                            sprite.color = .white
+                            sprite.colorBlendFactor = 0.0
+                            sprite.lightingBitMask = 0
+                        }
+                    }
+                }
+                
+                worldNode.addChild(pad)
+                pads.append(pad)
+                yPos += 100
+            }
+            
+            if let firstPad = pads.first {
+                frog.position = firstPad.position
+                frog.land(on: firstPad, weather: currentWeather)
+                
+                // Ensure MoonlightRenderer tracks the new frog position immediately
+                if let moonlight = moonlightRenderer {
+                    moonlight.update(0)
+                }
+            }
         }
-        if let firstPad = pads.first {
-            frog.position = firstPad.position
-            frog.land(on: firstPad, weather: currentWeather)
-        }
-    }
-    
     override func update(_ currentTime: TimeInterval) {
         if lastUpdateTime == 0 { lastUpdateTime = currentTime }
         let dt = currentTime - lastUpdateTime
@@ -3638,7 +3659,8 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             updateChallengeTimer()
         }
         
-        if let challenge = currentChallenge, finishLineNode == nil, score >= 800 {
+        // Spawn finish line when approaching the goal (at 900m, line appears at 1000m)
+        if let challenge = currentChallenge, worldNode.childNode(withName: "finishLine") == nil, score >= 900 {
             spawnFinishLine()
         }
         // Check for daily challenge completion (1000m = score of 1000)
@@ -3647,9 +3669,6 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             handleDailyChallengeComplete()
             return
         }
-        
-        // Update moonlight renderer to aim at screen center
-        moonlightRenderer?.update(currentTime)
         
         // Apply continuous rocket steering while touch is held
         if frog.rocketState != .none && rocketSteeringTouch != nil && rocketSteeringDirection != 0 {
@@ -3703,10 +3722,10 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         
         for enemy in enemies {
             let enemyY = enemy.position.y
-            // PERFORMANCE: Early exit for sorted arrays
-            if enemyY > activeUpperBound + viewHeight { break }
             // PERFORMANCE: Skip enemies far behind camera
             if enemyY < activeLowerBound - viewHeight { continue }
+            // NOTE: Cannot use early break for enemies because ghosts spawn out of order
+            // when the frog lands on grave pads, breaking the sorted assumption
             
             if enemyY > activeLowerBound && enemyY < activeUpperBound {
                 enemy.update(dt: dt, target: frog.position)
@@ -3824,6 +3843,8 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         updateWaterLines(dt: dt) // Update water line positions for movement effect
         updateWaterShimmers() // Update shimmer particles for enhanced water dynamics
         updateShores() // Update shore segments to follow camera
+        //updateMoonlightPosition(currentTime) // Update moonlight spotlight for night/space
+        updateBackgroundRenderers(currentTime) // Update space and desert backgrounds
         updateRaceState(dt: dt)
         updateDrowningGracePeriod(dt: dt)
         
@@ -3852,8 +3873,6 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         }
         previousSuperJumpState = currentSuperJumpState
         
-        updateMoonlightPosition()
-        updateSpaceGlowPosition()
         updateCamera()
        // updateParallaxPlants()  // Update parallax plant positions
         
@@ -4021,7 +4040,11 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             let normalizedPush = CGVector(dx: pushDx / distance, dy: pushDy / distance)
             // Add velocity to the pad. This will be handled in Pad.update()
             pad.velocity.dx += normalizedPush.dx * pushStrength
-            pad.velocity.dy += normalizedPush.dy * pushStrength
+            // FIX: Only push pads forward (positive Y), never backwards
+            // This prevents pads from being pushed back toward the frog in race mode
+            if normalizedPush.dy > 0 {
+                pad.velocity.dy += normalizedPush.dy * pushStrength
+            }
         } else {
             // If somehow they are at the exact same spot, push upwards.
             pad.velocity.dy += pushStrength
@@ -4102,8 +4125,12 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
                     let showGameOver = SKAction.run { [weak self] in
                         guard let self = self else { return }
                         self.reportChallengeProgress()
-                        self.restoreUnusedPackItems()
-                        self.coordinator?.gameDidEnd(score: self.score, coins: coinsWon, raceResult: self.raceResult)
+                        // Defer item restoration to avoid mutating collections during enumeration
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self = self else { return }
+                            self.restoreUnusedPackItems()
+                            self.coordinator?.gameDidEnd(score: self.score, coins: coinsWon, raceResult: self.raceResult)
+                        }
                     }
                     self.run(SKAction.sequence([delay, showGameOver]))
                 }
@@ -4119,8 +4146,12 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         let showGameOver = SKAction.run { [weak self] in
             guard let self = self else { return }
             self.reportChallengeProgress()
-            self.restoreUnusedPackItems()
-            self.coordinator?.gameDidEnd(score: self.score, coins: coinsWon, raceResult: self.raceResult)
+            // Defer item restoration to avoid mutating collections during enumeration
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.restoreUnusedPackItems()
+                self.coordinator?.gameDidEnd(score: self.score, coins: coinsWon, raceResult: self.raceResult)
+            }
         }
         run(SKAction.sequence([delay, showGameOver]))
     }
@@ -4254,35 +4285,49 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
 
     private func setWeather(_ type: WeatherType, duration: TimeInterval) {
         let oldWeather = self.currentWeather
-        // Force instant transitions for space weather
         var actualDuration = duration
+        
         if type == .space || oldWeather == .space {
             actualDuration = 0.0
         }
         
-        // No change if weather is the same, unless it's an instant setup (duration 0)
+        // Allow gradual night transitions in normal play mode
+        // Only force instant transition in Daily Challenge mode
+        if (type == .night || oldWeather == .night) && currentChallenge != nil {
+            actualDuration = 0.0
+        }
+        
         if oldWeather == type && actualDuration > 0 { return }
-
-        // --- Game Logic ---
+        
+        // --- 1. Background ---
+        // --- FIX START: Force Frog Brightness in Space ---
+        if type == .space {
+            // Access the frog sprite (usually children of bodyNode)
+            frog.bodyNode.children.compactMap { $0 as? SKSpriteNode }.forEach { sprite in
+                sprite.color = .white
+                sprite.colorBlendFactor = 0.0
+                sprite.lightingBitMask = 0 // Ignore the spotlight darkness
+            }
+        }
+        
+        else {
+            removeSpaceBackgroundGlow()
+            if oldWeather == .space { backgroundColor = .clear }
+        }
+        
+        // --- 2. Game Logic ---
         if oldWeather == .rain {
             frog.isWearingBoots = false
             frog.isRainEffectActive = false
         }
-        
-        // Show rain tooltip early when leaving night weather to give player time to prepare
-        // This shows BEFORE the rain actually starts, during the transition
         if oldWeather == .night && type == .rain {
             ToolTips.showToolTip(forKey: "rain", in: self)
         }
         
-        // For rain transitions, delay the slippery mechanics to allow rain to visually fall first
         let rainSlipperyDelay: TimeInterval = (type == .rain && actualDuration > 0) ? 2.5 : 0
-        
         self.currentWeather = type
+        
         if type == .rain {
-            // Rain tooltip is now shown earlier (during night → rain transition)
-            
-            // If instant transition (duration 0), activate rain effect immediately
             if rainSlipperyDelay == 0 {
                 frog.isRainEffectActive = true
                 if frog.buffs.bootsCount > 0 {
@@ -4291,15 +4336,13 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
                     HapticsManager.shared.playNotification(.success)
                 }
             } else {
-                // Delay applying boots/slippery mechanics when transitioning to rain
                 let applyRainEffects = SKAction.sequence([
                     SKAction.wait(forDuration: rainSlipperyDelay),
                     SKAction.run { [weak self] in
-                        guard let self = self else { return }
-                        self.frog.isRainEffectActive = true
-                        if self.frog.buffs.bootsCount > 0 {
-                            self.frog.buffs.bootsCount -= 1
-                            self.frog.isWearingBoots = true
+                        self?.frog.isRainEffectActive = true
+                        if (self?.frog.buffs.bootsCount ?? 0) > 0 {
+                            self?.frog.buffs.bootsCount -= 1
+                            self?.frog.isWearingBoots = true
                             HapticsManager.shared.playNotification(.success)
                         }
                     }
@@ -4308,43 +4351,43 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             }
         }
         
-        // --- Clear old weather particles immediately when switching to desert ---
-        if type == .desert {
+        // Clear weather node for all weather types except when transitioning with a duration
+        // This ensures particles start fresh, especially important for daily challenges
+        if type == .desert || type == .space {
+            weatherNode.removeAllChildren()
+        } else if actualDuration == 0 {
+            // When there's no transition duration (instant weather change),
+            // always clear old particles to ensure new weather starts properly
             weatherNode.removeAllChildren()
         }
         
-        // --- Convert Incompatible Pads ---
-        // Transform pads that aren't allowed in the new weather (e.g., logs/ice pads in desert)
-        for pad in pads {
-            pad.convertToNormalIfIncompatible(weather: type)
-        }
-        
-        // --- Update Enemy Visuals ---
-        // Update enemy appearances for the new weather (e.g., bees become space bees, dragonflies become asteroids)
-        for enemy in enemies {
-            enemy.updateWeather(type)
-        }
-        
-        // --- Visual & Audio Transitions ---
-        VFXManager.shared.transitionWeather(from: oldWeather, to: type, in: self, duration: actualDuration)
-        
-        // MARK: - Moonlight Renderer Control
-        // Activate moonlight during night and rain scenes (both are dark), deactivate for all other weather
-        if type == .night || type == .rain {
-            moonlightRenderer?.activate(animated: true)
-            moonlightRenderer?.startPulseAnimation(duration: 3.0)
-        } else {
-            moonlightRenderer?.deactivate(animated: true)
-            moonlightRenderer?.stopPulseAnimation()
-        }
-        
-        // Handle leaf spawning based on weather change
-        if type == .sunny && oldWeather != .sunny {
+        // --- Leaf Management ---
+        // Start leaves only for sunny weather, stop for all others
+        if type == .sunny {
             startSpawningLeaves()
-        } else if type != .sunny && oldWeather == .sunny {
+        } else {
             stopSpawningLeaves()
         }
         
+        // --- 3. Update Elements ---
+        for pad in pads { pad.convertToNormalIfIncompatible(weather: type) }
+        for enemy in enemies { enemy.updateWeather(type) }
+        
+        
+        // --- ADD THIS BLOCK ---
+        // Force Frog to be bright in Space
+        if type == .space {
+            frog.bodyNode.children.compactMap { $0 as? SKSpriteNode }.forEach { sprite in
+                sprite.color = .white
+                sprite.colorBlendFactor = 0.0
+            }
+        }
+        
+        // --- 4. VFX & Audio ---
+        // CRITICAL FIX: When duration is 0 (instant transition), VFXManager may not properly initialize particles
+        // Force call transitionWeather with a small duration to ensure particle systems start
+        let vfxDuration = actualDuration == 0 ? 0.01 : actualDuration
+        VFXManager.shared.transitionWeather(from: oldWeather, to: type, in: self, duration: vfxDuration)
         let sfx: SoundManager.WeatherSFX? = switch type {
         case .rain: .rain
         case .winter: .winter
@@ -4352,103 +4395,184 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         case .sunny: nil
         case .desert: .desert
         case .space: .space
-                }
-        
-        if type == .space {
-            SoundManager.shared.stopMusic()
         }
-        
-        // Stop previous weather SFX before starting new one
-        // Always stop, regardless of duration (for instant transitions too)
-        SoundManager.shared.stopWeatherSFX(fadeDuration: actualDuration > 0 ? actualDuration : 0.0)
+        if type == .space { SoundManager.shared.stopMusic() }
+        SoundManager.shared.stopWeatherSFX(fadeDuration: actualDuration)
         SoundManager.shared.playWeatherSFX(sfx, fadeDuration: actualDuration)
         
-        // --- In-World Object Transitions ---
-        // CRITICAL FIX: Batch pad updates to prevent creating hundreds of sprites/actions at once
-        let batchSize = 10  // Process 10 pads at a time
-        let batchDelay: TimeInterval = 0.016  // ~1 frame delay between batches (60fps)
+        // --- 5. NO LIGHTING ENGINE - Everything stays bright! ---
+        // All entities (frog, enemies, pads) are always bright and visible
+        // Space weather renders normally like other scenes
         
-        for (batchIndex, batch) in stride(from: 0, to: pads.count, by: batchSize).enumerated() {
-            let endIndex = min(batch + batchSize, pads.count)
-            let padBatch = Array(pads[batch..<endIndex])
+        // CRITICAL: Remove any SKLightNode instances from the scene EXCEPT for moonlight
+        // This ensures no lighting effects darken the scene, but preserves the moonlight spotlight
+        // NOTE: Skip this cleanup for night/space weather where moonlight is intentionally used
+        
+        
+        // Lighting is disabled (all SKLightNode removed), so nodes render at full brightness
+        // No need to modify lightingBitMask - default behavior is correct
+        
+        // Update pads in batches for performance
+        let batchSize = 10
+        for (i, batch) in stride(from: 0, to: pads.count, by: batchSize).enumerated() {
+            let end = min(batch + batchSize, pads.count)
+            let group = Array(pads[batch..<end])
             
-            let delay = batchDelay * Double(batchIndex)
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                for pad in padBatch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + (0.016 * Double(i))) {
+                for pad in group {
                     pad.updateColor(weather: type, duration: actualDuration)
+                    
+                    // FIX: Reset Color Tint (White) for space weather
+                    // Lighting is disabled globally, so no need to modify lightingBitMask
+                    if type == .space {
+                        pad.children.compactMap { $0 as? SKSpriteNode }.forEach { sprite in
+                            sprite.color = .white
+                            sprite.colorBlendFactor = 0.0
+                        }
+                    }
                 }
             }
         }
-
-        // Update water background with new gradient
-        transitionWaterBackground(to: type, duration: actualDuration)
         
-        // Handle water stars for night mode
-        if type == .night {
+        // --- 6. Water & Environment ---
+        transitionWaterBackground(to: type, duration: actualDuration)
+        // Show stars for both night and space weather
+        if type == .night || type == .space {
             createWaterStars()
-        } else if oldWeather == .night {
+        } else if oldWeather == .night || oldWeather == .space {
             removeWaterStars()
         }
         
-        // Handle water lines - hide in desert/space, show in water biomes
         if type == .desert || type == .space {
-            removeWaterLines()
-            removeWaterShimmers()  // Also remove shimmers
-            removeShores()  // Also hide shores in desert/space
-        } else if (oldWeather == .desert || oldWeather == .space) && (type != .desert && type != .space) {
-            restoreWaterLines()
-            restoreWaterShimmers()  // Restore shimmers
-            restoreShores()  // Restore shores when returning to water biomes
-        } else {
-            // No water line changes needed
-        }
-
-        // Handle moonlight visibility with a fade for smooth transitions.
-        if let moon = moonlightNode {
-            // Show moonlight during both night and rain scenes (both are dark)
-            if type == .night || type == .rain {
-                moon.isHidden = false
-                if actualDuration > 0 {
-                    moon.run(SKAction.fadeAlpha(to: 1.0, duration: actualDuration))
-                } else {
-                    moon.alpha = 1.0
-                }
-            } else if oldWeather == .night || oldWeather == .rain {
-                if actualDuration > 0 {
-                    // Hide after fade out to stop processing it.
-                    let fadeOut = SKAction.fadeAlpha(to: 0.0, duration: actualDuration)
-                    let hide = SKAction.run { moon.isHidden = true }
-                    moon.run(SKAction.sequence([fadeOut, hide]))
-                } else {
-                    moon.alpha = 0.0
-                    moon.isHidden = true
-                }
-            }
+            removeWaterLines(); removeWaterShimmers(); removeShores()
+        } else if (oldWeather == .desert || oldWeather == .space) {
+            restoreWaterLines(); restoreWaterShimmers(); restoreShores()
         }
         
-        // Handle space glow visibility
-        if let spaceGlow = spaceGlowNode {
-            if type == .space {
-                spaceGlow.isHidden = false
-                if actualDuration > 0 {
-                    spaceGlow.run(SKAction.fadeAlpha(to: 1.0, duration: actualDuration))
-                } else {
-                    spaceGlow.alpha = 1.0
-                }
-            } else if oldWeather == .space {
-                if actualDuration > 0 {
-                    let fadeOut = SKAction.fadeAlpha(to: 0.0, duration: actualDuration)
-                    let hide = SKAction.run { spaceGlow.isHidden = true }
-                    spaceGlow.run(SKAction.sequence([fadeOut, hide]))
-                } else {
-                    spaceGlow.alpha = 0.0
-                    spaceGlow.isHidden = true
-                }
-            }
+        // --- 7. Moonlight Effects (Night & Space) ---
+        print ("Skipping moonlight")
+        //handleMoonlightTransition(from: oldWeather, to: type, animated: actualDuration > 0)
+        
+        // --- 8. Background Renderers (Space & Desert) ---
+        handleBackgroundTransition(from: oldWeather, to: type, animated: actualDuration > 0)
+    }
+    
+    // MARK: - Background Renderer Management
+    
+    /// Handles activation/deactivation of background renderers during weather transitions
+    private func handleBackgroundTransition(from oldWeather: WeatherType, to newWeather: WeatherType, animated: Bool) {
+        // Handle space background
+        if newWeather == .space {
+            spaceBackground?.activate(animated: animated)
+        } else if oldWeather == .space {
+            spaceBackground?.deactivate(animated: animated)
+        }
+        
+        // Handle desert background
+        if newWeather == .desert {
+            desertBackground?.activate(animated: animated)
+            restoreDesertSkeletons()
+        } else if oldWeather == .desert {
+            desertBackground?.deactivate(animated: animated)
+            removeDesertSkeletons()
         }
     }
     
-    // MARK: - Desert Cutscene
+    // MARK: - Moonlight Management
+    
+   
+        
+    /// Handles activation/deactivation of moonlight effects during weather transitions
+        // Change the signature to accept 'animated: Bool'
+    // [In GameScene.swift]
+
+        /// Handles activation/deactivation of moonlight effects during weather transitions
+        private func handleMoonlightTransition(from oldWeather: WeatherType, to newWeather: WeatherType, animated: Bool = false) {
+            let needsMoonlight = (newWeather == .night || newWeather == .space)
+            
+            if needsMoonlight {
+                // We need moonlight. Check if we need to create it or switch types.
+                
+                // 1. If renderer doesn't exist, create it.
+                if moonlightRenderer == nil {
+                    createRenderer(for: newWeather)
+                }
+                // 2. If we are switching types (Night <-> Space), recreate it.
+                else if oldWeather != newWeather {
+                    moonlightRenderer?.cleanup()
+                    createRenderer(for: newWeather)
+                }
+                // 3. If the renderer's light node was removed from the scene (e.g. by startGame), recreate it.
+                else if let renderer = moonlightRenderer, renderer.lightNode.parent == nil {
+                    // The renderer object exists but its nodes were removed from the scene.
+                    // We must cleanup and recreate to re-add nodes to the scene.
+                    renderer.cleanup()
+                    createRenderer(for: newWeather)
+                }
+                
+                // Always activate. If it's already active, this does nothing (safe).
+                moonlightRenderer?.activate(animated: animated)
+                
+            } else {
+                // We don't need moonlight. Deactivate if it exists.
+                moonlightRenderer?.deactivate(animated: animated)
+            }
+        }
+        
+        /// Helper to create the correct renderer type
+        private func createRenderer(for weather: WeatherType) {
+            if weather == .night {
+                moonlightRenderer = MoonlightRenderer.createOptimized(
+                    for: worldNode,
+                    target: frog,
+                    camera: cam,
+                    colorScheme: .moonlight
+                )
+            } else { // .space
+                moonlightRenderer = MoonlightRenderer.createSpaceSpotlight(
+                    for: worldNode,
+                    target: frog,
+                    camera: cam
+                )
+            }
+        }
+    
+    // MARK: - Space Visuals
+        
+    private func addSpaceBackgroundGlow() {
+            if worldNode.childNode(withName: "spaceGlow") != nil { return }
+            
+            let size = CGSize(width: 2000, height: 2000)
+            
+            // FIXED: Increased alpha from 0.1 to 0.5 for a visible glow
+            let texture = createRadialGradientTexture(size: size, color: UIColor(red: 0.4, green: 0.6, blue: 1.0, alpha: 0.5))
+            
+            let glowNode = SKSpriteNode(texture: texture)
+            glowNode.name = "spaceGlow"
+            
+            // Keep zPosition at -50 so it sits ON TOP of the water (-100) but below pads (10)
+            glowNode.zPosition = -50
+            glowNode.blendMode = .add
+            
+            cam.addChild(glowNode)
+        }
+        private func removeSpaceBackgroundGlow() {
+            cam.childNode(withName: "spaceGlow")?.removeFromParent()
+        }
+        
+        private func createRadialGradientTexture(size: CGSize, color: UIColor) -> SKTexture {
+            let renderer = UIGraphicsImageRenderer(size: size)
+            let img = renderer.image { ctx in
+                let c = ctx.cgContext
+                let center = CGPoint(x: size.width/2, y: size.height/2)
+                let colors = [color.cgColor, UIColor.clear.cgColor] as CFArray
+                let locations: [CGFloat] = [0.0, 1.0]
+                if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: locations) {
+                    c.drawRadialGradient(grad, startCenter: center, startRadius: 0, endCenter: center, endRadius: size.width/2, options: [])
+                }
+            }
+            return SKTexture(image: img)
+        }
     
     private func checkPendingDesertTransition() {
         // Start the desert cutscene only if the transition is pending
@@ -4567,13 +4691,9 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     private func fadeToBlackAndTransitionToSpace() {
         // Instant transition to space - no fade to black
         transitionToSpace()
-        
-        // Ensure space glow is visible and at full brightness
-        if let spaceGlow = self.spaceGlowNode {
-            spaceGlow.isHidden = false
-            spaceGlow.alpha = 1.0
-        }
     }
+    
+
     
     private func transitionToSpace() {
         
@@ -4585,15 +4705,6 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         
         // Set the weather to space - INSTANT transition (duration: 0)
         setWeather(.space, duration: 0.0)
-        
-        // The space glow is already created and managed by setWeather()
-        // Just ensure its position is updated immediately
-        if let spaceGlow = spaceGlowNode {
-            spaceGlow.position = CGPoint(
-                x: cam.position.x * 0.85,
-                y: cam.position.y * 0.85
-            )
-        }
         
         // Instantly update all existing pads to space appearance
         for pad in pads {
@@ -4738,8 +4849,23 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     
     private func resetToDay() {
         
-        // 1. Change weather to sunny
-        setWeather(.sunny, duration: 0.0)
+        // 0. CRITICAL: Clear texture cache to prevent using stale space textures
+        cachedWaterTextures.removeAll()
+        
+        // 1. Change weather - respect Daily Challenge climate if active
+        let targetWeather: WeatherType
+        if let challenge = currentChallenge {
+            // Daily Challenge: return to the challenge's locked climate
+            targetWeather = challenge.climate
+        } else {
+            // Normal game: return to sunny
+            targetWeather = .sunny
+        }
+        setWeather(targetWeather, duration: 0.0)
+        
+        // 1.5. CRITICAL: Recreate water background to ensure fresh texture after space
+        // This prevents any lingering space artifacts or cache issues
+        recreateWaterBackground()
         
         // 2. Clear all existing entities except frog
         // Remove all pads
@@ -4785,7 +4911,7 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             position: CGPoint(x: Configuration.Dimensions.riverWidth / 2, y: startPadY),
             radius: 60
         )
-        startPad.updateColor(weather: .sunny)
+        startPad.updateColor(weather: targetWeather)
         worldNode.addChild(startPad)
         pads.append(startPad)
         
@@ -4795,6 +4921,7 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         frog.velocity = .zero
         frog.zVelocity = 0
         frog.onPad = startPad
+        frog.land(on: startPad, weather: targetWeather)
         
         // 5. Spawn new pads ahead (simple initial generation)
         var lastY = startPad.position.y
@@ -4807,7 +4934,7 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
                 position: CGPoint(x: padX, y: padY),
                 radius: Configuration.Dimensions.randomPadRadius()
             )
-            newPad.updateColor(weather: .sunny)
+            newPad.updateColor(weather: targetWeather)
             worldNode.addChild(newPad)
             pads.append(newPad)
             lastY = padY
@@ -4947,36 +5074,109 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         }
     }
     
-    private func updateMoonlightPosition() {
-        guard let moonlightNode = moonlightNode, !moonlightNode.isHidden else { return }
-        
-        // PERFORMANCE: Throttle moonlight updates to every 2 frames
-        if frameCount % 2 != 0 { return }
-        
-        // Create a parallax effect by moving the light source slower than the camera.
-        // This gives the illusion of a distant moon.
-        // A slight horizontal offset suggests the moon is off to one side.
-        let parallaxFactor: CGFloat = 0.9
-        let horizontalOffset: CGFloat = 200
-        moonlightNode.position = CGPoint(
-            x: cam.position.x * parallaxFactor + horizontalOffset,
-            y: cam.position.y * parallaxFactor
-        )
+    /// Updates the moonlight renderer position (called from update loop)
+    private func updateMoonlightPosition(_ currentTime: TimeInterval) {
+        moonlightRenderer?.update(currentTime)
     }
     
-    private func updateSpaceGlowPosition() {
-        guard let spaceGlowNode = spaceGlowNode, !spaceGlowNode.isHidden else { return }
+    /// Updates the background renderers (space and desert)
+    private func updateBackgroundRenderers(_ currentTime: TimeInterval) {
+        spaceBackground?.update(currentTime)
+        desertBackground?.update(currentTime)
         
-        // PERFORMANCE: Throttle space glow updates to every 2 frames
-        if frameCount % 2 != 0 { return }
-        
-        // Similar parallax effect for space glow, but even slower for a distant nebula feel
-        let parallaxFactor: CGFloat = 0.85
-        spaceGlowNode.position = CGPoint(
-            x: cam.position.x * parallaxFactor,
-            y: cam.position.y * parallaxFactor
-        )
+        // Update desert skeletons if in desert weather
+        if currentWeather == .desert {
+            updateDesertSkeletons()
+        }
     }
+    
+    // MARK: - Desert Skeleton System
+    
+    /// Updates desert skeleton decorations to follow camera movement
+    private func updateDesertSkeletons() {
+        let camY = cam.position.y
+        let viewHeight = size.height
+        
+        // Spawn new skeletons as camera moves up
+        if camY > lastSkeletonSpawnY + skeletonSpawnInterval {
+            spawnDesertSkeleton(atY: camY + viewHeight * 0.6)
+            lastSkeletonSpawnY = camY
+        }
+        
+        // Clean up skeletons that are far below the camera
+        let cleanupThreshold = camY - viewHeight * 1.5
+        desertSkeletons.removeAll { skeleton in
+            if skeleton.position.y < cleanupThreshold {
+                skeleton.removeFromParent()
+                return true
+            }
+            return false
+        }
+    }
+    
+    /// Spawns a random skeleton decoration on the desert sand
+    private func spawnDesertSkeleton(atY y: CGFloat) {
+        // Randomly choose between frog skeleton, bee skeleton, and snake skeleton
+        let skeletonType = ["frogskeleton", "beeskeleton", "snakeskeleton"].randomElement()!
+        
+        // Create the skeleton sprite
+        let skeleton = SKSpriteNode(imageNamed: skeletonType)
+        
+        // Random size variation for visual interest
+        let scale = CGFloat.random(in: 0.2...0.5)
+        skeleton.setScale(scale)
+        
+        // Random horizontal position across the sand (avoiding the river and lily pads)
+        // River width is defined in Configuration.Dimensions.riverWidth (typically around 600)
+        // We need to check where the river edges are to avoid lily pad areas
+        let riverWidth = Configuration.Dimensions.riverWidth
+        let riverLeftEdge: CGFloat = 0
+        let riverRightEdge = riverWidth
+        
+        // Calculate safe zones for skeleton placement (on the sand, not in/near the river)
+        // Add extra margin to ensure we're clearly on the sand, not near lily pads
+        let safeMargin: CGFloat = 25
+        
+        let isLeftSide = Bool.random()
+        let xPosition: CGFloat
+        
+        if isLeftSide {
+            // Left side of the river (on the left sand)
+            // Place well to the left of the river
+            xPosition = CGFloat.random(in: (riverLeftEdge - 200)...(riverLeftEdge - safeMargin))
+        } else {
+            // Right side of the river (on the right sand)
+            // Place well to the right of the river
+            xPosition = CGFloat.random(in: (riverRightEdge + safeMargin)...(riverRightEdge + 200))
+        }
+        
+        skeleton.position = CGPoint(x: xPosition, y: y)
+        
+        // Random rotation for natural placement
+        skeleton.zRotation = CGFloat.random(in: -0.3...0.3)
+        
+        // Semi-transparent for desert aesthetic
+        skeleton.alpha = CGFloat.random(in: 0.4...0.7)
+        
+        // Add to the scene
+        desertSkeletonNode.addChild(skeleton)
+        desertSkeletons.append(skeleton)
+    }
+    
+    /// Removes all desert skeletons from the scene
+    private func removeDesertSkeletons() {
+        desertSkeletons.forEach { $0.removeFromParent() }
+        desertSkeletons.removeAll()
+        lastSkeletonSpawnY = 0
+    }
+    
+    /// Restores desert skeletons when entering desert weather
+    private func restoreDesertSkeletons() {
+        guard desertSkeletons.isEmpty else { return }
+        lastSkeletonSpawnY = frog.position.y - 500 // Start spawning from current position
+    }
+    
+    
     private func cleanupOffscreenEntities() {
         // CRITICAL PERFORMANCE FIX: Enforce maximum entity counts
         // Prevents unbounded array growth that kills frame rate
@@ -5117,7 +5317,8 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             launchPadY = newY
         }
         // Check if we should spawn the warp pad (end of space, return to day)
-        else if currentWeather == .space && !hasSpawnedWarpPad && scoreVal >= Configuration.GameRules.warpPadSpawnScore {
+        // CRITICAL: Don't spawn warp pad in Daily Challenges - weather is locked!
+        else if currentWeather == .space && !hasSpawnedWarpPad && scoreVal >= Configuration.GameRules.warpPadSpawnScore && currentChallenge == nil {
             type = .warp
             hasSpawnedWarpPad = true
             
@@ -5164,23 +5365,32 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             }
             
             if scoreVal > 150 && Double.random(in: 0...1) < 0.15 { type = .waterLily }
-            if currentWeather == .night && Double.random(in: 0...1) < 0.15 { type = .grave }
+            
+            // GRAVE PAD SPAWNING
+            if currentWeather == .night && Double.random(in: 0...1) < 0.15 { 
+                type = .grave 
+            }
             
             // Shrinking pads - apply in both challenge and normal mode
             if let challenge = currentChallenge {
                 if challenge.focusPadTypes.contains(.shrinking) {
                     let shrinkProb = DailyChallenges.shared.getPadSpawnProbability(for: .shrinking, in: challenge)
-                    if Double.random(in: 0...1) < shrinkProb && type != .moving && type != .ice {
+                    // Don't override graves, moving pads, or ice pads
+                    if Double.random(in: 0...1) < shrinkProb && type != .moving && type != .ice && type != .grave {
                         type = .shrinking
                     }
                 }
             } else {
                 let shrinkingChance = Configuration.Difficulty.shrinkingProbability(forLevel: difficultyLevel)
-                if Double.random(in: 0...1) < shrinkingChance { type = .shrinking }
+                // Don't override graves with shrinking pads!
+                if Double.random(in: 0...1) < shrinkingChance && type != .grave { 
+                    type = .shrinking 
+                }
             }
         }
         
         let pad = Pad(type: type, position: CGPoint(x: newX, y: newY), radius: newPadRadius)
+        
         pad.updateColor(weather: currentWeather)
         worldNode.addChild(pad)
         pads.append(pad)
@@ -5194,7 +5404,29 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         // Only spawn if: score >= 2500 and we haven't reached max crocodiles this run
         let canSpawnCrocodile = scoreVal >= Configuration.Difficulty.crocodileMinScore &&
                                 crocodilesSpawnedThisRun < Configuration.Difficulty.crocodileMaxPerRun
-        if type == .waterLily && currentWeather != .space && canSpawnCrocodile && Double.random(in: 0...1) < Configuration.Difficulty.crocodileSpawnProbability(for: currentWeather) {
+        
+        // Calculate crocodile spawn probability
+        let crocodileProb: Double
+        if let challenge = currentChallenge {
+            // Daily challenge mode - check if crocodiles are in focus
+            if challenge.focusEnemyTypes.contains(.crocodile) {
+                let distanceMeters = scoreVal / 10
+                crocodileProb = DailyChallenges.shared.getEnemySpawnProbability(for: challenge, distance: distanceMeters) * 0.4 // Lower than enemy spawn rate since crocodiles are more dangerous
+            } else if challenge.focusEnemyTypes.contains(.mixed) {
+                crocodileProb = Configuration.Difficulty.crocodileSpawnProbability(for: currentWeather)
+            } else {
+                crocodileProb = 0 // Crocodiles not in focus for this challenge
+            }
+        } else {
+            // Normal mode - use difficulty scaling
+            crocodileProb = Configuration.Difficulty.crocodileSpawnProbability(for: currentWeather)
+        }
+        
+        // Check weather conditions
+        let weatherAllowsCrocodiles = currentWeather != .space
+        let challengeOverridesWeather = currentChallenge?.focusEnemyTypes.contains(.crocodile) ?? false
+        
+        if type == .waterLily && (weatherAllowsCrocodiles || challengeOverridesWeather) && canSpawnCrocodile && Double.random(in: 0...1) < crocodileProb {
             // Find a valid spawn position in the water (not overlapping any pads/logs)
             if let crocPosition = findCrocodileSpawnPosition(nearY: newY) {
                 // Random delay before rising (1-4 seconds)
@@ -5216,12 +5448,29 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         
         // MARK: - Log Spawning with Collision Detection
         // Logs spawn based on difficulty and move horizontally across the river.
-        // Three safety checks ensure logs don't collide with lilypads:
-        // 1. Don't overlap with the newly spawned pad at this position
-        // 2. Horizontal path must be clear of ALL lilypads at this Y level
-        // 3. Y position must be far enough from other logs/moving pads
-        let logChance = Configuration.Difficulty.logProbability(forLevel: difficultyLevel)
-        if currentWeather != .desert && logChance > 0 && Double.random(in: 0...1) < logChance {
+        // SIMPLIFIED: Just check basic overlap with the current pad
+        let logChance: Double
+        if let challenge = currentChallenge {
+            // Daily challenge mode - check if crocodiles (logs) are in focus
+            // Note: The EnemyFocusType uses "crocodile" but logs are the obstacle
+            if challenge.focusEnemyTypes.contains(.crocodile) {
+                let distanceMeters = scoreVal / 10
+                logChance = DailyChallenges.shared.getEnemySpawnProbability(for: challenge, distance: distanceMeters) * 0.6 // Slightly lower than enemy spawn rate
+            } else if challenge.focusEnemyTypes.contains(.mixed) {
+                logChance = Configuration.Difficulty.logProbability(forLevel: difficultyLevel)
+            } else {
+                logChance = 0 // Logs not in focus for this challenge
+            }
+        } else {
+            // Normal mode - use difficulty scaling
+            logChance = Configuration.Difficulty.logProbability(forLevel: difficultyLevel)
+        }
+        
+        // Check weather conditions - logs don't spawn in desert/space unless it's a challenge override
+        let weatherAllowsLogs = currentWeather != .desert && currentWeather != .space
+        // Reuse challengeOverridesWeather from crocodile section above
+        
+        if (weatherAllowsLogs || challengeOverridesWeather) && logChance > 0 && Double.random(in: 0...1) < logChance {
             let logX = CGFloat.random(in: 100...500)
             let proposedLogPosition = CGPoint(x: logX, y: newY)
             
@@ -5229,31 +5478,58 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             let minLogDistance = 60.0 + pad.scaledRadius + Configuration.Dimensions.padSpacing
             let doesntOverlapNewPad = abs(logX - newX) > minLogDistance
             
-            // CHECK 2: Ensure log's horizontal path is clear of existing lilypads
-            // (Logs move left-right, so any lilypad at this Y level would cause collision)
-            let pathIsClear = Pad.isLogPathClear(at: proposedLogPosition, existingPads: pads)
+            // CHECK 2: Make sure we're not too close vertically to other logs (avoid clusters)
+            var tooCloseToOtherLog = false
+            for existingPad in pads where existingPad.type == .log {
+                let dy = abs(existingPad.position.y - newY)
+                if dy < 100 { // Just 100 pixels vertical spacing between logs
+                    tooCloseToOtherLog = true
+                    break
+                }
+            }
             
-            // CHECK 3: Ensure Y position is safe from other moving elements
-            let yPositionIsSafe = Pad.isYPositionSafeForLog(newY, existingPads: pads)
-            
-            if doesntOverlapNewPad && pathIsClear && yPositionIsSafe {
+            if doesntOverlapNewPad && !tooCloseToOtherLog {
                 let log = Pad(type: .log, position: proposedLogPosition)
                 worldNode.addChild(log)
                 pads.append(log)
+                #if DEBUG
+                print("✅ LOG SPAWNED at Y: \(newY), X: \(logX), chance was: \(logChance)")
+                print("   Log count in pads array: \(pads.filter { $0.type == .log }.count)")
+                print("   Log zPosition: \(log.zPosition), parent: \(log.parent?.name ?? "nil")")
+                print("   Log alpha: \(log.alpha), isHidden: \(log.isHidden)")
+                #endif
             } else {
-                // Debug: Log why spawn was rejected (helpful for tuning difficulty)
-                // Log spawn rejected
+                #if DEBUG
+                if !doesntOverlapNewPad {
+                    print("❌ Log rejected: too close to current pad (distance: \(abs(logX - newX)))")
+                }
+                if tooCloseToOtherLog {
+                    print("❌ Log rejected: too close to another log")
+                }
+                #endif
             }
         }
         
         // Snake spawning based on difficulty (mirrors log spawning logic)
-        let snakeChance = Configuration.Difficulty.snakeProbability(forScore: scoreVal, weather: currentWeather)
+        let snakeChance: Double
+        if let challenge = currentChallenge {
+            // Daily challenge mode - check if snakes are in focus
+            if challenge.focusEnemyTypes.contains(.snake) {
+                let distanceMeters = scoreVal / 10
+                snakeChance = DailyChallenges.shared.getEnemySpawnProbability(for: challenge, distance: distanceMeters)
+            } else if challenge.focusEnemyTypes.contains(.mixed) {
+                snakeChance = Configuration.Difficulty.snakeProbability(forScore: scoreVal, weather: currentWeather)
+            } else {
+                snakeChance = 0 // Snake not in focus for this challenge
+            }
+        } else {
+            // Normal mode - use difficulty scaling
+            snakeChance = Configuration.Difficulty.snakeProbability(forScore: scoreVal, weather: currentWeather)
+        }
+        
         let activeSnakesCount = snakes.filter { !$0.isDestroyed }.count
         
-        // DEBUG MODE: Force higher spawn rate for testing (remove this for production)
-        let debugSnakeChance = max(snakeChance, scoreVal >= 2400 ? 0.8 : 0.0)  // 80% chance when score >= 2400
-        
-        if debugSnakeChance > 0 && Double.random(in: 0...1) < debugSnakeChance && activeSnakesCount < Configuration.Difficulty.snakeMaxOnScreen {
+        if snakeChance > 0 && Double.random(in: 0...1) < snakeChance && activeSnakesCount < Configuration.Difficulty.snakeMaxOnScreen {
             // IMPORTANT: Spawn snake closer to the camera, not at the edge of generation
             // Snakes move horizontally and need to be visible for ~3-4 seconds to cross the screen
             // So spawn them within the visible range, not at the far edge where pads generate
@@ -5296,14 +5572,30 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         }
         
         // Cactus spawning (Desert Only) - stationary hazards on lily pad centers
-        let cactusProb = Configuration.Difficulty.cactusProbability(forScore: scoreVal, weather: currentWeather)
+        let cactusProb: Double
+        if let challenge = currentChallenge {
+            // Daily challenge mode - check if cactus should spawn
+            // Note: Cactus doesn't have its own EnemyFocusType, but spawns in desert challenges
+            // or when the challenge climate is desert
+            if challenge.climate == .desert {
+                let distanceMeters = scoreVal / 10
+                cactusProb = DailyChallenges.shared.getEnemySpawnProbability(for: challenge, distance: distanceMeters) * 0.5 // Half the enemy spawn rate
+            } else if challenge.focusEnemyTypes.contains(.mixed) {
+                cactusProb = Configuration.Difficulty.cactusProbability(forScore: scoreVal, weather: currentWeather)
+            } else {
+                cactusProb = 0 // No cacti in non-desert challenges unless mixed
+            }
+        } else {
+            // Normal mode - use difficulty scaling
+            cactusProb = Configuration.Difficulty.cactusProbability(forScore: scoreVal, weather: currentWeather)
+        }
         
         // Cacti can spawn on normal, moving, and water lily pads in the desert
         // They should NOT spawn on shrinking pads, graves, logs, ice, or special pads
         // Check BOTH the score threshold AND weather to handle the desert cutscene transition
         let isInDesertScore = scoreVal >= Configuration.Weather.desertStart && scoreVal < Configuration.Weather.spaceStart
         let canSpawnCactus = (type == .normal || type == .moving || type == .waterLily) && 
-                             (currentWeather == .desert || isInDesertScore)
+                             (currentWeather == .desert || isInDesertScore || ((currentChallenge?.climate == .desert) ?? false))
         
         if canSpawnCactus && cactusProb > 0 && Double.random(in: 0...1) < cactusProb {
             // Spawn cactus at the center of the pad (position relative to pad is 0,0)
@@ -5536,8 +5828,9 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
                 // Real-time combo challenge tracking
                 ChallengeManager.shared.recordComboStreak(comboCount)
                 
-                // MARK: - Activate Combo Invincibility Mode at 25+ combo
-                if comboCount >= 25 && !frog.isComboInvincible {
+                // MARK: - Activate Combo Invincibility Mode at 25+ combo (or 15+ with Combo Boost)
+                let comboThreshold = PersistenceManager.shared.hasComboBoost ? 15 : 25
+                if comboCount >= comboThreshold && !frog.isComboInvincible {
                     frog.isComboInvincible = true
                     // Play special sound and haptic feedback
                     SoundManager.shared.play("powerup")
@@ -5603,7 +5896,7 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
                 SoundManager.shared.play("ghost")
                 HapticsManager.shared.playNotification(.warning)
                 
-                let ghost = Enemy(position: CGPoint(x: pad.position.x, y: pad.position.y + 40), type: "GHOST")
+                let ghost = Enemy(position: CGPoint(x: pad.position.x, y: pad.position.y + 40), type: "GHOST", weather: self.currentWeather)
                 self.worldNode.addChild(ghost)
                 self.enemies.append(ghost)
             }
@@ -5638,7 +5931,8 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         // Instant game over in desert, regardless of vests
         if currentWeather == .desert {
             isGameEnding = true
-            frog.playWailingAnimation()
+            frog.playWailingAnimation(isDesert: true)
+            SoundManager.shared.play("frogFall")
             playDrowningSequence()
             return
         }
@@ -5759,17 +6053,23 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         frog.zHeight = 0
         frog.isFloating = false // Stop floating to allow sinking animation
         
-        // Create expanding water ripples at the splash point
-        spawnDrowningRipples()  // Ripples now parent to frog
+        // Check if we're in desert weather
+        let isDesert = currentWeather == .desert
         
-        // Create water splash particles going upward
-        spawnDrowningSplash(at: frog.position)
+        // Only spawn ripples and splash effects if NOT in desert
+        if !isDesert {
+            // Create expanding water ripples at the splash point
+            spawnDrowningRipples()  // Ripples now parent to frog
+            
+            // Create water splash particles going upward
+            spawnDrowningSplash(at: frog.position)
+        }
         
         // Stop weather sound effects
         SoundManager.shared.stopWeatherSFX(fadeDuration: 0.5)
         
         // Play the frog's drowning animation (sinks and disappears)
-        frog.playDrowningAnimation { [weak self] in
+        frog.playDrowningAnimation(isDesert: isDesert) { [weak self] in
             guard let self = self else { return }
             
             // Small delay after frog disappears before showing game over
@@ -5780,8 +6080,12 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
                 if self.gameMode == .beatTheBoat && self.raceResult == nil {
                     self.raceResult = .lose(reason: .drowned)
                 }
-                self.restoreUnusedPackItems()
-                self.coordinator?.gameDidEnd(score: self.score, coins: self.coinsCollectedThisRun, raceResult: self.raceResult)
+                // Defer item restoration to avoid mutating collections during enumeration
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.restoreUnusedPackItems()
+                    self.coordinator?.gameDidEnd(score: self.score, coins: self.coinsCollectedThisRun, raceResult: self.raceResult)
+                }
             }
             self.run(SKAction.sequence([delay, showGameOver]))
         }
@@ -5839,8 +6143,12 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
                     if self.gameMode == .beatTheBoat && self.raceResult == nil {
                         self.raceResult = .lose(reason: .drowned)
                     }
-                    self.restoreUnusedPackItems()
-                    self.coordinator?.gameDidEnd(score: self.score, coins: self.coinsCollectedThisRun, raceResult: self.raceResult)
+                    // Defer item restoration to avoid mutating collections during enumeration
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self else { return }
+                        self.restoreUnusedPackItems()
+                        self.coordinator?.gameDidEnd(score: self.score, coins: self.coinsCollectedThisRun, raceResult: self.raceResult)
+                    }
                 }
                 self.run(SKAction.sequence([delay, showGameOver]))
             }
@@ -5896,6 +6204,60 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         let remove = SKAction.removeFromParent()
         
         enemy.run(SKAction.sequence([flyAway, remove]))
+    }
+    
+    /// Creates a performant burst animation when enemies are destroyed by invincibility
+    /// This provides visual feedback that invincibility is active
+    private func createInvincibilityBurst(at position: CGPoint) {
+        // Create a simple expanding ring effect with particles
+        let particleCount = 8
+        let burstRadius: CGFloat = 60
+        let burstDuration: TimeInterval = 0.3
+        
+        // Create radial burst particles
+        for i in 0..<particleCount {
+            let angle = (CGFloat(i) / CGFloat(particleCount)) * .pi * 2
+            let particle = SKShapeNode(circleOfRadius: 4)
+            particle.fillColor = UIColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 1.0) // Light blue for invincibility
+            particle.strokeColor = .white
+            particle.lineWidth = 1
+            particle.position = position
+            particle.zPosition = Layer.frog + 1
+            worldNode.addChild(particle)
+            
+            // Calculate end position
+            let endX = position.x + cos(angle) * burstRadius
+            let endY = position.y + sin(angle) * burstRadius
+            
+            // Animate particle outward with fade
+            let move = SKAction.move(to: CGPoint(x: endX, y: endY), duration: burstDuration)
+            let fadeOut = SKAction.fadeOut(withDuration: burstDuration)
+            let scale = SKAction.scale(to: 0.5, duration: burstDuration)
+            let remove = SKAction.removeFromParent()
+            
+            particle.run(SKAction.sequence([
+                SKAction.group([move, fadeOut, scale]),
+                remove
+            ]))
+        }
+        
+        // Add a quick flash ring for emphasis
+        let ring = SKShapeNode(circleOfRadius: 20)
+        ring.strokeColor = UIColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 0.8)
+        ring.lineWidth = 3
+        ring.fillColor = .clear
+        ring.position = position
+        ring.zPosition = Layer.frog + 1
+        worldNode.addChild(ring)
+        
+        let expand = SKAction.scale(to: 2.5, duration: 0.2)
+        let fade = SKAction.fadeOut(withDuration: 0.2)
+        let remove = SKAction.removeFromParent()
+        
+        ring.run(SKAction.sequence([
+            SKAction.group([expand, fade]),
+            remove
+        ]))
     }
     
     /// Creates expanding concentric ripples at the drowning location
@@ -6100,7 +6462,22 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             return  // IMPORTANT: Return here so frog doesn't take damage!
         }
         
-        if frog.isInvincible { return }
+        if frog.isInvincible {
+            // MARK: - Invincibility Burst Effect
+            // Destroy enemy with a visual burst to make invincibility more apparent
+            enemy.removeFromParent()
+            if let idx = enemies.firstIndex(of: enemy) { enemies.remove(at: idx) }
+            
+            // Create a simple, performant burst animation
+            createInvincibilityBurst(at: enemy.position)
+            
+            // Play feedback
+            HapticsManager.shared.playImpact(.light)
+            SoundManager.shared.play("hit")
+            ChallengeManager.shared.recordEnemyDefeated()
+            
+            return
+        }
         
         // NOTE: Swatter, Honey, Axe, and Cross attacks are handled by CollisionManager
         // and should never reach here. This is only for direct collisions.
@@ -6137,26 +6514,31 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         }
     }
     
+    // DISABLED: Boat collision disabled in race mode to prevent interference with frog jumping
+    // This delegate method is no longer called from CollisionManager
     func didCrash(into boat: Boat) {
-        guard !isGameEnding, !frog.isInvincible else { return }
+        // Collision disabled - no longer used
+        return
         
-        // Trigger the boat's veering behavior
-        boat.hitByFrog(frogPosition: frog.position)
-        
-        // Play feedback
-        HapticsManager.shared.playImpact(.heavy)
-        SoundManager.shared.play("hit")
-        
-        // Put frog into a "hit" state (for invincibility frames)
-        frog.hit()
-        
-        // Move the frog to the right away from the boat
-        let pushDistance: CGFloat = 80
-        frog.position.x += pushDistance
-        
-        // Constrain to river bounds
-        let rightEdge = Configuration.Dimensions.riverWidth - 30
-        frog.position.x = min(frog.position.x, rightEdge)
+        // guard !isGameEnding, !frog.isInvincible else { return }
+        // 
+        // // Trigger the boat's veering behavior
+        // boat.hitByFrog(frogPosition: frog.position)
+        // 
+        // // Play feedback
+        // HapticsManager.shared.playImpact(.heavy)
+        // SoundManager.shared.play("hit")
+        // 
+        // // Put frog into a "hit" state (for invincibility frames)
+        // frog.hit()
+        // 
+        // // Move the frog to the right away from the boat
+        // let pushDistance: CGFloat = 80
+        // frog.position.x += pushDistance
+        // 
+        // // Constrain to river bounds
+        // let rightEdge = Configuration.Dimensions.riverWidth - 30
+        // frog.position.x = min(frog.position.x, rightEdge)
     }
     
     func didCrash(into snake: Snake) {
@@ -6224,7 +6606,23 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             return
         }
         
-        if frog.isInvincible { return }
+        if frog.isInvincible {
+            // MARK: - Invincibility Burst Effect for Snakes
+            // Destroy snake with a visual burst
+            snake.isDestroyed = true
+            snake.removeFromParent()
+            if let idx = snakes.firstIndex(of: snake) { snakes.remove(at: idx) }
+            
+            // Create a simple, performant burst animation
+            createInvincibilityBurst(at: snake.position)
+            
+            // Play feedback
+            HapticsManager.shared.playImpact(.light)
+            SoundManager.shared.play("hit")
+            ChallengeManager.shared.recordEnemyDefeated()
+            
+            return
+        }
         
         // Axe can destroy snakes
         if frog.buffs.axe > 0 {
@@ -6327,7 +6725,23 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             return
         }
         
-        if frog.isInvincible { return }
+        if frog.isInvincible {
+            // MARK: - Invincibility Burst Effect for Cacti
+            // Destroy cactus with a visual burst
+            cactus.isDestroyed = true
+            cactus.destroy()
+            if let idx = cacti.firstIndex(of: cactus) { cacti.remove(at: idx) }
+            
+            // Create a simple, performant burst animation
+            createInvincibilityBurst(at: cactusWorldPos)
+            
+            // Play feedback
+            HapticsManager.shared.playImpact(.light)
+            SoundManager.shared.play("hit")
+            ChallengeManager.shared.recordEnemyDefeated()
+            
+            return
+        }
         
         // Axe can destroy cacti
         if frog.buffs.axe > 0 {
@@ -7362,9 +7776,8 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
             )
             
             // Update trajectory appearance based on jump type and intensity
-            // Force solid red, full alpha, thick line for debugging
-                renderer.updateAppearance(color: .yellow, width: 5.0, alpha: 1.0)
-                renderer.updateForDragIntensity(1.0)
+            let dragIntensity = min(1.0, dist / Configuration.Physics.maxDragDistance)
+            renderer.updateForDragIntensity(dragIntensity)
         } else {
             // TrajectoryRenderer is nil
         }
@@ -7538,7 +7951,10 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
     
     /// Shows a banner at the start with challenge info
     private func showDailyChallengeBanner(_ challenge: DailyChallenge) {
-        let banner = SKSpriteNode(color: .black.withAlphaComponent(0.85), size: CGSize(width: size.width * 0.9, height: 180))
+        // Adjust banner opacity based on current weather
+        // Space and night are already dark, so use lighter banner background
+        let bannerAlpha: CGFloat = (currentWeather == .space || currentWeather == .night || currentWeather == .rain) ? 0.5 : 0.85
+        let banner = SKSpriteNode(color: .black.withAlphaComponent(bannerAlpha), size: CGSize(width: size.width * 0.9, height: 180))
         banner.name = "dailyChallengeBanner"
         banner.position = CGPoint(x: 0, y: 0)  // Centered on camera (uiNode is camera-relative)
         banner.zPosition = Layer.overlay
@@ -7592,18 +8008,18 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         let finishLine = SKNode()
         finishLine.name = "finishLine"
         
-        // Calculate world position for 2000m mark
-        let finishY = frog.position.y + (2000 - CGFloat(score))
+        // Calculate world position for 1000m mark (challenge completion distance)
+        let finishY = frog.position.y + (1000 - CGFloat(score))
         
         // Create checkered pattern banner
-        let bannerWidth: CGFloat = size.width * 1.2
+        let bannerWidth: CGFloat = Configuration.Dimensions.riverWidth
         let bannerHeight: CGFloat = 60
         let squareSize: CGFloat = 30
         
         // Background banner
         let banner = SKSpriteNode(color: .white, size: CGSize(width: bannerWidth, height: bannerHeight))
-        banner.position = CGPoint(x: size.width / 2, y: 0)
-        banner.zPosition = Layer.pad + 5 // Behind player but in front of pads
+        banner.position = CGPoint(x: Configuration.Dimensions.riverWidth / 2, y: 0)
+        banner.zPosition = Layer.pad - 1 // Below pads so frog can jump over it
         
         // Add checkered pattern
         let squaresAcross = Int(bannerWidth / squareSize) + 1
@@ -7630,7 +8046,7 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         finishLabel.text = "FINISH"
         finishLabel.fontSize = 36
         finishLabel.fontColor = .cyan
-        finishLabel.position = CGPoint(x: size.width / 2, y: 5)
+        finishLabel.position = CGPoint(x: Configuration.Dimensions.riverWidth / 2, y: 5)
         finishLabel.zPosition = Layer.pad + 6
         
         // Add outline/stroke effect
@@ -7656,10 +8072,10 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         
         // Add distance marker
         let distanceLabel = SKLabelNode(fontNamed: "Nunito-Bold")
-        distanceLabel.text = "2000m"
+        distanceLabel.text = "1000m"
         distanceLabel.fontSize = 18
         distanceLabel.fontColor = .yellow
-        distanceLabel.position = CGPoint(x: size.width / 2, y: -40)
+        distanceLabel.position = CGPoint(x: Configuration.Dimensions.riverWidth / 2, y: -40)
         distanceLabel.zPosition = Layer.pad + 6
         finishLine.addChild(distanceLabel)
         
@@ -7680,13 +8096,11 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         ])
         banner.run(SKAction.repeatForever(shimmer))
         
-        finishLineNode = finishLine as! SKShapeNode
-        addChild(finishLine)
-        
-        print("🏁 Finish line spawned at \(finishY)")
+        // Add finish line to worldNode so it scrolls with the world
+        worldNode.addChild(finishLine)
     }
 
-    /// Called when the frog reaches 2000m in a daily challenge
+    /// Called when the frog reaches 1000m in a daily challenge
     private func handleDailyChallengeComplete() {
         guard !isGameEnding else { return }
         isGameEnding = true
@@ -7707,8 +8121,12 @@ class GameScene: SKScene, CollisionManagerDelegate, TooltipSafetyChecking {
         let endGame = SKAction.run { [weak self] in
             guard let self = self else { return }
             self.reportChallengeProgress()
-            self.restoreUnusedPackItems()
-            self.coordinator?.gameDidEnd(score: self.score, coins: 0, raceResult: nil)
+            // Defer item restoration to avoid mutating collections during enumeration
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.restoreUnusedPackItems()
+                self.coordinator?.gameDidEnd(score: self.score, coins: 0, raceResult: nil)
+            }
         }
         run(SKAction.sequence([wait, endGame]))
     }

@@ -41,7 +41,7 @@ class SoundManager: NSObject, AVAudioPlayerDelegate {
     }
     
     func preloadSounds() {
-        let sounds = ["jump", "land", "coin", "hit", "splash", "rocket", "ghost", "crocodileMashing", "crocodileRide", "thunder", "gameOver", "ouch", "laser","eat","splat","explosion"]
+        let sounds = ["jump", "land", "coin", "hit", "splash", "rocket", "ghost", "crocodileMashing", "crocodileRide", "thunder", "gameOver", "ouch", "laser","eat","splat","explosion","frogFall"]
         let extensions = ["mp3", "wav", "caf", "m4a"]  // Try multiple audio formats
         
         print("🔊 SoundManager: Starting to preload \(sounds.count) sounds...")
@@ -430,26 +430,39 @@ class VFXManager {
         if let newEmitter = createEmitter(for: newWeather, in: scene) {
             let targetBirthRate = newEmitter.particleBirthRate
             newEmitter.userData = ["initialRate": targetBirthRate]
-            newEmitter.particleBirthRate = 0
             
             scene.weatherNode.addChild(newEmitter)
             self.activeEmitter = newEmitter
             
-            let fadeInAction = SKAction.customAction(withDuration: duration) { node, elapsedTime in
-                guard let emitter = node as? SKEmitterNode else { return }
-                let progress = elapsedTime / CGFloat(duration)
-                emitter.particleBirthRate = targetBirthRate * progress
+            // Handle instant weather change (duration == 0)
+            if duration == 0 {
+                // Set birth rate immediately for instant weather changes (e.g., daily challenges)
+                newEmitter.particleBirthRate = targetBirthRate
+            } else {
+                // Fade in gradually for smooth transitions
+                newEmitter.particleBirthRate = 0
+                let fadeInAction = SKAction.customAction(withDuration: duration) { node, elapsedTime in
+                    guard let emitter = node as? SKEmitterNode else { return }
+                    let progress = elapsedTime / CGFloat(duration)
+                    emitter.particleBirthRate = targetBirthRate * progress
+                }
+                newEmitter.run(fadeInAction)
             }
-            newEmitter.run(fadeInAction)
         }
 
         // 4. Manage the thunder cycle
         if newWeather == .rain {
-            let wait = SKAction.wait(forDuration: duration)
-            let startThunder = SKAction.run { [weak self] in
-                self?.startThunderCycle(in: scene)
+            if duration == 0 {
+                // Start thunder immediately for instant weather changes
+                self.startThunderCycle(in: scene)
+            } else {
+                // Wait for transition to complete before starting thunder
+                let wait = SKAction.wait(forDuration: duration)
+                let startThunder = SKAction.run { [weak self] in
+                    self?.startThunderCycle(in: scene)
+                }
+                scene.run(SKAction.sequence([wait, startThunder]))
             }
-            scene.run(SKAction.sequence([wait, startThunder]))
         } else {
             stopThunderCycle()
         }
